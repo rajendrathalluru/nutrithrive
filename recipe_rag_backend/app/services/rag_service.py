@@ -95,6 +95,10 @@ class RecipeRAGService:
         start_time = time.time()
         
         try:
+            if self._contains_phi_like_content(query):
+                logger.info("Detected PHI-like content, returning privacy redirect response")
+                return self._build_phi_redirect_response(query, mode, conversation_history)
+
             if self._is_small_talk_query(query):
                 logger.info("Detected small-talk query, returning conversational response")
                 return self._build_small_talk_response(query, mode, conversation_history)
@@ -208,6 +212,124 @@ class RecipeRAGService:
                 "mode": mode,
                 "source_documents": []
             }
+
+    def _contains_phi_like_content(self, query: str) -> bool:
+        normalized = query.lower()
+
+        strong_identifier_patterns = [
+            r"\b\d{3}-\d{2}-\d{4}\b",  # SSN
+            r"\b(?:mrn|medical record number|member id|insurance id|policy number|claim number|patient identifier|patient id|unique patient identifier|account number|license number|certificate number|device identifier|vehicle identifier)\b",
+            r"\b(?:date of birth|dob|born on|my birthday)\b",
+            r"\b[\w\.-]+@[\w\.-]+\.\w+\b",  # email
+            r"\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",  # phone
+            r"\b[a-z]{1,6}-?\d{4,}\b",  # PT-00077891, MRN12345, ID998877
+            r"\b\d{5,}\b"  # long unique numeric identifiers
+        ]
+
+        health_context_terms = {
+            "diet",
+            "recipe",
+            "meal",
+            "nutrition",
+            "symptom",
+            "symptoms",
+            "treatment",
+            "diagnosis",
+            "condition",
+            "cancer",
+            "nausea",
+            "allergy",
+            "doctor",
+            "hospital",
+            "insurance",
+            "medication",
+            "patient",
+            "health"
+        }
+
+        direct_personal_patterns = [
+            r"\bmy name is\s+[a-z]+(?:\s+[a-z]+)?\b",
+            r"\bi am\s+[a-z]+(?:\s+[a-z]+)?\b",
+            r"\bi'm\s+[a-z]+(?:\s+[a-z]+)?\b",
+            r"\bfor\s+[a-z]+(?:\s+[a-z]+){0,2}\b",
+            r"\bfor my\s+(?:mother|father|mom|dad|son|daughter|wife|husband|brother|sister|friend|patient)\b",
+            r"\bpatient\s+[a-z]+(?:\s+[a-z]+){0,2}\b",
+            r"\bmember\s+[a-z]+(?:\s+[a-z]+){0,2}\b",
+            r"\bfor\s+[a-z]+(?:\s+[a-z]+){1,2}\b",
+            r"\blive at\b",
+            r"\bmy address is\b",
+            r"\bmy phone number is\b",
+            r"\bmy email is\b"
+        ]
+
+        identifier_value_patterns = [
+            r"\b(?:patient identifier|patient id|member id|medical record number|mrn|insurance id|policy number|claim number|account number|device identifier|vehicle identifier)\s*[:#-]?\s*[a-z0-9-]{4,}\b",
+            r"\b(?:identifier|id)\s*[:#-]?\s*[a-z]{0,4}-?\d{4,}\b"
+        ]
+
+        has_health_context = any(term in normalized for term in health_context_terms)
+        has_strong_identifier = any(re.search(pattern, normalized) for pattern in strong_identifier_patterns)
+        has_direct_personal_info = any(re.search(pattern, normalized) for pattern in direct_personal_patterns)
+        has_identifier_value = any(re.search(pattern, normalized) for pattern in identifier_value_patterns)
+        has_name_like_reference = bool(
+            re.search(r"\b(?:for|patient|member)\s+[a-z]+(?:\s+[a-z]+){0,2}\b", normalized)
+        )
+        has_explicit_identity_phrase = bool(
+            re.search(r"\b(?:my name is|patient\s+[a-z]+|member\s+[a-z]+|for my\s+(?:mother|father|mom|dad|son|daughter|wife|husband|brother|sister|friend|patient)|for\s+[a-z]+(?:\s+[a-z]+){0,2})\b", normalized)
+        )
+
+        return (
+            has_strong_identifier or
+            has_identifier_value or
+            (has_direct_personal_info and has_health_context and has_explicit_identity_phrase) or
+            (has_name_like_reference and has_health_context)
+        )
+
+    def _build_phi_redirect_response(
+        self,
+        query: str,
+        mode: str,
+        conversation_history: Optional[List[Dict]] = None
+    ) -> Dict[str, Any]:
+        response_text = (
+            "Please do not share personal or identifying health information here. "
+            "Please ask me about diet-based recipe or nutrition questions without personal details."
+        )
+
+        return {
+            "query": query,
+            "response": response_text,
+            "source": "privacy_redirect",
+            "matches_found": 0,
+            "mode": mode,
+            "source_documents": [],
+            "intent_analysis": {
+                "query_type": "privacy_redirect",
+                "constraints": {},
+                "preferences": {},
+                "cancer_patient_specific": {},
+                "search_strategy": {
+                    "primary_focus": "privacy_redirect",
+                    "search_keywords": [],
+                    "must_match_criteria": [],
+                    "enhanced_query": query
+                }
+            },
+            "dynamically_adapted": False,
+            "instructions_generated": False,
+            "aicr_compliant": False,
+            "verification_details": {
+                "total_candidates": 0,
+                "passed_verification": 0,
+                "failed_verification": 0,
+                "llm_generated": 0
+            },
+            "performance": {
+                "total_time_seconds": 0
+            },
+            "conversation_context_used": conversation_history is not None and len(conversation_history) > 0,
+            "previous_messages_considered": len(conversation_history) if conversation_history else 0
+        }
 
     def _is_small_talk_query(self, query: str) -> bool:
         normalized = re.sub(r"\s+", " ", query.lower()).strip()
