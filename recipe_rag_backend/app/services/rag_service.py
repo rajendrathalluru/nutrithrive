@@ -1,5 +1,6 @@
 import logging
 import time
+import re
 from typing import List, Dict, Any, Optional
 
 from app.core.config import settings
@@ -94,16 +95,21 @@ class RecipeRAGService:
         start_time = time.time()
         
         try:
+            if self._is_small_talk_query(query):
+                logger.info("Detected small-talk query, returning conversational response")
+                return self._build_small_talk_response(query, mode, conversation_history)
+
             # Step 1: Enhanced intent understanding with conversation context
             intent_data = self.intent_analyzer.understand_query_intent_with_context(query, conversation_history)
             logger.info(f"Intent analysis: {time.time() - start_time:.2f}s")
+            effective_query = intent_data.get("search_strategy", {}).get("enhanced_query") or query
             
             # Step 2: Multi-query search
-            docs = self.search_engine.multi_query_search(query, intent_data, k=settings.SEARCH_K * 2)
+            docs = self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
             logger.info(f"Search complete: {time.time() - start_time:.2f}s, found {len(docs)} docs")
             
             # Step 3: Reranking
-            reranked_docs = self.search_engine.rerank_with_constraint_filtering(docs, query, intent_data, top_k=settings.SEARCH_K)
+            reranked_docs = self.search_engine.rerank_with_constraint_filtering(docs, effective_query, intent_data, top_k=settings.SEARCH_K)
             logger.info(f"Reranking complete: {time.time() - start_time:.2f}s, {len(reranked_docs)} docs")
             
             # Step 4: Extract recipe details
@@ -141,14 +147,14 @@ class RecipeRAGService:
             
             if not verified_recipes:
                 logger.warning("No recipes passed - generating AICR-compliant custom recipes")
-                generated_recipes = self.recipe_enhancer.generate_fallback_recipes(query, intent_data, failed_recipes)
+                generated_recipes = self.recipe_enhancer.generate_fallback_recipes(effective_query, intent_data, failed_recipes)
                 
                 if generated_recipes:
                     source_docs = generated_recipes
                 else:
                     return {
                         "query": query,
-                        "response": self.response_generator.generate_helpful_no_results_message(query, intent_data),
+                        "response": self.response_generator.generate_helpful_no_results_message(effective_query, intent_data),
                         "source": "no_results",
                         "matches_found": 0,
                         "mode": mode,
@@ -161,7 +167,7 @@ class RecipeRAGService:
             logger.info(f"Enhancement complete: {time.time() - start_time:.2f}s")
             
             # Step 8: Generate response
-            response_text = self.response_generator.generate_personalized_response(query, source_docs, intent_data)
+            response_text = self.response_generator.generate_personalized_response(effective_query, source_docs, intent_data)
             
             total_time = time.time() - start_time
             logger.info(f"TOTAL TIME: {total_time:.2f}s")
@@ -202,6 +208,153 @@ class RecipeRAGService:
                 "mode": mode,
                 "source_documents": []
             }
+
+    def _is_small_talk_query(self, query: str) -> bool:
+        normalized = re.sub(r"\s+", " ", query.lower()).strip()
+        normalized = re.sub(r"[^\w\s]", "", normalized)
+
+        if not normalized:
+            return True
+
+        small_talk_patterns = {
+            "hi",
+            "hello",
+            "hey",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "how are you",
+            "whats up",
+            "what is up",
+            "howdy",
+            "yo",
+            "sup",
+            "thanks",
+            "thank you",
+            "ok",
+            "okay"
+        }
+
+        conversational_patterns = [
+            r"^hi(?:\s+there)?$",
+            r"^hello(?:\s+there)?$",
+            r"^hey(?:\s+there)?$",
+            r"^how are you(?: doing)?(?: today)?$",
+            r"^hows it going(?: today)?$",
+            r"^what are you doing(?: today)?$",
+            r"^whats up(?: today)?$",
+            r"^can you help me$",
+            r"^who are you$",
+            r"^what can you do$",
+            r"^thanks(?: you)?$"
+        ]
+
+        recipe_keywords = {
+            "recipe",
+            "recipes",
+            "meal",
+            "meals",
+            "diet",
+            "dietary",
+            "eat",
+            "eating",
+            "food",
+            "foods",
+            "cook",
+            "cooking",
+            "ingredients",
+            "nutrition",
+            "nutritious",
+            "healthy",
+            "symptom",
+            "symptoms",
+            "side",
+            "effect",
+            "effects",
+            "protein",
+            "calories",
+            "microwave",
+            "breakfast",
+            "lunch",
+            "dinner",
+            "snack",
+            "vegetarian",
+            "vegan",
+            "nausea",
+            "swallow",
+            "appetite"
+        }
+
+        if any(keyword in normalized.split() for keyword in recipe_keywords):
+            return False
+
+        if normalized in small_talk_patterns:
+            return True
+
+        if any(re.fullmatch(pattern, normalized) for pattern in conversational_patterns):
+            return True
+
+        # Short, non-domain prompts are treated as conversation instead of recipe requests.
+        if len(normalized.split()) <= 6:
+            return True
+
+        return False
+
+    def _build_small_talk_response(
+        self,
+        query: str,
+        mode: str,
+        conversation_history: Optional[List[Dict]] = None
+    ) -> Dict[str, Any]:
+        normalized = re.sub(r"\s+", " ", query.lower()).strip()
+
+        if normalized in {"thanks", "thank you"}:
+            response_text = (
+                "Thanks for reaching out. Please ask me about diet-based, nutrition, or recipe-related questions and I’ll be happy to help."
+            )
+        elif normalized in {"how are you", "how are you doing today", "whats up", "what is up"}:
+            response_text = (
+                "Thanks for reaching out. Please ask me about diet-based recipe-related questions, meal ideas, symptoms, or ingredients you want to work with."
+            )
+        else:
+            response_text = (
+                "Thanks for reaching out. Please ask me about diet-based recipe-related questions, nutrition-friendly meals, symptom-aware food suggestions, or cooking with ingredients you already have."
+            )
+
+        return {
+            "query": query,
+            "response": response_text,
+            "source": "conversation",
+            "matches_found": 0,
+            "mode": mode,
+            "source_documents": [],
+            "intent_analysis": {
+                "query_type": "small_talk",
+                "constraints": {},
+                "preferences": {},
+                "cancer_patient_specific": {},
+                "search_strategy": {
+                    "primary_focus": "conversation",
+                    "search_keywords": [],
+                    "must_match_criteria": [],
+                    "enhanced_query": query
+                }
+            },
+            "dynamically_adapted": False,
+            "instructions_generated": False,
+            "aicr_compliant": False,
+            "verification_details": {
+                "total_candidates": 0,
+                "passed_verification": 0,
+                "failed_verification": 0,
+                "llm_generated": 0
+            },
+            "performance": {
+                "total_time_seconds": 0
+            },
+            "conversation_context_used": conversation_history is not None and len(conversation_history) > 0,
+            "previous_messages_considered": len(conversation_history) if conversation_history else 0
+        }
     
     def search_recipes(self, query: str, k: int = None) -> List[Dict[str, Any]]:
         """Search for recipes"""

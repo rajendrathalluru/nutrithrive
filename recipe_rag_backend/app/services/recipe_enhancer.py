@@ -185,6 +185,27 @@ Generate all three sections. Be specific, nutrition-appropriate, and AICR-compli
                     "violations": r.get("verification_details", {}).get("constraint_violations", [])
                 } for r in failed_recipes[:2]]
                 failure_context = f"\n\nPrevious Failed Recipes:\n{json.dumps(failures, indent=2)}"
+
+            preferences = intent_data.get("preferences", {})
+            constraints = intent_data.get("constraints", {})
+            cuisine_preferences = preferences.get("cuisine_types", [])
+            nutritional_goals = preferences.get("nutritional_goals", [])
+
+            explicit_rules = []
+            if cuisine_preferences:
+                explicit_rules.append(
+                    f"- Cuisine preference is REQUIRED: recipes must stay within {', '.join(cuisine_preferences)} cuisine style."
+                )
+            if constraints.get("avoid_red_meat"):
+                explicit_rules.append(
+                    "- Do NOT use beef, pork, lamb, bacon, sausage, ham, salami, pepperoni, or other red/processed meats."
+                )
+            if nutritional_goals:
+                explicit_rules.append(
+                    f"- Nutritional focus to preserve: {', '.join(nutritional_goals)}."
+                )
+            if not explicit_rules:
+                explicit_rules.append("- Preserve the user's stated intent closely.")
             
             # STEP 3: Generate with AICR Guidelines
             generation_prompt = f"""You are a nutrition specialist creating recipes using AICR guidelines.
@@ -214,6 +235,9 @@ CONSTRAINT COMPLIANCE:
 - If min_ingredients exists → recipes MUST have ≥ that number  
 - If dietary_restrictions exist → full compliance required
 - If equipment_only exists → use only that equipment
+
+IMPORTANT FOLLOW-UP RULES:
+{chr(10).join(explicit_rules)}
 
 OUTPUT FORMAT (valid JSON only):
 [
@@ -246,15 +270,7 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             
             # STEP 4: Parse Response
             response = response.strip()
-            if response.startswith("```json"):
-                response = response[7:]
-            elif response.startswith("```"):
-                response = response[3:]
-            if response.endswith("```"):
-                response = response[:-3]
-            response = response.strip()
-            
-            generated_recipes = json.loads(response)
+            generated_recipes = self._parse_generated_recipe_response(response)
             
             if not generated_recipes:
                 logger.error("LLM returned empty recipe array")
@@ -305,6 +321,24 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             import traceback
             logger.error(traceback.format_exc())
             return []
+
+    def _parse_generated_recipe_response(self, response: str) -> List[Dict[str, Any]]:
+        cleaned = response.strip()
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        elif cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            match = re.search(r"\[\s*\{.*\}\s*\]", cleaned, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+            raise
 
     def generate_helpful_no_results_message(self, query: str, intent_data: Dict[str, Any]) -> str:
         """Generate a helpful message when no recipes can be found or generated"""

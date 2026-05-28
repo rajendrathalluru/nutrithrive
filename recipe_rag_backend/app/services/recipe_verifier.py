@@ -168,8 +168,15 @@ Verify ALL {len(recipes_for_verification)} recipes.
         try:
             ingredients = recipe_data.get("ingredients", [])
             recipe_name = recipe_data.get("name", "Unknown")
-            
             constraints = intent_data.get("constraints", {})
+            recipe_text = " ".join([
+                recipe_name,
+                recipe_data.get("type", ""),
+                recipe_data.get("description", ""),
+                recipe_data.get("content", ""),
+                " ".join(ingredients)
+            ]).lower()
+            
             if not ingredients and any(constraints.values()):
                 logger.warning(f"Recipe '{recipe_name}' has no ingredient data but constraints exist")
                 return {
@@ -177,6 +184,15 @@ Verify ALL {len(recipes_for_verification)} recipes.
                     "verification_score": 0,
                     "reasoning": "Recipe lacks ingredient data needed for verification",
                     "constraint_violations": ["Missing ingredient data"],
+                    "meets_preferences": False
+                }
+
+            if self._should_avoid_red_meat(constraints) and self._contains_red_meat(recipe_text):
+                return {
+                    "passes_verification": False,
+                    "verification_score": 0,
+                    "reasoning": "Recipe contains red meat or pork, which conflicts with the conversation dietary preference.",
+                    "constraint_violations": ["Contains red meat or pork"],
                     "meets_preferences": False
                 }
             
@@ -201,6 +217,31 @@ Verify ALL {len(recipes_for_verification)} recipes.
                 "constraint_violations": ["System error during verification"],
                 "verification_error": str(e)
             }
+
+    def _should_avoid_red_meat(self, constraints: Dict[str, Any]) -> bool:
+        if constraints.get("avoid_red_meat"):
+            return True
+
+        dietary_restrictions = [str(item).lower() for item in constraints.get("dietary_restrictions", [])]
+        return any(
+            phrase in restriction
+            for restriction in dietary_restrictions
+            for phrase in ("red meat", "no pork", "avoid pork")
+        )
+
+    def _contains_red_meat(self, recipe_text: str) -> bool:
+        red_meat_keywords = [
+            "beef",
+            "pork",
+            "lamb",
+            "ham",
+            "bacon",
+            "sausage",
+            "prosciutto",
+            "pepperoni",
+            "salami"
+        ]
+        return any(keyword in recipe_text for keyword in red_meat_keywords)
 
     def _build_individual_verification_prompt(self, recipe_data: Dict[str, Any], intent_data: Dict[str, Any]) -> str:
         """Build individual verification prompt"""
