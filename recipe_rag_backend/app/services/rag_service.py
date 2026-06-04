@@ -83,7 +83,7 @@ class RecipeRAGService:
             self.initialization_error = str(e)
             logger.error(f"Error initializing RAG system: {e}")
             raise
-    
+    "main initialization"
     def ask_question(self, query: str, mode: str = "auto", conversation_history: List[Dict] = None) -> Dict[str, Any]:
         """
         Main entry point with conversation context support
