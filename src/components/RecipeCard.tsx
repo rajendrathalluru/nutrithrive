@@ -14,10 +14,6 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
   const ingredientAdaptations = Array.isArray(recipe.ingredientAdaptations)
     ? recipe.ingredientAdaptations.filter(Boolean)
     : [];
-  const warnings = Array.isArray(recipe.aicrCompliance?.warnings) ? recipe.aicrCompliance.warnings.filter(Boolean) : [];
-  const recommendations = Array.isArray(recipe.aicrCompliance?.recommendations)
-    ? recipe.aicrCompliance.recommendations.filter(Boolean)
-    : [];
   const nutritionItems = [
     recipe.nutrition?.protein !== undefined && recipe.nutrition?.protein !== null
       ? { label: 'protein', value: `${recipe.nutrition.protein}g` }
@@ -176,38 +172,6 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
                     </li>
                   ))}
                 </ul>
-              </div>
-            )}
-            
-            {/* AICR Compliance Details */}
-            {recipe.aicrCompliance && (
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
-                <h4 className="font-medium text-slate-900 mb-2">AICR Compliance</h4>
-                <div className="text-sm text-slate-700 space-y-1">
-                  <div>Score: {recipe.aicrCompliance.score}/100</div>
-                  {warnings.length > 0 && (
-                    <div className="text-yellow-700">
-                      Warnings: {warnings.join(', ')}
-                    </div>
-                  )}
-                  {recommendations.length > 0 && (
-                    <div className="text-green-700">
-                      Recommendations: {recommendations.join(', ')}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            
-            {/* Verification Details */}
-            {recipe.verificationDetails && (
-              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
-                <h4 className="font-medium text-slate-900 mb-2">Verification</h4>
-                <div className="text-sm text-slate-700">
-                  <div>Passes: {recipe.verificationDetails.passes_verification ? 'Yes' : 'No'}</div>
-                  <div>Score: {recipe.verificationDetails.verification_score}%</div>
-                  <div>Reasoning: {recipe.verificationDetails.reasoning}</div>
-                </div>
               </div>
             )}
             

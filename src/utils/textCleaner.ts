@@ -16,7 +16,11 @@ export const cleanBackendText = (text: string): string => {
 };
 
 export const formatInstructions = (instructions: string[]): string[] => {
-  return instructions.map(instruction => cleanBackendText(instruction));
+  return instructions
+    .map((instruction) => cleanBackendText(instruction))
+    .map((instruction) => instruction.replace(/^\s*(?:step\s*)?\d+[\).\:-]\s*/i, ''))
+    .map((instruction) => instruction.replace(/^\s*[•*-]\s*/, ''))
+    .filter(Boolean);
 };
 
 export const formatIngredients = (ingredients: string[]): string[] => {

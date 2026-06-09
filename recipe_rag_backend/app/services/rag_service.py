@@ -135,6 +135,10 @@ class RecipeRAGService:
                     continue
             
             logger.info(f"Extraction complete: {time.time() - start_time:.2f}s")
+
+            # Step 4.5: Fill missing ingredients/instructions before verification
+            candidate_recipes = self.recipe_enhancer.prepare_recipes_for_verification(candidate_recipes, intent_data)
+            logger.info(f"Pre-verification enrichment complete: {time.time() - start_time:.2f}s")
             
             # Step 5: BATCH VERIFICATION with AICR validation
             candidate_recipes = self.recipe_verifier.batch_verify_recipes(candidate_recipes, intent_data, aicr_service)

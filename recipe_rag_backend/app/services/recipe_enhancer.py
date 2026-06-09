@@ -24,6 +24,28 @@ class RecipeEnhancer:
         constraints = intent_data.get("constraints", {})
         constraint_str = json.dumps(constraints, sort_keys=True)
         return hashlib.md5(constraint_str.encode()).hexdigest()[:16]
+
+    def prepare_recipes_for_verification(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Fill missing core recipe data before verification.
+        This ensures AICR validation and constraint verification run on complete recipes.
+        """
+        if not recipes:
+            return []
+
+        prepared_recipes: List[Dict[str, Any]] = []
+        for recipe in recipes:
+            if self._needs_core_recipe_generation(recipe):
+                prepared_recipes.append(self.enhance_single_recipe(recipe, intent_data))
+            else:
+                prepared_recipes.append(recipe)
+
+        return prepared_recipes
+
+    def _needs_core_recipe_generation(self, recipe: Dict[str, Any]) -> bool:
+        ingredients = [item for item in recipe.get("ingredients", []) if str(item).strip()]
+        instructions = [item for item in recipe.get("instructions", []) if str(item).strip()]
+        return len(ingredients) == 0 or len(instructions) == 0
     
     def batch_enhance_recipes(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Batch enhancement of recipes"""
@@ -74,11 +96,17 @@ class RecipeEnhancer:
         constraints = intent_data.get("constraints", {})
         preferences = intent_data.get("preferences", {})
         cancer_specific = intent_data.get("cancer_patient_specific", {})
-        
-        needs_instructions = enhanced_recipe.get("needs_instruction_generation") and enhanced_recipe.get("ingredients")
+
+        existing_ingredients = [item for item in enhanced_recipe.get("ingredients", []) if str(item).strip()]
+        existing_instructions = [item for item in enhanced_recipe.get("instructions", []) if str(item).strip()]
+        needs_ingredients = len(existing_ingredients) == 0
+        needs_instructions = (
+            enhanced_recipe.get("needs_instruction_generation")
+            or len(existing_instructions) == 0
+        )
         needs_adaptation = any([constraints.values(), preferences.values(), cancer_specific.values()])
-        
-        if not (needs_instructions or needs_adaptation):
+
+        if not (needs_ingredients or needs_instructions or needs_adaptation):
             return enhanced_recipe
         
         try:
@@ -89,7 +117,8 @@ class RecipeEnhancer:
             context_lines = [
                 f"Recipe: {enhanced_recipe.get('name', 'Recipe')}",
                 f"Type: {enhanced_recipe.get('type', 'General')}",
-                f"Ingredients: {', '.join(enhanced_recipe.get('ingredients', [])[:10])}"
+                f"Description: {enhanced_recipe.get('description', '')}",
+                f"Ingredients: {', '.join(existing_ingredients[:10]) if existing_ingredients else 'Missing - generate a plausible, nutrition-appropriate ingredient list'}"
             ]
             
             combined_prompt = f"""Generate COMPLETE recipe enhancement for nutritious recipes following AICR guidelines.
@@ -103,21 +132,40 @@ USER REQUIREMENTS:
 
 YOUR TASK - Generate ALL of the following in ONE response:
 
-1. COOKING_INSTRUCTIONS:
+1. INGREDIENTS:
+[One ingredient per line starting with "-". If the recipe already has ingredients, preserve them unless a nutrition or safety improvement is needed.]
+
+2. COOKING_INSTRUCTIONS:
 [Numbered steps 1., 2., 3., etc. - Include cooking temperatures for food safety, clear practical instructions]
 
-2. INGREDIENT_MODIFICATIONS:
+3. INGREDIENT_MODIFICATIONS:
 [Any nutrition-appropriate substitutions/changes needed - one per line starting with "-"]
 
-3. HELPFUL_TIPS:
+4. HELPFUL_TIPS:
 [2-3 nutrition-focused tips (e.g., for easy digestion, texture, protein) - one per line starting with "-"]
 
-Generate all three sections. Be specific, nutrition-appropriate, and AICR-compliant.
+If recipe data is incomplete, first infer a sensible ingredient list and cooking process from the recipe name, type, and description.
+Generate all four sections. Be specific, nutrition-appropriate, and AICR-compliant.
 """
 
             response = self.llm.predict(combined_prompt)
             
             # Parse all sections from one response
+            if "INGREDIENTS:" in response:
+                section = response.split("INGREDIENTS:")[1]
+                if "COOKING_INSTRUCTIONS:" in section:
+                    section = section.split("COOKING_INSTRUCTIONS:")[0]
+
+                generated_ingredients = [
+                    line.strip().lstrip('-•*').strip()
+                    for line in section.split('\n')
+                    if line.strip() and line.strip().startswith(('-', '•', '*'))
+                ]
+
+                if generated_ingredients and needs_ingredients:
+                    enhanced_recipe["ingredients"] = generated_ingredients[:20]
+                    enhanced_recipe["ingredients_generated"] = True
+
             if "COOKING_INSTRUCTIONS:" in response:
                 section = response.split("COOKING_INSTRUCTIONS:")[1]
                 if "INGREDIENT_MODIFICATIONS:" in section:
@@ -131,7 +179,7 @@ Generate all three sections. Be specific, nutrition-appropriate, and AICR-compli
                         if cleaned:
                             instructions.append(cleaned)
                 
-                if instructions:
+                if instructions and needs_instructions:
                     enhanced_recipe["instructions"] = [f"{i+1}. {inst}" for i, inst in enumerate(instructions[:8])]
                     enhanced_recipe["instructions_generated"] = True
             
