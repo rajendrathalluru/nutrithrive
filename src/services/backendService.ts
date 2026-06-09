@@ -15,7 +15,7 @@ export class BackendService {
     }
 
     if (typeof window !== 'undefined') {
-      this.baseUrl = `${window.location.protocol}//${window.location.hostname}:8000`;
+      this.baseUrl = window.location.origin.replace(/\/+$/, '');
       return;
     }
 

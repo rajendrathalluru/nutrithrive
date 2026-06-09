@@ -1,5 +1,8 @@
 # app/main.py
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import threading
@@ -38,6 +41,10 @@ app = FastAPI(
     version="2.0.0"
 )
 
+frontend_build_dir = Path(__file__).resolve().parents[2] / "frontend-build"
+frontend_static_dir = frontend_build_dir / "static"
+frontend_index_file = frontend_build_dir / "index.html"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -45,6 +52,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if frontend_static_dir.exists():
+    app.mount("/static", StaticFiles(directory=frontend_static_dir), name="frontend-static")
 
 def _initialize_rag_system():
     global startup_error, startup_in_progress
@@ -91,7 +101,10 @@ async def health_check():
 
 @app.get("/")
 async def root():
-    """API information"""
+    """Serve the frontend app when available, otherwise return API information."""
+    if frontend_index_file.exists():
+        return FileResponse(frontend_index_file)
+
     return {
         "message": "Cancer Patient Recipe RAG API v2.0",
         "version": "2.0.0",
@@ -258,6 +271,7 @@ async def system_info():
     info["startup_in_progress"] = startup_in_progress
     return info
 
+
 @app.get("/cache/stats")
 async def cache_stats():
     """Get cache statistics"""
@@ -268,6 +282,19 @@ async def clear_cache():
     """Clear all caches (useful for testing)"""
     rag_service.clear_caches()
     return {"message": "All caches cleared successfully"}
+
+@app.get("/{full_path:path}")
+async def frontend_app(full_path: str):
+    """Serve React build assets and client-side routes from the same domain."""
+    requested_file = frontend_build_dir / full_path
+
+    if requested_file.is_file():
+        return FileResponse(requested_file)
+
+    if frontend_index_file.exists():
+        return FileResponse(frontend_index_file)
+
+    raise HTTPException(status_code=404, detail="Not found")
 
 if __name__ == "__main__":
     import uvicorn

@@ -1,97 +1,55 @@
 # NutriThrive Research
 
-NutriThrive Research is a full-stack AI nutrition assistant that helps users ask diet and recipe questions in natural language and receive recipe-oriented answers with filtering, follow-up context, and safety checks.
+NutriThrive Research is a full-stack AI nutrition assistant focused on diet-based recipe discovery. Users chat in natural language, the backend interprets the request, searches a curated recipe dataset, applies nutrition and safety logic, and returns recipe-oriented responses with follow-up awareness.
 
-It includes:
-- A React frontend chat interface
-- A FastAPI backend
-- Retrieval and reranking over a recipe dataset
-- Nutrition-oriented recipe verification and enhancement
-- PHI/privacy redirect logic for protected health information
+## What the project does
+
+- Accepts diet and recipe questions in a chat interface
+- Handles follow-up prompts within the same conversation
+- Filters or redirects small-talk and privacy-sensitive prompts
+- Retrieves relevant recipes from a structured dataset
+- Applies nutrition-oriented validation and response formatting
+- Returns recipe suggestions, tips, and generated guidance
 
 ## Architecture
 
 ```text
-Frontend (React) -> FastAPI backend -> intent analysis -> search/rerank -> verification -> recipe enhancement -> response
+React frontend -> FastAPI API -> intent and safety checks -> recipe retrieval -> nutrition filtering -> formatted response
 ```
 
-Main directories:
+## Repository structure
 
 ```text
 nutrithrive-research/
-├── src/                           # Frontend source
-├── public/                        # Frontend static assets
+├── public/                       # Frontend static files
+├── src/                          # Frontend application
 ├── recipe_rag_backend/
 │   ├── app/
-│   │   ├── core/                  # Backend configuration
-│   │   ├── data/                  # Recipe dataset
-│   │   ├── models/                # Pydantic schemas
-│   │   ├── services/              # Search, verification, enhancement logic
-│   │   └── main.py                # FastAPI entrypoint
-│   ├── Dockerfile                 # Backend container
+│   │   ├── core/                 # Environment and config handling
+│   │   ├── data/                 # Recipe CSV dataset
+│   │   ├── models/               # API schemas
+│   │   ├── services/             # Retrieval, filtering, adaptation, scoring
+│   │   └── main.py               # FastAPI app and API routes
 │   ├── requirements.txt
 │   └── .env.example
-├── deploy/nginx/                  # Frontend nginx config and runtime env injection
-├── Dockerfile                     # Frontend container
-├── docker-compose.yml             # Local container orchestration
-├── render.yaml                    # Render blueprint
-├── .env.example                   # Frontend environment example
+├── Dockerfile                    # Single-service production container
+├── docker-compose.yml            # Single-service local container run
+├── render.yaml                   # Single Render web service blueprint
+├── .env.example                  # Frontend example env file
 └── README.md
 ```
 
-## Features
+## Tech stack
 
-- Conversational recipe discovery
-- Follow-up handling across the same chat
-- Diet, cuisine, and ingredient-aware retrieval
-- Nutrition-oriented filtering and recipe verification
-- Helpful tips and generated instructions for selected recipes
-- Redirects for small-talk and PHI-like prompts
+- Frontend: React, TypeScript, Tailwind CSS
+- Backend: FastAPI, Uvicorn, LangChain, OpenAI, FAISS, Pandas, Pydantic
+- Deployment: Docker, Docker Compose, Render
 
-## Tech Stack
-
-### Frontend
-
-- React 19
-- TypeScript
-- Tailwind CSS
-- Lucide React
+## Environment variables
 
 ### Backend
 
-- FastAPI
-- Uvicorn
-- LangChain
-- OpenAI
-- FAISS
-- Pandas
-- Pydantic
-- Tiktoken
-
-## Environment Variables
-
-### Frontend
-
-Copy the example:
-
-```bash
-cp .env.example .env
-```
-
-Available variables:
-
-- `REACT_APP_BACKEND_URL`
-  Backend base URL used by the React app
-
-Example:
-
-```env
-REACT_APP_BACKEND_URL=http://localhost:8000
-```
-
-### Backend
-
-Copy the example:
+Copy the backend example file:
 
 ```bash
 cp recipe_rag_backend/.env.example recipe_rag_backend/.env
@@ -106,6 +64,7 @@ Recommended:
 - `DATA_FILE_PATH`
 - `API_HOST`
 - `API_PORT`
+- `PORT`
 - `CORS_ORIGINS`
 
 Example:
@@ -114,16 +73,23 @@ Example:
 OPENAI_API_KEY=your_openai_api_key_here
 DATA_FILE_PATH=app/data/Recipe.csv
 API_HOST=0.0.0.0
-API_PORT=8000
-CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+PORT=8000
+CORS_ORIGINS=http://localhost:3000,http://localhost:8000
 ```
 
-## Run Locally Without Docker
+### Frontend
+
+Frontend can still use `REACT_APP_BACKEND_URL`, but it is optional now.
+
+- Local split frontend/backend mode: set `REACT_APP_BACKEND_URL=http://localhost:8000`
+- Single-service deployed mode: leave it unset and the frontend will call the same origin automatically
+
+## Run locally without Docker
 
 ### Backend
 
 ```bash
-cd recipe_rag_backend
+cd /Users/rajendrathalluru/Documents/nutrithrive-research/recipe_rag_backend
 /opt/homebrew/bin/python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -131,13 +97,9 @@ python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Health check:
-
-```bash
-curl http://localhost:8000/health
-```
-
 ### Frontend
+
+In a second terminal:
 
 ```bash
 cd /Users/rajendrathalluru/Documents/nutrithrive-research
@@ -150,97 +112,75 @@ Open:
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8000`
 
-## Run With Docker
+## Run locally with Docker
 
-### Backend only
-
-```bash
-docker build -t nutrithrive-backend ./recipe_rag_backend
-docker run --env-file ./recipe_rag_backend/.env -p 8000:8000 nutrithrive-backend
-```
-
-### Frontend only
+This now runs as one container and serves both frontend and backend from the same service.
 
 ```bash
-docker build -t nutrithrive-frontend .
-docker run -e REACT_APP_BACKEND_URL=http://localhost:8000 -p 8080:80 nutrithrive-frontend
-```
-
-### Full stack with Docker Compose
-
-```bash
+cd /Users/rajendrathalluru/Documents/nutrithrive-research
 docker compose up --build
 ```
 
 Open:
 
-- Frontend: `http://localhost:8080`
-- Backend: `http://localhost:8000`
+- App and API: `http://localhost:8000`
+- Health check: `http://localhost:8000/health`
 
 ## Deploy to Render
 
-This repo includes [render.yaml](/Users/rajendrathalluru/Documents/nutrithrive-research/render.yaml) as a starting point.
+This repo is now set up for a true single-service Render deployment.
 
-Deploy flow:
+### Render setup
 
-1. Push the repo to GitHub.
-2. In Render, create a Blueprint deployment from the repository.
-3. Set `OPENAI_API_KEY` in Render.
-4. Update the frontend/backend hostnames in `render.yaml` if you choose different service names.
+1. Push the repository to GitHub.
+2. In Render, create a new Blueprint or Web Service from the repo.
+3. Make sure the root `Dockerfile` is used.
+4. Set the required environment variable:
+   - `OPENAI_API_KEY`
+5. Keep or set the recommended variables:
+   - `DATA_FILE_PATH=app/data/Recipe.csv`
+   - `API_HOST=0.0.0.0`
+   - `PORT=8000`
+   - `CORS_ORIGINS=https://your-service-name.onrender.com`
 
-Recommended Render setup:
+### Why this works
 
-- Backend as a Docker web service using `recipe_rag_backend/Dockerfile`
-- Frontend as a Docker web service using `Dockerfile`
+- The Docker build compiles the React frontend
+- The same container installs and runs the FastAPI backend
+- FastAPI serves the built frontend files
+- Browser requests and API requests use the same domain
 
-Backend environment variables on Render:
+That means you only need one Render web service.
 
-- `OPENAI_API_KEY`
-- `DATA_FILE_PATH=app/data/Recipe.csv`
-- `CORS_ORIGINS=https://your-frontend-domain.onrender.com`
+## Deploy to other platforms
 
-Frontend environment variable on Render:
-
-- `REACT_APP_BACKEND_URL=https://your-backend-domain.onrender.com`
-
-## Deploy to Other Platforms
-
-This project can also be deployed to:
+The same root `Dockerfile` can be used on:
 
 - Railway
 - Fly.io
 - Azure App Service
-- AWS ECS / App Runner
+- AWS App Runner or ECS
 - Google Cloud Run
 - DigitalOcean App Platform
-- Any VM with Docker
+- Any VM or container host with Docker
 
-General production pattern:
+For any platform, expose port `8000` and set `OPENAI_API_KEY`.
 
-1. Deploy the backend container.
-2. Set `OPENAI_API_KEY` and `CORS_ORIGINS`.
-3. Deploy the frontend container with `REACT_APP_BACKEND_URL` pointed at the backend URL.
-4. Expose the frontend publicly.
-
-## API Endpoints
-
-### `GET /`
-
-Basic API information.
+## API endpoints
 
 ### `GET /health`
 
-Service health and initialization status.
+Returns service health and initialization status.
 
 ### `POST /ask`
 
-Main conversational recipe endpoint.
+Primary conversational recipe endpoint.
 
 Example:
 
 ```json
 {
-  "query": "I need easy high-protein dinners",
+  "query": "Give me easy high-protein dinner recipes",
   "mode": "auto",
   "conversation_history": [
     {
@@ -253,59 +193,14 @@ Example:
 
 ### `POST /search`
 
-Simpler search endpoint without the full adaptation pipeline.
+Simpler recipe search endpoint without the full conversational adaptation pipeline.
 
 ### `GET /system/info`
 
-Detailed backend capability and initialization information.
+Returns detailed backend capability and startup information.
 
-## Production Notes
+## Local development notes
 
-- The backend keeps running even if initialization fails; check `/health` for details.
-- CORS is configurable through `CORS_ORIGINS`.
-- The frontend backend URL is injected at build time.
-- The backend uses a bundled CSV dataset, so no database is required for initial deployment.
-- The app should not be treated as medical advice; it is a recipe and nutrition support tool.
-
-## Privacy / PHI Behavior
-
-The backend includes prompt-level safeguards that:
-
-- redirect casual small-talk away from recipe generation
-- redirect prompts that include PHI-like personal or identifying health information
-- allow anonymous, general diet and recipe questions
-
-## Useful Commands
-
-### Frontend
-
-```bash
-npm start
-npm run build
-npx tsc --noEmit
-```
-
-### Backend
-
-```bash
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-python -m py_compile recipe_rag_backend/app/main.py
-```
-
-### Docker
-
-```bash
-docker compose up --build
-docker compose down
-```
-
-## What Still Needs Attention
-
-- Add automated tests for PHI redirect logic
-- Add automated tests for follow-up context handling
-- Tune retrieval quality for stricter cuisine preservation
-- Add production monitoring/logging if deploying publicly
-
-## License
-
-Add your preferred license before public release.
+- If the backend is not fully initialized yet, `/health` may show startup in progress while the server is already reachable.
+- If the OpenAI key is invalid or missing, the app starts but recipe generation endpoints will not fully initialize.
+- In deployed single-service mode, do not point the frontend to `localhost:8000`; same-origin is the correct default.

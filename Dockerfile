@@ -1,6 +1,6 @@
-FROM node:20-alpine AS build
+FROM node:20-alpine AS frontend-build
 
-WORKDIR /app
+WORKDIR /frontend
 
 COPY package*.json ./
 RUN npm ci
@@ -9,13 +9,28 @@ COPY . .
 
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM python:3.11-slim AS runtime
 
-COPY deploy/nginx/default.conf /etc/nginx/conf.d/default.conf
-COPY deploy/nginx/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-COPY --from=build /app/build /usr/share/nginx/html
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV API_HOST=0.0.0.0
+ENV PORT=8000
+ENV DATA_FILE_PATH=app/data/Recipe.csv
 
-EXPOSE 80
+WORKDIR /app
 
-CMD ["/entrypoint.sh"]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY recipe_rag_backend/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+COPY recipe_rag_backend/app ./app
+COPY --from=frontend-build /frontend/build ./frontend-build
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn app.main:app --host ${API_HOST} --port ${PORT}"]

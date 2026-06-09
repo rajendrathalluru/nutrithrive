@@ -1,21 +1,17 @@
 services:
   - type: web
-    name: nutrithrive-backend
+    name: nutrithrive
     runtime: docker
-    dockerfilePath: ./recipe_rag_backend/Dockerfile
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
       - key: OPENAI_API_KEY
         sync: false
       - key: DATA_FILE_PATH
         value: app/data/Recipe.csv
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8000
       - key: CORS_ORIGINS
-        value: https://nutrithrive-frontend.onrender.com
-
-  - type: web
-    name: nutrithrive-frontend
-    runtime: docker
-    dockerfilePath: ./Dockerfile
-    envVars:
-      - key: REACT_APP_BACKEND_URL
-        value: https://nutrithrive-backend.onrender.com
+        value: https://nutrithrive.onrender.com
