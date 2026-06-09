@@ -31,7 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div className="mb-5 flex items-start justify-between gap-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Workspace</div>
-            <h2 className="mt-2 text-xl font-semibold text-slate-900">NutriThrive AI</h2>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">Thrivewell AI</h2>
             <p className="mt-1 text-sm text-slate-500">Research-grade recipe guidance for care journeys.</p>
           </div>
           <div className="rounded-2xl bg-slate-900 p-2.5 text-white shadow-lg shadow-slate-900/20">

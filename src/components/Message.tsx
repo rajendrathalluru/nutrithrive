@@ -22,7 +22,7 @@ const Message: React.FC<MessageProps> = ({ message }) => {
       <div className="flex-1">
         <div className="mb-2 flex items-center gap-2 px-1">
           <span className="text-sm font-medium text-slate-900">
-            {message.role === 'user' ? 'You' : 'NutriThrive'}
+            {message.role === 'user' ? 'You' : 'Thrivewell'}
           </span>
           <span className="text-xs text-slate-400">
             {message.timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}

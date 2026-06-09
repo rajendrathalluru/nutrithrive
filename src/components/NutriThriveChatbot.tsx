@@ -235,7 +235,7 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
                 <Menu className="w-6 h-6" />
               </button>
               <div>
-                <h1 className="font-semibold text-xl text-slate-900">NutriThrive Recipe Assistant</h1>
+                <h1 className="font-semibold text-xl text-slate-900">Thrivewell Recipe Assistant</h1>
                 <p className="text-sm text-slate-500">Focused, conversational nutrition guidance with backend grounding</p>
               </div>
             </div>

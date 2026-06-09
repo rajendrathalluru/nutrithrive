@@ -392,7 +392,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
 
   const testimonials = [
     {
-      quote: "NutriThrive helped me maintain my strength during chemotherapy. The personalized recipes made eating enjoyable again.",
+      quote: "Thrivewell helped me maintain my strength during chemotherapy. The personalized recipes made eating enjoyable again.",
       author: "Sarah M.",
       role: "Breast Cancer Survivor"
     },
@@ -442,7 +442,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
           logo={
             <div className="flex items-center gap-2">
               <Heart className="w-6 h-6 text-blue-400" />
-              <span className="text-xl font-bold">NutriThrive</span>
+              <span className="text-xl font-bold">Thrivewell</span>
             </div>
           }
           items={navItems}
@@ -496,7 +496,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
                 </div>
 
                 <div className="rounded-[1.5rem] border border-cyan-400/20 bg-gradient-to-br from-cyan-400/10 via-blue-500/10 to-slate-950 p-6">
-                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200/80">Why teams use NutriThrive</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200/80">Why teams use Thrivewell</p>
                   <div className="mt-6 space-y-4">
                     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                       <p className="text-3xl font-bold text-white">Diet-first</p>
@@ -700,7 +700,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
               <div>
                 <div className="flex items-center gap-2 mb-4">
                   <Heart className="w-6 h-6 text-blue-400" />
-                  <span className="text-xl font-bold">NutriThrive</span>
+                  <span className="text-xl font-bold">Thrivewell</span>
                 </div>
                 <p className="text-gray-400 text-sm">
                   A non-profit initiative dedicated to improving cancer patient outcomes through nutrition.
@@ -732,7 +732,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
               </div>
             </div>
             <div className="mt-8 pt-8 border-t border-gray-800 text-center text-gray-400 text-sm">
-              © 2024 NutriThrive Research. All rights reserved. | 501(c)(3) Non-Profit Organization
+              © 2024 Thrivewell Research. All rights reserved. | 501(c)(3) Non-Profit Organization
             </div>
           </div>
         </footer>
