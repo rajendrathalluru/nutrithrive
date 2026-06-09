@@ -11,9 +11,9 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: Dockerfile.frontend
-      args:
-        REACT_APP_BACKEND_URL: http://localhost:8000
+      dockerfile: Dockerfile
+    environment:
+      REACT_APP_BACKEND_URL: http://localhost:8000
     ports:
       - "8080:80"
     depends_on:

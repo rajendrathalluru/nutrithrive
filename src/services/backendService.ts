@@ -6,7 +6,8 @@ export class BackendService {
   private readonly baseUrl: string;
 
   private constructor() {
-    const configuredUrl = process.env.REACT_APP_BACKEND_URL?.trim();
+    const configuredUrl = window.__APP_CONFIG__?.REACT_APP_BACKEND_URL?.trim()
+      || process.env.REACT_APP_BACKEND_URL?.trim();
 
     if (configuredUrl) {
       this.baseUrl = configuredUrl.replace(/\/+$/, '');

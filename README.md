@@ -31,8 +31,8 @@ nutrithrive-research/
 │   ├── Dockerfile                 # Backend container
 │   ├── requirements.txt
 │   └── .env.example
-├── deploy/nginx/default.conf      # Frontend nginx config
-├── Dockerfile.frontend            # Frontend container
+├── deploy/nginx/                  # Frontend nginx config and runtime env injection
+├── Dockerfile                     # Frontend container
 ├── docker-compose.yml             # Local container orchestration
 ├── render.yaml                    # Render blueprint
 ├── .env.example                   # Frontend environment example
@@ -162,12 +162,8 @@ docker run --env-file ./recipe_rag_backend/.env -p 8000:8000 nutrithrive-backend
 ### Frontend only
 
 ```bash
-docker build \
-  --build-arg REACT_APP_BACKEND_URL=http://localhost:8000 \
-  -f Dockerfile.frontend \
-  -t nutrithrive-frontend .
-
-docker run -p 8080:80 nutrithrive-frontend
+docker build -t nutrithrive-frontend .
+docker run -e REACT_APP_BACKEND_URL=http://localhost:8000 -p 8080:80 nutrithrive-frontend
 ```
 
 ### Full stack with Docker Compose
@@ -195,7 +191,7 @@ Deploy flow:
 Recommended Render setup:
 
 - Backend as a Docker web service using `recipe_rag_backend/Dockerfile`
-- Frontend as a Docker web service using `Dockerfile.frontend`
+- Frontend as a Docker web service using `Dockerfile`
 
 Backend environment variables on Render:
 
@@ -203,7 +199,7 @@ Backend environment variables on Render:
 - `DATA_FILE_PATH=app/data/Recipe.csv`
 - `CORS_ORIGINS=https://your-frontend-domain.onrender.com`
 
-Frontend build arg on Render:
+Frontend environment variable on Render:
 
 - `REACT_APP_BACKEND_URL=https://your-backend-domain.onrender.com`
 

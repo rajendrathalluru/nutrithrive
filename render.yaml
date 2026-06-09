@@ -3,6 +3,7 @@ services:
     name: nutrithrive-backend
     runtime: docker
     dockerfilePath: ./recipe_rag_backend/Dockerfile
+    healthCheckPath: /health
     envVars:
       - key: OPENAI_API_KEY
         sync: false
@@ -14,7 +15,7 @@ services:
   - type: web
     name: nutrithrive-frontend
     runtime: docker
-    dockerfilePath: ./Dockerfile.frontend
-    dockerBuildArgs:
+    dockerfilePath: ./Dockerfile
+    envVars:
       - key: REACT_APP_BACKEND_URL
         value: https://nutrithrive-backend.onrender.com
