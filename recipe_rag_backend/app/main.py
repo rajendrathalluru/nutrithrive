@@ -2,6 +2,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import threading
 from typing import List, Optional
 
 from app.models.schemas import (
@@ -16,6 +17,7 @@ from app.services.rag_service import rag_service
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 startup_error: Optional[str] = None
+startup_in_progress = False
 
 # ============= NEW: Conversation Context Models =============
 from pydantic import BaseModel
@@ -44,9 +46,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def startup_event():
-    global startup_error
+def _initialize_rag_system():
+    global startup_error, startup_in_progress
     try:
         rag_service.initialize()
         startup_error = None
@@ -54,6 +55,18 @@ async def startup_event():
     except Exception as e:
         startup_error = str(e)
         logger.error(f"❌ Failed to initialize RAG system: {e}")
+    finally:
+        startup_in_progress = False
+
+
+@app.on_event("startup")
+async def startup_event():
+    global startup_in_progress
+    if rag_service.is_initialized or startup_in_progress:
+        return
+
+    startup_in_progress = True
+    threading.Thread(target=_initialize_rag_system, daemon=True).start()
 
 @app.get("/health", response_model=HealthCheck)
 async def health_check():
@@ -61,7 +74,13 @@ async def health_check():
     system_info = rag_service.get_system_info()
     return HealthCheck(
         status="healthy" if system_info["initialized"] else "unhealthy",
-        message="Service is running" if system_info["initialized"] else "Service initialization failed",
+        message=(
+            "Service is running"
+            if system_info["initialized"]
+            else "Service initialization in progress"
+            if startup_in_progress
+            else "Service initialization failed"
+        ),
         model_loaded=system_info["initialized"],
         recipes_count=system_info["recipes_loaded"],
         initialization_error=system_info.get("initialization_error"),
@@ -236,6 +255,7 @@ async def system_info():
     info["supports_conversation_context"] = True
     info["max_conversation_history"] = 6  # Last 3 exchanges
     info["initialization_error"] = startup_error
+    info["startup_in_progress"] = startup_in_progress
     return info
 
 @app.get("/cache/stats")
