@@ -21,6 +21,7 @@
   position: relative;
   overflow: hidden;
   will-change: height;
+  transition: height 0.4s ease;
 }
 
 .card-nav-top {
@@ -119,11 +120,14 @@
   visibility: hidden;
   pointer-events: none;
   z-index: 1;
+  opacity: 0;
+  transition: opacity 0.22s ease;
 }
 
 .card-nav.open .card-nav-content {
   visibility: visible;
   pointer-events: auto;
+  opacity: 1;
 }
 
 .nav-card {
@@ -138,6 +142,24 @@
   gap: 8px;
   user-select: none;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  opacity: 0;
+  transform: translateY(22px);
+  transition:
+    opacity 0.28s ease,
+    transform 0.32s ease;
+}
+
+.card-nav.open .nav-card {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.card-nav.open .nav-card:nth-child(2) {
+  transition-delay: 0.05s;
+}
+
+.card-nav.open .nav-card:nth-child(3) {
+  transition-delay: 0.1s;
 }
 
 .nav-card-label {
