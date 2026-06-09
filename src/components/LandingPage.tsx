@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { gsap } from 'gsap';
-import { Heart, Clock, Users, Star, ChevronRight, ArrowUpRight, Search, Shield, Brain } from 'lucide-react';
+import { Heart, Clock, Users, Star, ChevronRight, ArrowUpRight, Search, Shield, Brain, MessageSquareText, Salad, FlaskConical } from 'lucide-react';
 import LightRays from './LightRays';
 import './CardNav.css';
-import ProfessorImage from "../assets/images/professor.jpg";
 
 // CardNav Component
 
@@ -373,6 +372,24 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
     }
   ];
 
+  const platformHighlights = [
+    {
+      icon: <MessageSquareText className="w-6 h-6 text-white" />,
+      title: "Conversation-first guidance",
+      description: "Ask naturally, refine with follow-up questions, and keep the same context across the chat."
+    },
+    {
+      icon: <Salad className="w-6 h-6 text-white" />,
+      title: "Recipe answers that stay relevant",
+      description: "The system focuses on diet-based recipe suggestions instead of drifting into vague or generic responses."
+    },
+    {
+      icon: <FlaskConical className="w-6 h-6 text-white" />,
+      title: "Research-informed filtering",
+      description: "Results are shaped by nutrition guidance, ingredient constraints, and safety checks before they reach the user."
+    }
+  ];
+
   const testimonials = [
     {
       quote: "NutriThrive helped me maintain my strength during chemotherapy. The personalized recipes made eating enjoyable again.",
@@ -437,7 +454,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
         />
 
         {/* Hero Section */}
-        <section className="px-6 py-32 md:px-12 lg:px-20 text-center mt-20">
+        <section className="px-6 pb-28 pt-36 md:px-12 md:pt-40 lg:px-20 text-center">
           <div className="max-w-4xl mx-auto">
             <h1 className="text-5xl md:text-7xl font-bold mb-6">
               Nourish Your Body
@@ -447,8 +464,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
               </span>
             </h1>
             
-            <p className="text-xl md:text-2xl text-gray-300 mb-8 max-w-2xl mx-auto">
-              AI-powered nutrition guidance with AICR-verified recipes designed specifically for cancer patients
+            <p className="text-xl md:text-2xl text-gray-300 mb-8 max-w-3xl mx-auto">
+              Ask for cuisine-specific, constraint-aware, diet-focused recipes and get responses that stay grounded in nutrition guidance.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -462,6 +479,36 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
               <button className="border-2 border-blue-600 text-blue-400 hover:bg-blue-600/10 px-8 py-4 rounded-full font-bold text-lg transition-all">
                 Learn About Research
               </button>
+            </div>
+
+            <div className="mt-12 mx-auto max-w-4xl rounded-[2rem] border border-white/10 bg-slate-950/55 p-4 shadow-2xl shadow-slate-950/40 backdrop-blur-xl">
+              <div className="grid gap-4 text-left md:grid-cols-[1.15fr_0.85fr]">
+                <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300/80">Sample conversation</p>
+                  <div className="mt-5 space-y-4">
+                    <div className="rounded-2xl bg-slate-900 px-4 py-3 text-sm text-slate-100 shadow-lg shadow-slate-950/30">
+                      Give me gentle high-protein Chinese recipes without red meat.
+                    </div>
+                    <div className="rounded-2xl bg-white/95 px-4 py-4 text-sm leading-7 text-slate-800">
+                      I can help with that. I&apos;ll keep the results Chinese-inspired, avoid red meat, and focus on nutritious high-protein options such as steamed ginger fish bowls, tofu congee, and chicken with bok choy.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-[1.5rem] border border-cyan-400/20 bg-gradient-to-br from-cyan-400/10 via-blue-500/10 to-slate-950 p-6">
+                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-200/80">Why teams use NutriThrive</p>
+                  <div className="mt-6 space-y-4">
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-3xl font-bold text-white">Diet-first</p>
+                      <p className="mt-2 text-sm text-slate-300">Designed to answer recipe and nutrition requests instead of drifting into off-topic chat.</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-3xl font-bold text-white">Follow-up aware</p>
+                      <p className="mt-2 text-sm text-slate-300">Preserves cuisine, ingredient, and restriction context across the same conversation.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -489,109 +536,63 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
             </div>
           </div>
         </section>
-{/* Professor Section */}
-<section className="px-6 py-20 md:px-12 lg:px-20 relative">
-  <div className="max-w-6xl mx-auto">
-    <div className="text-center mb-16">
-      <h2 className="text-4xl font-bold mb-4">
-        Developed with
-        <span className="bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent"> Leading Research</span>
-      </h2>
-      <p className="text-xl text-gray-300 max-w-2xl mx-auto">
-        NutriThrive is guided by acclaimed cancer nutrition research from the University of Illinois
-      </p>
-    </div>
+        <section className="px-6 py-20 md:px-12 lg:px-20 relative">
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-16">
+              <h2 className="text-4xl font-bold mb-4">
+                Built for better
+                <span className="bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent"> nutrition conversations</span>
+              </h2>
+              <p className="text-xl text-gray-300 max-w-3xl mx-auto">
+                The experience is designed to feel practical and trustworthy: clear prompts, grounded recipe guidance, and responses that stay aligned with diet-related intent.
+              </p>
+            </div>
 
-    <div className="grid lg:grid-cols-2 gap-12 items-center">
-      {/* Professor Image */}
-      <div className="relative">
-        <div className="relative z-10 group">
-          <div className="absolute -inset-2 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-2xl opacity-75 group-hover:opacity-100 blur transition-all duration-300"></div>
-          <div className="relative w-full h-96 lg:h-[500px] rounded-2xl overflow-hidden z-20 bg-gray-800">
-            <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-transparent to-transparent z-10"></div>
-            <img 
-              src={ProfessorImage} 
-              alt="Dr. Jean Miki Reading" 
-              className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-700"
-            />
-            <div className="absolute bottom-6 left-6 z-20">
-              <div className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-4 py-2 rounded-lg font-semibold">
-                Principal Investigator
+            <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="rounded-[2rem] border border-white/10 bg-white/6 p-8 backdrop-blur-xl">
+                <div className="grid gap-5 md:grid-cols-3">
+                  {platformHighlights.map((item, index) => (
+                    <div key={index} className="rounded-3xl border border-white/10 bg-slate-950/35 p-5">
+                      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-500">
+                        {item.icon}
+                      </div>
+                      <h3 className="text-xl font-semibold text-white">{item.title}</h3>
+                      <p className="mt-3 text-sm leading-7 text-slate-300">{item.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[2rem] border border-cyan-400/15 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950/70 p-8 shadow-2xl shadow-blue-950/30">
+                <p className="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300/80">What makes it stronger</p>
+                <div className="mt-6 space-y-5">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                    <p className="text-lg font-semibold text-white">Constraint-aware recipe retrieval</p>
+                    <p className="mt-2 text-sm leading-7 text-slate-300">Cuisine, ingredient, budget, and exclusion requests can all shape what comes back.</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                    <p className="text-lg font-semibold text-white">Privacy and scope guardrails</p>
+                    <p className="mt-2 text-sm leading-7 text-slate-300">The assistant can redirect off-topic or personal-health prompts back to safe, diet-based questions.</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+                    <p className="text-lg font-semibold text-white">Same-chat continuity</p>
+                    <p className="mt-2 text-sm leading-7 text-slate-300">Follow-up requests can build on earlier preferences instead of starting from zero each time.</p>
+                  </div>
+                </div>
+
+                <a
+                  href="https://chicago.medicine.uic.edu/family-community-medicine/fcm-research/labs/vitality-lab/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-8 inline-flex items-center gap-2 text-cyan-300 transition-colors hover:text-cyan-200 font-semibold"
+                >
+                  Learn more about the research foundation
+                  <ArrowUpRight className="w-4 h-4" />
+                </a>
               </div>
             </div>
           </div>
-        </div>
-      </div>
-      
-      {/* Professor Details */}
-      <div className="space-y-6">
-        <div>
-          <h3 className="text-3xl font-bold text-white">Jean Miki Reading, PhD</h3>
-          <p className="text-blue-400 text-lg mt-1">Assistant Professor</p>
-          <p className="text-gray-400 mt-2">Department of Family and Community Medicine</p>
-          <div className="flex flex-wrap gap-4 mt-4">
-            <div className="flex items-center gap-2 text-sm bg-blue-900/30 px-3 py-1.5 rounded-full">
-              <span className="text-blue-400">Pronouns:</span>
-              <span className="text-gray-300">She/her</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm bg-blue-900/30 px-3 py-1.5 rounded-full">
-              <span className="text-blue-400">Email:</span>
-              <span className="text-gray-300">jreading@uic.edu</span>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-gray-800/40 backdrop-blur-lg p-6 rounded-xl border border-gray-700/50">
-          <h4 className="text-xl font-semibold text-white mb-3">Research Focus</h4>
-          <p className="text-gray-300">
-            Dr. Reading is a social and behavioral scientist specializing in cancer prevention and control. 
-            Her work focuses on developing digital health interventions addressing diet, physical activity, 
-            and weight control for diverse populations across the lifespan.
-          </p>
-        </div>
-        
-        <div className="bg-gray-800/40 backdrop-blur-lg p-6 rounded-xl border border-gray-700/50">
-          <h4 className="text-xl font-semibold text-white mb-3">Current Research</h4>
-          <p className="text-gray-300">
-            Recipient of an NCI Clinical Research Loan Repayment Award to develop a multilevel lifestyle 
-            intervention for cancer survivors to improve reach, access, and engagement with diet and 
-            physical activity.
-          </p>
-        </div>
-        
-        <div className="bg-gray-800/40 backdrop-blur-lg p-6 rounded-xl border border-gray-700/50">
-          <h4 className="text-xl font-semibold text-white mb-3">Research Interests</h4>
-          <ul className="text-gray-300 space-y-2">
-            <li className="flex items-start gap-2">
-              <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5 flex-shrink-0"></div>
-              <span>Optimizing multilevel lifestyle interventions for behavioral obesity treatment and cancer survivorship</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5 flex-shrink-0"></div>
-              <span>Identifying strategies to reach and engage underrepresented populations in clinical trials</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full mt-2.5 flex-shrink-0"></div>
-              <span>Applying mixed method approaches to implement digital lifestyle interventions into clinical care</span>
-            </li>
-          </ul>
-        </div>
-        
-        <div className="pt-4">
-          <a 
-            href="https://chicago.medicine.uic.edu/family-community-medicine/fcm-research/labs/vitality-lab/" 
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-cyan-400 hover:text-cyan-300 transition-colors font-semibold"
-          >
-            Learn more about our research
-            <ArrowUpRight className="w-4 h-4" />
-          </a>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+        </section>
 
         {/* Featured Recipes Section */}
         <section id="recipes" className="px-6 py-20 md:px-12 lg:px-20">
