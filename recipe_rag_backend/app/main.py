@@ -41,7 +41,7 @@ app = FastAPI(
     version="2.0.0"
 )
 
-frontend_build_dir = Path(__file__).resolve().parents[2] / "frontend-build"
+frontend_build_dir = Path(__file__).resolve().parents[1] / "frontend-build"
 frontend_static_dir = frontend_build_dir / "static"
 frontend_index_file = frontend_build_dir / "index.html"
 
