@@ -10,6 +10,7 @@ from app.models.schemas import (
     SearchResponse,
     HealthCheck
 )
+from app.core.config import settings
 from app.services.rag_service import rag_service
 
 logging.basicConfig(level=logging.INFO)
@@ -37,8 +38,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -252,7 +253,7 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         app, 
-        host="0.0.0.0", 
-        port=8000,
+        host=settings.API_HOST, 
+        port=settings.API_PORT,
         log_level="info"
     )

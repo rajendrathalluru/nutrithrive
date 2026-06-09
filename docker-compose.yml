@@ -1,0 +1,20 @@
+services:
+  backend:
+    build:
+      context: ./recipe_rag_backend
+      dockerfile: Dockerfile
+    env_file:
+      - ./recipe_rag_backend/.env
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        REACT_APP_BACKEND_URL: http://localhost:8000
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend

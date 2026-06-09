@@ -1,14 +1,52 @@
 # NutriThrive Research
 
-NutriThrive Research is a full-stack AI recipe assistant built for cancer-support nutrition use cases. It combines a React chat interface with a FastAPI retrieval and generation backend that searches recipes, applies nutrition-aware filtering, and returns guided recipe suggestions with adaptations and generated instructions when needed.
+NutriThrive Research is a full-stack AI nutrition assistant that helps users ask diet and recipe questions in natural language and receive recipe-oriented answers with filtering, follow-up context, and safety checks.
 
-## What This Project Does
+It includes:
+- A React frontend chat interface
+- A FastAPI backend
+- Retrieval and reranking over a recipe dataset
+- Nutrition-oriented recipe verification and enhancement
+- PHI/privacy redirect logic for protected health information
 
-- Chat-style recipe discovery with conversation history
-- Retrieval-augmented backend using recipe data from `Recipe.csv`
-- Constraint-aware search for symptoms, ingredients, equipment, and meal preferences
-- AICR-oriented recipe verification and compliance details
-- Generated tips, adaptations, and recipe instructions when the backend needs to enrich a result
+## Architecture
+
+```text
+Frontend (React) -> FastAPI backend -> intent analysis -> search/rerank -> verification -> recipe enhancement -> response
+```
+
+Main directories:
+
+```text
+nutrithrive-research/
+├── src/                           # Frontend source
+├── public/                        # Frontend static assets
+├── recipe_rag_backend/
+│   ├── app/
+│   │   ├── core/                  # Backend configuration
+│   │   ├── data/                  # Recipe dataset
+│   │   ├── models/                # Pydantic schemas
+│   │   ├── services/              # Search, verification, enhancement logic
+│   │   └── main.py                # FastAPI entrypoint
+│   ├── Dockerfile                 # Backend container
+│   ├── requirements.txt
+│   └── .env.example
+├── deploy/nginx/default.conf      # Frontend nginx config
+├── Dockerfile.frontend            # Frontend container
+├── docker-compose.yml             # Local container orchestration
+├── render.yaml                    # Render blueprint
+├── .env.example                   # Frontend environment example
+└── README.md
+```
+
+## Features
+
+- Conversational recipe discovery
+- Follow-up handling across the same chat
+- Diet, cuisine, and ingredient-aware retrieval
+- Nutrition-oriented filtering and recipe verification
+- Helpful tips and generated instructions for selected recipes
+- Redirects for small-talk and PHI-like prompts
 
 ## Tech Stack
 
@@ -22,84 +60,67 @@ NutriThrive Research is a full-stack AI recipe assistant built for cancer-suppor
 ### Backend
 
 - FastAPI
-- Python 3.11 recommended
+- Uvicorn
 - LangChain
+- OpenAI
 - FAISS
-- OpenAI API
 - Pandas
-
-## Project Structure
-
-```text
-nutrithrive-research/
-├── src/                         # React frontend
-├── public/                      # Static frontend assets
-├── recipe_rag_backend/
-│   ├── app/
-│   │   ├── main.py              # FastAPI app entrypoint
-│   │   ├── core/                # Backend config
-│   │   ├── models/              # Pydantic schemas
-│   │   ├── services/            # RAG, search, verification, enhancement logic
-│   │   └── data/Recipe.csv      # Recipe dataset
-│   ├── requirements.txt
-│   └── .env.example
-├── .env.example
-├── package.json
-└── README.md
-```
-
-## How It Works
-
-1. The React app sends user chat prompts to the FastAPI backend.
-2. The backend analyzes intent and constraints from the latest message and prior conversation.
-3. Matching recipes are retrieved and reranked.
-4. Recipes are verified and enhanced with helpful tips, adaptations, and instructions where needed.
-5. The frontend renders the assistant reply and expandable recipe cards in a chat interface.
-
-## Prerequisites
-
-- Node.js 18+ recommended
-- npm
-- Python 3.11 recommended
-- An OpenAI API key
+- Pydantic
+- Tiktoken
 
 ## Environment Variables
 
 ### Frontend
 
-Create a root `.env` from `.env.example` if you want to override the backend URL:
+Copy the example:
 
 ```bash
 cp .env.example .env
 ```
 
-Available variable:
+Available variables:
 
-- `REACT_APP_BACKEND_URL`: backend base URL for the React app
+- `REACT_APP_BACKEND_URL`
+  Backend base URL used by the React app
 
-Default behavior without the variable:
+Example:
 
-- The frontend falls back to `http://<current-host>:8000`
+```env
+REACT_APP_BACKEND_URL=http://localhost:8000
+```
 
 ### Backend
 
-Create a backend `.env` file from the example:
+Copy the example:
 
 ```bash
 cp recipe_rag_backend/.env.example recipe_rag_backend/.env
 ```
 
-Required variables:
+Required:
 
 - `OPENAI_API_KEY`
 
-Optional variables:
+Recommended:
 
 - `DATA_FILE_PATH`
+- `API_HOST`
+- `API_PORT`
+- `CORS_ORIGINS`
 
-## Local Development
+Example:
 
-### 1. Start the Backend
+```env
+OPENAI_API_KEY=your_openai_api_key_here
+DATA_FILE_PATH=app/data/Recipe.csv
+API_HOST=0.0.0.0
+API_PORT=8000
+CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+```
+
+## Run Locally Without Docker
+
+### Backend
 
 ```bash
 cd recipe_rag_backend
@@ -110,72 +131,153 @@ python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Backend health check:
+Health check:
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-### 2. Start the Frontend
-
-From the project root:
+### Frontend
 
 ```bash
+cd /Users/rajendrathalluru/Documents/nutrithrive-research
 npm install
 npm start
 ```
 
-Or explicitly point the frontend to the backend:
+Open:
+
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:8000`
+
+## Run With Docker
+
+### Backend only
 
 ```bash
-REACT_APP_BACKEND_URL=http://localhost:8000 npm start
+docker build -t nutrithrive-backend ./recipe_rag_backend
+docker run --env-file ./recipe_rag_backend/.env -p 8000:8000 nutrithrive-backend
 ```
 
-Frontend URL:
+### Frontend only
 
-- `http://localhost:3000`
+```bash
+docker build \
+  --build-arg REACT_APP_BACKEND_URL=http://localhost:8000 \
+  -f Dockerfile.frontend \
+  -t nutrithrive-frontend .
+
+docker run -p 8080:80 nutrithrive-frontend
+```
+
+### Full stack with Docker Compose
+
+```bash
+docker compose up --build
+```
+
+Open:
+
+- Frontend: `http://localhost:8080`
+- Backend: `http://localhost:8000`
+
+## Deploy to Render
+
+This repo includes [render.yaml](/Users/rajendrathalluru/Documents/nutrithrive-research/render.yaml) as a starting point.
+
+Deploy flow:
+
+1. Push the repo to GitHub.
+2. In Render, create a Blueprint deployment from the repository.
+3. Set `OPENAI_API_KEY` in Render.
+4. Update the frontend/backend hostnames in `render.yaml` if you choose different service names.
+
+Recommended Render setup:
+
+- Backend as a Docker web service using `recipe_rag_backend/Dockerfile`
+- Frontend as a Docker web service using `Dockerfile.frontend`
+
+Backend environment variables on Render:
+
+- `OPENAI_API_KEY`
+- `DATA_FILE_PATH=app/data/Recipe.csv`
+- `CORS_ORIGINS=https://your-frontend-domain.onrender.com`
+
+Frontend build arg on Render:
+
+- `REACT_APP_BACKEND_URL=https://your-backend-domain.onrender.com`
+
+## Deploy to Other Platforms
+
+This project can also be deployed to:
+
+- Railway
+- Fly.io
+- Azure App Service
+- AWS ECS / App Runner
+- Google Cloud Run
+- DigitalOcean App Platform
+- Any VM with Docker
+
+General production pattern:
+
+1. Deploy the backend container.
+2. Set `OPENAI_API_KEY` and `CORS_ORIGINS`.
+3. Deploy the frontend container with `REACT_APP_BACKEND_URL` pointed at the backend URL.
+4. Expose the frontend publicly.
 
 ## API Endpoints
 
+### `GET /`
+
+Basic API information.
+
 ### `GET /health`
 
-Returns backend health and initialization status.
+Service health and initialization status.
 
 ### `POST /ask`
 
-Main conversational endpoint for recipe retrieval and adaptation.
+Main conversational recipe endpoint.
 
-Example payload:
+Example:
 
 ```json
 {
-  "query": "I feel nauseous and only have a microwave",
+  "query": "I need easy high-protein dinners",
   "mode": "auto",
   "conversation_history": [
     {
       "role": "user",
-      "content": "Show me easy lunch recipes"
+      "content": "Show me nutritious lunch ideas"
     }
   ]
 }
 ```
 
+### `POST /search`
+
+Simpler search endpoint without the full adaptation pipeline.
+
 ### `GET /system/info`
 
-Returns backend capability and initialization metadata.
+Detailed backend capability and initialization information.
 
-## GitHub Readiness Notes
+## Production Notes
 
-- Real secrets are ignored through `.gitignore`
-- Safe starter environment files are included as `.env.example`
-- Python virtual environments, build outputs, logs, and local caches are ignored
-- `tiktoken` has been added to backend requirements because the OpenAI embedding flow depends on it
+- The backend keeps running even if initialization fails; check `/health` for details.
+- CORS is configurable through `CORS_ORIGINS`.
+- The frontend backend URL is injected at build time.
+- The backend uses a bundled CSV dataset, so no database is required for initial deployment.
+- The app should not be treated as medical advice; it is a recipe and nutrition support tool.
 
-## Before You Push
+## Privacy / PHI Behavior
 
-1. Make sure `recipe_rag_backend/.env` is not committed.
-2. Make sure your OpenAI API key is not present anywhere in tracked files.
-3. If you pasted a real API key anywhere publicly during setup, rotate it before pushing.
+The backend includes prompt-level safeguards that:
+
+- redirect casual small-talk away from recipe generation
+- redirect prompts that include PHI-like personal or identifying health information
+- allow anonymous, general diet and recipe questions
 
 ## Useful Commands
 
@@ -191,16 +293,23 @@ npx tsc --noEmit
 
 ```bash
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-python -m py_compile app/main.py
+python -m py_compile recipe_rag_backend/app/main.py
 ```
 
-## Current Status
+### Docker
 
-- Frontend and backend service connection fixed
-- Backend health reporting improved
-- Chat UI upgraded with separate pane scrolling
-- Recipe cards preserve expandable functionality for generated content
+```bash
+docker compose up --build
+docker compose down
+```
+
+## What Still Needs Attention
+
+- Add automated tests for PHI redirect logic
+- Add automated tests for follow-up context handling
+- Tune retrieval quality for stricter cuisine preservation
+- Add production monitoring/logging if deploying publicly
 
 ## License
 
-Add your preferred license before publishing publicly.
+Add your preferred license before public release.

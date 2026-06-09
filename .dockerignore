@@ -1,0 +1,9 @@
+node_modules
+build
+.git
+.env
+.env.*
+recipe_rag_backend/.venv
+recipe_rag_backend/__pycache__
+recipe_rag_backend/.pytest_cache
+*.log
