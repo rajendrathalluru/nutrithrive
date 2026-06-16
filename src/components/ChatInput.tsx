@@ -21,6 +21,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [isListening, setIsListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [voiceError, setVoiceError] = useState('');
+  const [isCompactPlaceholder, setIsCompactPlaceholder] = useState(false);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -79,6 +80,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
       recognitionRef.current = null;
     };
   }, [onInputChange]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 640px)');
+    const updatePlaceholderMode = () => setIsCompactPlaceholder(mediaQuery.matches);
+
+    updatePlaceholderMode();
+    mediaQuery.addEventListener('change', updatePlaceholderMode);
+
+    return () => {
+      mediaQuery.removeEventListener('change', updatePlaceholderMode);
+    };
+  }, []);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -153,8 +166,12 @@ const ChatInput: React.FC<ChatInputProps> = ({
               value={input}
               onChange={(e) => onInputChange(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder="Describe your dietary needs, ingredients available, or ask for recipe ideas..."
-              className="min-w-0 w-full flex-1 resize-none overflow-hidden bg-transparent px-1 py-2 text-lg leading-8 text-slate-800 placeholder:text-slate-400 focus:outline-none"
+              placeholder={
+                isCompactPlaceholder
+                  ? 'Ask for recipe ideas or ingredients...'
+                  : 'Describe your dietary needs, ingredients available, or ask for recipe ideas...'
+              }
+              className="min-w-0 w-full flex-1 resize-none overflow-hidden bg-transparent px-1 py-2 text-base leading-7 text-slate-800 placeholder:text-slate-400 focus:outline-none sm:text-lg sm:leading-8"
               rows={1}
               style={{
                 minHeight: '56px',

@@ -125,9 +125,10 @@ class RecipeEnhancer:
         if not recipes:
             return []
         
-        recipes_to_enhance = recipes[:3]
-        
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        recipes_to_enhance = recipes
+        max_workers = min(3, len(recipes_to_enhance))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_recipe = {
                 executor.submit(self.enhance_single_recipe, recipe, intent_data, True): recipe
                 for recipe in recipes_to_enhance
@@ -146,7 +147,7 @@ class RecipeEnhancer:
         recipe_map = {r.get("name"): r for r in enhanced_recipes}
         ordered_enhanced = [recipe_map.get(r.get("name"), r) for r in recipes_to_enhance]
         
-        return ordered_enhanced + recipes[3:]
+        return ordered_enhanced
     
     def enhance_single_recipe(
         self,
