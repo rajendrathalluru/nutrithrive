@@ -131,9 +131,9 @@ export class BackendService {
           ingredientAdaptations: doc.ingredient_adaptations ? doc.ingredient_adaptations.map((adapt: string) => cleanBackendText(adapt)) : [],
           aicrCompliance: doc.aicr_compliance,
           dynamicallyAdapted: doc.dynamically_adapted || false,
-          cookTime: doc.cookTime || 'Varies',
-          servings: doc.servings || 2,
-          difficulty: doc.difficulty || 'Medium',
+          cookTime: doc.cookTime || undefined,
+          servings: doc.servings || undefined,
+          difficulty: doc.difficulty || undefined,
           nutrition: {
             calories: doc.calories ? parseFloat(doc.calories) : 0,
             protein: doc.protein || undefined,
@@ -160,9 +160,6 @@ export class BackendService {
     if (doc.aicr_compliance?.overall_compliant) tags.push('AICR Verified');
     if (doc.instructions_generated) tags.push('AI Enhanced');
     if (doc.dynamically_adapted) tags.push('Adapted');
-    if (doc.aicr_compliance?.details?.protein_source) {
-      tags.push(cleanBackendText(doc.aicr_compliance.details.protein_source));
-    }
     
     // Add equipment tags
     if (doc.equipment_required?.includes('microwave')) {

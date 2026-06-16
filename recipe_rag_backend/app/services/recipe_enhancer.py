@@ -47,7 +47,7 @@ class RecipeEnhancer:
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_index = {
-                executor.submit(self.enhance_single_recipe, recipe, intent_data): index
+                executor.submit(self.enhance_single_recipe, recipe, intent_data, False): index
                 for index, recipe in recipes_needing_generation
             }
 
@@ -129,7 +129,7 @@ class RecipeEnhancer:
         
         with ThreadPoolExecutor(max_workers=3) as executor:
             future_to_recipe = {
-                executor.submit(self.enhance_single_recipe, recipe, intent_data): recipe
+                executor.submit(self.enhance_single_recipe, recipe, intent_data, True): recipe
                 for recipe in recipes_to_enhance
             }
             
@@ -148,14 +148,19 @@ class RecipeEnhancer:
         
         return ordered_enhanced + recipes[3:]
     
-    def enhance_single_recipe(self, recipe_data: Dict[str, Any], intent_data: Dict[str, Any]) -> Dict[str, Any]:
+    def enhance_single_recipe(
+        self,
+        recipe_data: Dict[str, Any],
+        intent_data: Dict[str, Any],
+        generate_supporting_guidance: bool = True
+    ) -> Dict[str, Any]:
         """
         CACHED: Combines instruction generation + adaptation into ONE LLM call.
         """
         recipe_name = recipe_data.get("name", "Unknown")
         
         constraints_hash = self._get_constraints_hash(intent_data)
-        cache_key = f"{recipe_name}_{constraints_hash}_enhanced"
+        cache_key = f"{recipe_name}_{constraints_hash}_{'guidance' if generate_supporting_guidance else 'core'}_enhanced"
         
         if cache_key in self.enhancement_cache:
             self.cache_hits += 1
@@ -181,8 +186,9 @@ class RecipeEnhancer:
             self._has_actionable_adaptation_request(constraints, preferences, cancer_specific)
             and not self._is_direct_recipe_lookup(enhanced_recipe, intent_data)
         )
+        needs_guidance = generate_supporting_guidance and bool(existing_ingredients or existing_instructions)
 
-        if not (needs_ingredients or needs_instructions or needs_adaptation):
+        if not (needs_ingredients or needs_instructions or needs_adaptation or needs_guidance):
             return enhanced_recipe
         
         try:
@@ -230,6 +236,9 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
 
             response = self.llm.predict(combined_prompt)
             
+            generated_core_fields = False
+            generated_guidance = False
+
             # Parse all sections from one response
             if "INGREDIENTS:" in response:
                 section = response.split("INGREDIENTS:")[1]
@@ -245,6 +254,7 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
                 if generated_ingredients and needs_ingredients:
                     enhanced_recipe["ingredients"] = generated_ingredients[:20]
                     enhanced_recipe["ingredients_generated"] = True
+                    generated_core_fields = True
 
             if "COOKING_INSTRUCTIONS:" in response:
                 section = response.split("COOKING_INSTRUCTIONS:")[1]
@@ -262,6 +272,7 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
                 if instructions and needs_instructions:
                     enhanced_recipe["instructions"] = [f"{i+1}. {inst}" for i, inst in enumerate(instructions[:8])]
                     enhanced_recipe["instructions_generated"] = True
+                    generated_core_fields = True
             
             if "INGREDIENT_MODIFICATIONS:" in response:
                 section = response.split("INGREDIENT_MODIFICATIONS:")[1]
@@ -275,6 +286,7 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
                 if mods:
                     enhanced_recipe["ingredient_adaptations"] = mods[:5]
                     enhanced_recipe["instructions_adapted"] = True
+                    generated_guidance = True
             
             if "HELPFUL_TIPS:" in response:
                 section = response.split("HELPFUL_TIPS:")[1]
@@ -284,8 +296,10 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
                 
                 if tips:
                     enhanced_recipe["helpful_tips"] = tips[:3]
+                    generated_guidance = True
             
-            enhanced_recipe["dynamically_adapted"] = True
+            enhanced_recipe["guidance_generated"] = generated_guidance
+            enhanced_recipe["dynamically_adapted"] = generated_core_fields
             logger.info(f"Enhanced '{enhanced_recipe.get('name')}' with AICR compliance")
             
         except Exception as e:

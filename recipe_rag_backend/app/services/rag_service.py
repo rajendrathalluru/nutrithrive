@@ -83,6 +83,46 @@ class RecipeRAGService:
             self.initialization_error = str(e)
             logger.error(f"Error initializing RAG system: {e}")
             raise
+
+    def _classify_recipe_source_tier(self, recipe: Dict[str, Any]) -> str:
+        if recipe.get("generated_by_llm"):
+            return "llm_generated"
+
+        core_completion_flags = [
+            recipe.get("ingredients_generated", False),
+            recipe.get("instructions_generated", False),
+            recipe.get("dynamically_adapted", False)
+        ]
+
+        if any(core_completion_flags):
+            return "database_completed"
+
+        return "database_exact"
+
+    def _annotate_recipe_source_tiers(self, recipes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        annotated_recipes = []
+        for recipe in recipes:
+            annotated_recipe = dict(recipe)
+            source_tier = self._classify_recipe_source_tier(annotated_recipe)
+            annotated_recipe["source_tier"] = source_tier
+            annotated_recipe["source"] = source_tier
+            annotated_recipes.append(annotated_recipe)
+        return annotated_recipes
+
+    def _classify_response_source(self, recipes: List[Dict[str, Any]]) -> str:
+        if not recipes:
+            return "database_exact"
+
+        source_tiers = {recipe.get("source_tier") or self._classify_recipe_source_tier(recipe) for recipe in recipes}
+
+        if source_tiers == {"database_exact"}:
+            return "database_exact"
+        if source_tiers.issubset({"database_exact", "database_completed"}):
+            return "database_completed"
+        if source_tiers == {"llm_generated"}:
+            return "llm_generated"
+
+        return "database_completed"
     "main initialization"
     def ask_question(self, query: str, mode: str = "auto", conversation_history: List[Dict] = None) -> Dict[str, Any]:
         """
@@ -120,13 +160,17 @@ class RecipeRAGService:
             candidate_recipes = []
             for doc in reranked_docs:
                 try:
-                    recipe_details = self.search_engine.extract_recipe_details(doc.page_content)
+                    recipe_name = self.search_engine.safe_get_metadata(doc, "name")
+                    full_recipe_record = self.data_loader.get_recipe_record(recipe_name)
+                    recipe_content = self.data_loader.build_recipe_text(full_recipe_record) or doc.page_content
+                    recipe_details = self.search_engine.extract_recipe_details(recipe_content)
                     recipe_data = {
-                        "name": self.search_engine.safe_get_metadata(doc, "name"),
+                        "name": recipe_name,
                         "type": self.search_engine.safe_get_metadata(doc, "type"),
                         "calories": self.search_engine.safe_get_metadata(doc, "calories", 0),
-                        "content": doc.page_content,
+                        "content": recipe_content,
                         "youtube_link": self.search_engine.safe_get_metadata(doc, "youtube_link", ""),
+                        "database_record_found": bool(full_recipe_record),
                         **recipe_details
                     }
                     candidate_recipes.append(recipe_data)
@@ -172,6 +216,7 @@ class RecipeRAGService:
             
             # Step 7: PARALLEL ENHANCEMENT with AICR guidelines
             source_docs = self.recipe_enhancer.batch_enhance_recipes(source_docs, intent_data)
+            source_docs = self._annotate_recipe_source_tiers(source_docs)
             logger.info(f"Enhancement complete: {time.time() - start_time:.2f}s")
             
             # Step 8: Generate response
@@ -183,7 +228,7 @@ class RecipeRAGService:
             return {
                 "query": query,
                 "response": response_text,
-                "source": "database" if verified_recipes else "llm_generated",
+                "source": self._classify_response_source(source_docs),
                 "matches_found": len(source_docs),
                 "mode": mode,
                 "source_documents": source_docs,
@@ -195,7 +240,9 @@ class RecipeRAGService:
                     "total_candidates": len(candidate_recipes),
                     "passed_verification": len(verified_recipes),
                     "failed_verification": len(failed_recipes),
-                    "llm_generated": len(source_docs) if not verified_recipes else 0
+                    "llm_generated": len([doc for doc in source_docs if doc.get("source_tier") == "llm_generated"]),
+                    "database_exact": len([doc for doc in source_docs if doc.get("source_tier") == "database_exact"]),
+                    "database_completed": len([doc for doc in source_docs if doc.get("source_tier") == "database_completed"])
                 },
                 "performance": {
                     "total_time_seconds": round(total_time, 2)
@@ -426,7 +473,10 @@ class RecipeRAGService:
             r"\bcould you provide me some\b",
             r"\bshow me some\b",
             r"\bgive me some\b",
-            r"\bfind me some\b"
+            r"\bfind me some\b",
+            r"\bsheet pan\b",
+            r"\broasted vegetables?\b",
+            r"\bvegetables and beans\b"
         ]
 
         if any(keyword in normalized.split() for keyword in recipe_keywords):
@@ -440,6 +490,17 @@ class RecipeRAGService:
 
         if any(re.fullmatch(pattern, normalized) for pattern in conversational_patterns):
             return True
+
+        # Short noun-phrase prompts are often recipe lookups rather than small talk.
+        if len(normalized.split()) >= 2:
+            conversational_verbs = {
+                "are", "am", "is", "was", "were", "do", "does", "did",
+                "can", "could", "would", "should", "who", "what", "why", "how",
+                "thanks", "thank", "hello", "hi", "hey"
+            }
+            words = normalized.split()
+            if not any(word in conversational_verbs for word in words):
+                return False
 
         # Short, non-domain prompts are treated as conversation instead of recipe requests.
         if len(normalized.split()) <= 6:
@@ -516,13 +577,17 @@ class RecipeRAGService:
         recipes = []
         for doc in reranked_docs:
             try:
-                recipe_details = self.search_engine.extract_recipe_details(doc.page_content)
+                recipe_name = self.search_engine.safe_get_metadata(doc, "name")
+                full_recipe_record = self.data_loader.get_recipe_record(recipe_name)
+                recipe_content = self.data_loader.build_recipe_text(full_recipe_record) or doc.page_content
+                recipe_details = self.search_engine.extract_recipe_details(recipe_content)
                 recipe = {
-                    "name": self.search_engine.safe_get_metadata(doc, "name"),
+                    "name": recipe_name,
                     "type": self.search_engine.safe_get_metadata(doc, "type"),
                     "calories": self.search_engine.safe_get_metadata(doc, "calories", 0),
-                    "content": doc.page_content,
+                    "content": recipe_content,
                     "youtube_link": self.search_engine.safe_get_metadata(doc, "youtube_link", ""),
+                    "database_record_found": bool(full_recipe_record),
                     **recipe_details
                 }
                 
@@ -534,8 +599,8 @@ class RecipeRAGService:
             except Exception as e:
                 logger.error(f"Error processing document: {e}")
                 continue
-        
-        return recipes
+
+        return self._annotate_recipe_source_tiers(recipes)
     
     def get_system_info(self) -> Dict[str, Any]:
         """Get system information"""

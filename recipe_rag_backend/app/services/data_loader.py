@@ -11,6 +11,7 @@ class DataLoader:
     def __init__(self):
         self.df = None
         self.recipes_count = 0
+        self.recipe_lookup = {}
         
     def load_data(self, file_path: str = None) -> pd.DataFrame:
         try:
@@ -34,6 +35,13 @@ class DataLoader:
         for col in text_columns:
             if col in self.df.columns:
                 self.df[col] = self.df[col].astype(str).apply(self._clean_text)
+
+        self.recipe_lookup = {}
+        if 'Name' in self.df.columns:
+            for _, row in self.df.iterrows():
+                name_key = self._normalize_name(row.get('Name', ''))
+                if name_key and name_key not in self.recipe_lookup:
+                    self.recipe_lookup[name_key] = row.to_dict()
     
     def _clean_text(self, text: str) -> str:
         if not text:
@@ -49,7 +57,13 @@ class DataLoader:
             text = text.replace(unicode_char, ascii_char)
         
         text = text.encode('ascii', 'ignore').decode('ascii')
-        return ' '.join(text.split())
+        lines = []
+        for raw_line in text.splitlines():
+            cleaned_line = ' '.join(raw_line.split()).strip()
+            if cleaned_line:
+                lines.append(cleaned_line)
+
+        return '\n'.join(lines)
     
     def prepare_documents(self) -> List[Document]:
         if self.df is None:
@@ -76,3 +90,25 @@ Notes: {row['Notes'] if row['Notes'] else 'No additional notes'}
             documents.append(Document(page_content=recipe_text, metadata=metadata))
         
         return documents
+
+    def _normalize_name(self, name: str) -> str:
+        return ' '.join(str(name).lower().split())
+
+    def get_recipe_record(self, name: str):
+        if not name:
+            return None
+        return self.recipe_lookup.get(self._normalize_name(name))
+
+    def build_recipe_text(self, row: dict) -> str:
+        if not row:
+            return ""
+
+        return f"""
+Recipe Name: {row.get('Name', '')}
+Type: {row.get('Type', '')}
+Description: {row.get('Description', '')}
+Calories: {row.get('Calories', 'Not specified') if row.get('Calories', '') else 'Not specified'}
+Ingredients: {row.get('Ingredients', '')}
+Directions: {row.get('Directions', '')}
+Notes: {row.get('Notes', 'No additional notes') if row.get('Notes', '') else 'No additional notes'}
+"""

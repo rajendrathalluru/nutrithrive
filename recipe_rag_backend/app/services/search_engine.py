@@ -203,7 +203,7 @@ Return {top_k} best indices as JSON:
                     desc_section = desc_section.split('Calories:')[0]
                 elif 'Ingredients:' in desc_section:
                     desc_section = desc_section.split('Ingredients:')[0]
-                details["description"] = desc_section.strip()[:250]
+                details["description"] = desc_section.strip()
             
             if not details["ingredients"]:
                 details["insufficient_data"] = True
