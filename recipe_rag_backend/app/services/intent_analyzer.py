@@ -44,9 +44,13 @@ class IntentAnalyzer:
             return self.understand_query_intent(query)
         
         try:
+            sanitized_history = self._sanitize_conversation_history(conversation_history)
+            if not sanitized_history:
+                return self.understand_query_intent(query)
+
             # Build conversation context
             context_lines = []
-            for msg in conversation_history[-6:]:  # Last 3 exchanges
+            for msg in sanitized_history[-6:]:  # Last 3 exchanges
                 role = "User" if msg.get("role") == "user" else "Assistant"
                 context_lines.append(f"{role}: {msg.get('content', '')}")
             
@@ -75,11 +79,11 @@ Return the SAME JSON format as the original intent analysis, but with context-aw
 
             response = self.llm.predict(enhanced_prompt)
             intent_data = self._parse_intent_response(response)
-            intent_data = self._post_process_intent(query, intent_data, conversation_history)
+            intent_data = self._post_process_intent(query, intent_data, sanitized_history)
             logger.info(f"Context-aware intent analysis: {intent_data['query_type']}")
             
             # Cache with context consideration
-            cache_key = self._normalize_query(query + str(hash(str(conversation_history))))
+            cache_key = self._normalize_query(query + str(hash(str(sanitized_history))))
             self.intent_cache[cache_key] = intent_data
             
             return intent_data
@@ -88,6 +92,20 @@ Return the SAME JSON format as the original intent analysis, but with context-aw
             logger.error(f"Error in context-aware intent analysis: {e}")
             fallback_intent = self._get_fallback_intent_data(query)
             return self._post_process_intent(query, fallback_intent, conversation_history)
+
+    def _sanitize_conversation_history(self, conversation_history: List[Any]) -> List[Dict[str, str]]:
+        sanitized: List[Dict[str, str]] = []
+        for msg in conversation_history:
+            if isinstance(msg, dict):
+                role = str(msg.get("role", "")).strip()
+                content = str(msg.get("content", "")).strip()
+                if role and content:
+                    sanitized.append({"role": role, "content": content})
+            elif isinstance(msg, str):
+                content = msg.strip()
+                if content:
+                    sanitized.append({"role": "user", "content": content})
+        return sanitized
     
     def _build_intent_prompt(self, query: str) -> str:
         """Build the intent analysis prompt"""
@@ -234,7 +252,7 @@ Extract the following information:
         symptoms: List[str] = []
         avoid_red_meat = False
 
-        for msg in conversation_history:
+        for msg in self._sanitize_conversation_history(conversation_history):
             if msg.get("role") != "user":
                 continue
             content = str(msg.get("content", "")).lower()

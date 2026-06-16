@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Dict, Any, List
 from functools import lru_cache
 
@@ -339,14 +340,11 @@ class AICRGuidelinesService:
         # Check for high-risk raw items
         avoid_raw = guidelines["food_safety"]["rules"]["avoid_high_risk"]["items"]
         for raw_item in avoid_raw:
-            raw_keywords = raw_item.lower().split()
-            for keyword in raw_keywords[:2]:  # Check first 2 words
-                if any(keyword in ing for ing in ingredients_lower):
-                    compliance_report["warnings"].append(
-                        f"Contains '{raw_item}' - ensure fully cooked or pasteurized"
-                    )
-                    compliance_report["score"] -= 15
-                    break
+            if self._matches_high_risk_item(raw_item, ingredients_lower):
+                compliance_report["warnings"].append(
+                    f"Contains '{raw_item}' - ensure fully cooked or pasteurized"
+                )
+                compliance_report["score"] -= 15
         
         # Check for processed meats
         processed_meats = guidelines["foods_to_limit"]["processed_meats"]["items"]
@@ -368,7 +366,7 @@ class AICRGuidelinesService:
         
         if not has_protein:
             compliance_report["recommendations"].append(
-                "Add protein source: chicken, fish, eggs, tofu, beans, or Greek yogurt"
+                self._build_protein_recommendation(recipe, ingredients_lower)
             )
             compliance_report["score"] -= 15
         
@@ -381,11 +379,94 @@ class AICRGuidelinesService:
                 )
                 compliance_report["score"] -= 5
                 break
+
+        # Recommend lower-sodium canned beans when standard canned beans are used
+        canned_bean_terms = ["canned beans", "black beans", "kidney beans", "pinto beans", "chickpeas", "garbanzo beans", "white beans", "cannellini beans"]
+        has_regular_canned_beans = any(
+            ("canned" in ing or "can " in ing or "beans," in ing or "beans)" in ing)
+            and any(bean_term in ing for bean_term in canned_bean_terms)
+            and "low-sodium" not in ing
+            and "low sodium" not in ing
+            and "no-salt-added" not in ing
+            and "no salt added" not in ing
+            for ing in ingredients_lower
+        )
+
+        if has_regular_canned_beans:
+            compliance_report["recommendations"].append(
+                "If using canned beans, choose low-sodium or no-salt-added when available. If using regular canned beans, rinse and drain them well to reduce sodium."
+            )
         
         # Set overall compliance
         compliance_report["overall_compliant"] = compliance_report["score"] >= 70
         
         return compliance_report
+
+    def _matches_high_risk_item(self, raw_item: str, ingredients_lower: List[str]) -> bool:
+        item = raw_item.lower()
+
+        if item == "raw or undercooked eggs":
+            return any(
+                "raw egg" in ing
+                or "undercooked egg" in ing
+                or ("egg" in ing and any(keyword in ing for keyword in ["raw", "runny", "undercooked", "soft yolk"]))
+                for ing in ingredients_lower
+            )
+
+        if item == "raw fish (sushi, sashimi)":
+            return any(
+                ("raw fish" in ing)
+                or ("sushi" in ing)
+                or ("sashimi" in ing)
+                for ing in ingredients_lower
+            )
+
+        if item == "raw shellfish":
+            shellfish_terms = ("raw shellfish", "raw oyster", "raw clam", "raw mussel", "raw scallop", "ceviche")
+            return any(any(term in ing for term in shellfish_terms) for ing in ingredients_lower)
+
+        if item == "unpasteurized dairy products":
+            return any("unpasteurized" in ing and any(term in ing for term in ["milk", "cheese", "yogurt", "dairy"]) for ing in ingredients_lower)
+
+        if item == "unpasteurized juices":
+            return any("unpasteurized" in ing and "juice" in ing for ing in ingredients_lower)
+
+        if item == "raw sprouts":
+            return any(any(term in ing for term in ["raw sprouts", "alfalfa sprouts", "bean sprouts", "sprouts"]) for ing in ingredients_lower)
+
+        if item == "deli meats (unless heated to steaming)":
+            deli_terms = ("deli meat", "cold cuts", "turkey slices", "ham slices", "salami", "prosciutto")
+            return any(any(term in ing for term in deli_terms) for ing in ingredients_lower)
+
+        escaped = re.escape(item)
+        return any(re.search(rf"\b{escaped}\b", ing) for ing in ingredients_lower)
+
+    def _build_protein_recommendation(self, recipe: Dict[str, Any], ingredients_lower: List[str]) -> str:
+        if self._is_vegetarian_recipe(recipe, ingredients_lower):
+            return "Add a vegetarian protein source such as tofu, tempeh, beans, lentils, Greek yogurt, cottage cheese, or eggs."
+
+        return (
+            "Add a protein source such as tofu, tempeh, beans, lentils, Greek yogurt, cottage cheese, or eggs; "
+            "animal-based options like chicken, turkey, or fish can also work if they fit the recipe."
+        )
+
+    def _is_vegetarian_recipe(self, recipe: Dict[str, Any], ingredients_lower: List[str]) -> bool:
+        text_parts = [
+            recipe.get("name", ""),
+            recipe.get("type", ""),
+            recipe.get("description", "")
+        ]
+        combined_text = " ".join(str(part).lower() for part in text_parts)
+
+        if "vegetarian" in combined_text:
+            return True
+
+        red_or_animal_meat_terms = [
+            "chicken", "turkey", "fish", "salmon", "tuna", "shrimp", "beef", "pork", "lamb",
+            "bacon", "ham", "sausage", "anchovy"
+        ]
+        has_meat_or_fish = any(any(term in ing for term in red_or_animal_meat_terms) for ing in ingredients_lower)
+        return not has_meat_or_fish
     
     def extract_focus_areas_from_intent(self, intent_data: Dict[str, Any]) -> List[str]:
         """

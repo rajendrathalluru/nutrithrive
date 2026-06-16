@@ -33,12 +33,31 @@ class RecipeEnhancer:
         if not recipes:
             return []
 
-        prepared_recipes: List[Dict[str, Any]] = []
-        for recipe in recipes:
-            if self._needs_core_recipe_generation(recipe):
-                prepared_recipes.append(self.enhance_single_recipe(recipe, intent_data))
-            else:
-                prepared_recipes.append(recipe)
+        recipes_needing_generation = [
+            (index, recipe)
+            for index, recipe in enumerate(recipes)
+            if self._needs_core_recipe_generation(recipe)
+        ]
+
+        if not recipes_needing_generation:
+            return recipes
+
+        prepared_recipes = list(recipes)
+        max_workers = min(3, len(recipes_needing_generation))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(self.enhance_single_recipe, recipe, intent_data): index
+                for index, recipe in recipes_needing_generation
+            }
+
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    prepared_recipes[index] = future.result()
+                except Exception as e:
+                    logger.error(f"Error preparing recipe {recipes[index].get('name')}: {e}")
+                    prepared_recipes[index] = recipes[index]
 
         return prepared_recipes
 
@@ -46,6 +65,60 @@ class RecipeEnhancer:
         ingredients = [item for item in recipe.get("ingredients", []) if str(item).strip()]
         instructions = [item for item in recipe.get("instructions", []) if str(item).strip()]
         return len(ingredients) == 0 or len(instructions) == 0
+
+    def _normalize_text(self, text: str) -> str:
+        return re.sub(r"[^a-z0-9\s]", " ", str(text).lower()).strip()
+
+    def _is_direct_recipe_lookup(self, recipe: Dict[str, Any], intent_data: Dict[str, Any]) -> bool:
+        recipe_name = self._normalize_text(recipe.get("name", ""))
+        if not recipe_name:
+            return False
+
+        primary_focus = self._normalize_text(intent_data.get("search_strategy", {}).get("primary_focus", ""))
+        enhanced_query = self._normalize_text(intent_data.get("search_strategy", {}).get("enhanced_query", ""))
+
+        # Preserve the original recipe when the user is effectively asking for this exact recipe by name.
+        return (
+            len(recipe_name.split()) >= 3 and
+            (recipe_name in primary_focus or recipe_name in enhanced_query)
+        )
+
+    def _has_actionable_adaptation_request(
+        self,
+        constraints: Dict[str, Any],
+        preferences: Dict[str, Any],
+        cancer_specific: Dict[str, Any]
+    ) -> bool:
+        hard_constraint_keys = [
+            "budget_max",
+            "time_max_minutes",
+            "max_ingredients",
+            "min_ingredients",
+            "ingredients_available",
+            "ingredients_must_use",
+            "equipment_required",
+            "equipment_only",
+            "dietary_restrictions",
+            "allergens_to_avoid",
+            "health_conditions",
+            "skill_level",
+            "avoid_red_meat"
+        ]
+        preference_keys_that_need_adaptation = [
+            "texture_preferences",
+            "cooking_methods"
+        ]
+        cancer_specific_keys = [
+            "symptoms",
+            "dietary_needs",
+            "texture_requirements"
+        ]
+
+        has_hard_constraints = any(constraints.get(key) for key in hard_constraint_keys)
+        has_adaptation_preferences = any(preferences.get(key) for key in preference_keys_that_need_adaptation)
+        has_cancer_specific_needs = any(cancer_specific.get(key) for key in cancer_specific_keys)
+
+        return has_hard_constraints or has_adaptation_preferences or has_cancer_specific_needs
     
     def batch_enhance_recipes(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Batch enhancement of recipes"""
@@ -104,7 +177,10 @@ class RecipeEnhancer:
             enhanced_recipe.get("needs_instruction_generation")
             or len(existing_instructions) == 0
         )
-        needs_adaptation = any([constraints.values(), preferences.values(), cancer_specific.values()])
+        needs_adaptation = (
+            self._has_actionable_adaptation_request(constraints, preferences, cancer_specific)
+            and not self._is_direct_recipe_lookup(enhanced_recipe, intent_data)
+        )
 
         if not (needs_ingredients or needs_instructions or needs_adaptation):
             return enhanced_recipe
@@ -145,6 +221,10 @@ YOUR TASK - Generate ALL of the following in ONE response:
 [2-3 nutrition-focused tips (e.g., for easy digestion, texture, protein) - one per line starting with "-"]
 
 If recipe data is incomplete, first infer a sensible ingredient list and cooking process from the recipe name, type, and description.
+When suggesting substitutions:
+- Do not describe quinoa, brown rice, or other grains as equivalent protein replacements for lentils, beans, tofu, eggs, fish, or poultry.
+- If replacing a stronger protein source with a lower-protein grain, describe the change as texture or flavor only.
+- If mentioning added protein, phrase it as adding a protein source alongside the grain instead of replacing the original protein.
 Generate all four sections. Be specific, nutrition-appropriate, and AICR-compliant.
 """
 

@@ -411,7 +411,28 @@ class RecipeRAGService:
             "appetite"
         }
 
+        recipe_request_patterns = [
+            r"\bbreakfasts?\b",
+            r"\blunch(?:es)?\b",
+            r"\bdinners?\b",
+            r"\bsnacks?\b",
+            r"\bmeal(?:s)?\b",
+            r"\brecipe(?:s)?\b",
+            r"\bmeal ideas?\b",
+            r"\bbreakfast ideas?\b",
+            r"\blunch ideas?\b",
+            r"\bdinner ideas?\b",
+            r"\bsnack ideas?\b",
+            r"\bcould you provide me some\b",
+            r"\bshow me some\b",
+            r"\bgive me some\b",
+            r"\bfind me some\b"
+        ]
+
         if any(keyword in normalized.split() for keyword in recipe_keywords):
+            return False
+
+        if any(re.search(pattern, normalized) for pattern in recipe_request_patterns):
             return False
 
         if normalized in small_talk_patterns:
