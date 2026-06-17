@@ -1,7 +1,10 @@
 # app/main.py
+import asyncio
+import base64
 from io import BytesIO
+import json
 from pathlib import Path
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +21,7 @@ from app.models.schemas import (
 from app.core.config import settings
 from app.services.rag_service import rag_service
 import openai
+import requests
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -57,6 +61,72 @@ app.add_middleware(
 
 if frontend_static_dir.exists():
     app.mount("/static", StaticFiles(directory=frontend_static_dir), name="frontend-static")
+
+
+def _guess_audio_filename(content_type: str) -> str:
+    normalized_type = (content_type or "audio/webm").split(";")[0].strip().lower()
+    extension_map = {
+        "audio/webm": "webm",
+        "audio/mp4": "mp4",
+        "audio/mpeg": "mp3",
+        "audio/mp3": "mp3",
+        "audio/wav": "wav",
+        "audio/x-wav": "wav",
+        "audio/mpga": "mp3",
+        "audio/ogg": "ogg",
+        "audio/opus": "opus",
+        "application/octet-stream": "webm",
+    }
+    extension = extension_map.get(normalized_type, "webm")
+    return f"voice-input.{extension}"
+
+
+def _transcribe_audio_bytes(audio_bytes: bytes, content_type: str) -> str:
+    audio_file = BytesIO(audio_bytes)
+    audio_file.name = _guess_audio_filename(content_type)
+
+    transcription = openai.Audio.transcribe(
+        model="whisper-1",
+        file=audio_file,
+        response_format="json",
+    )
+
+    return (transcription.get("text") or "").strip()
+
+
+def _create_realtime_transcription_session(offer_sdp: str) -> str:
+    session_config = {
+        "type": "transcription",
+        "audio": {
+            "input": {
+                "transcription": {
+                    "model": "gpt-realtime-whisper",
+                    "language": "en",
+                    "delay": "minimal",
+                },
+                "turn_detection": None,
+            }
+        },
+    }
+
+    response = requests.post(
+        "https://api.openai.com/v1/realtime/calls",
+        headers={
+            "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+        },
+        files={
+            "sdp": (None, offer_sdp),
+            "session": (None, json.dumps(session_config)),
+        },
+        timeout=45,
+    )
+
+    if not response.ok:
+        raise RuntimeError(
+            f"Realtime session creation failed: {response.status_code} {response.text}"
+        )
+
+    return response.text
 
 def _initialize_rag_system():
     global startup_error, startup_in_progress
@@ -286,6 +356,29 @@ async def clear_cache():
     return {"message": "All caches cleared successfully"}
 
 
+@app.post("/realtime/session")
+async def create_realtime_session(request: Request):
+    """Create a browser WebRTC transcription session via the unified Realtime interface."""
+    try:
+        raw_body = await request.body()
+        offer_sdp = raw_body.decode("utf-8")
+        if not offer_sdp:
+            raise HTTPException(status_code=400, detail="Missing SDP offer.")
+
+        logger.info("Received realtime SDP offer (%s bytes)", len(raw_body))
+
+        answer_sdp = await asyncio.to_thread(_create_realtime_transcription_session, offer_sdp)
+        return Response(content=answer_sdp, media_type="application/sdp")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Failed to create realtime transcription session: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to initialize live voice session."
+        )
+
+
 @app.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
     """Transcribe recorded voice input into text for the chat composer."""
@@ -322,16 +415,10 @@ async def transcribe_audio(file: UploadFile = File(...)):
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="Empty audio upload received.")
 
-        audio_file = BytesIO(audio_bytes)
-        audio_file.name = file.filename or "voice-input.webm"
-
-        transcription = openai.Audio.transcribe(
-            model="whisper-1",
-            file=audio_file,
-            response_format="json",
+        transcript_text = _transcribe_audio_bytes(
+            audio_bytes=audio_bytes,
+            content_type=normalized_content_type or "audio/webm",
         )
-
-        transcript_text = (transcription.get("text") or "").strip()
         if not transcript_text:
             raise HTTPException(status_code=422, detail="No speech was detected in the recording.")
 
@@ -344,6 +431,97 @@ async def transcribe_audio(file: UploadFile = File(...)):
             status_code=500,
             detail="Voice transcription is temporarily unavailable."
         )
+
+
+@app.websocket("/ws/transcribe")
+async def transcribe_audio_stream(websocket: WebSocket):
+    """Provide live, incremental transcription updates using rolling audio snapshots."""
+    await websocket.accept()
+
+    current_content_type = "audio/webm"
+    latest_transcript = ""
+
+    try:
+        await websocket.send_json({
+            "type": "ready",
+            "message": "Voice transcription session ready",
+        })
+
+        while True:
+            message = await websocket.receive_json()
+            message_type = message.get("type")
+
+            if message_type == "start":
+                requested_content_type = (message.get("mimeType") or "").strip()
+                if requested_content_type:
+                    current_content_type = requested_content_type
+                latest_transcript = ""
+                await websocket.send_json({"type": "started"})
+                continue
+
+            if message_type == "snapshot":
+                encoded_audio = message.get("audio") or ""
+                requested_content_type = (message.get("mimeType") or "").strip()
+                if requested_content_type:
+                    current_content_type = requested_content_type
+
+                if not encoded_audio:
+                    continue
+
+                try:
+                    audio_bytes = base64.b64decode(encoded_audio)
+                except Exception:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Unable to decode recorded audio snapshot.",
+                    })
+                    continue
+
+                if not audio_bytes:
+                    continue
+
+                try:
+                    transcript_text = await asyncio.to_thread(
+                        _transcribe_audio_bytes,
+                        audio_bytes,
+                        current_content_type,
+                    )
+                except Exception as exc:
+                    logger.error(f"Live voice transcription failed: {exc}", exc_info=True)
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Live voice transcription is temporarily unavailable.",
+                    })
+                    continue
+
+                transcript_changed = False
+                if transcript_text and transcript_text != latest_transcript:
+                    latest_transcript = transcript_text
+                    transcript_changed = True
+
+                await websocket.send_json({
+                    "type": "snapshot_result",
+                    "text": latest_transcript,
+                    "changed": transcript_changed,
+                })
+                continue
+
+            if message_type == "stop":
+                await websocket.send_json({
+                    "type": "final",
+                    "text": latest_transcript,
+                })
+                break
+
+            await websocket.send_json({
+                "type": "error",
+                "message": "Unsupported transcription event.",
+            })
+    except WebSocketDisconnect:
+        logger.info("Voice transcription websocket disconnected")
+    finally:
+        if websocket.client_state.name != "DISCONNECTED":
+            await websocket.close()
 
 @app.get("/{full_path:path}")
 async def frontend_app(full_path: str):

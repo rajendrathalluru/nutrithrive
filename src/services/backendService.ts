@@ -111,8 +111,43 @@ export class BackendService {
     return typeof data?.text === 'string' ? data.text.trim() : '';
   }
 
+  async createRealtimeSession(offerSdp: string): Promise<string> {
+    let response: Response;
+
+    try {
+      response = await fetch(`${this.baseUrl}/realtime/session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/sdp',
+        },
+        body: offerSdp,
+      });
+    } catch {
+      throw new Error(
+        `Unable to reach the backend at ${this.baseUrl}. Make sure the FastAPI server is running and reachable.`
+      );
+    }
+
+    if (!response.ok) {
+      const errorDetail = await this.extractErrorDetail(response);
+      throw new Error(errorDetail || `Unable to initialize live voice session: ${response.status} ${response.statusText}`);
+    }
+
+    return response.text();
+  }
+
   getBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  getWebSocketUrl(path: string): string {
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    const url = new URL(this.baseUrl);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.pathname = normalizedPath;
+    url.search = '';
+    url.hash = '';
+    return url.toString();
   }
 
   private getAudioExtension(mimeType: string): string {
