@@ -1,6 +1,7 @@
 # app/main.py
+from io import BytesIO
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,7 @@ from app.models.schemas import (
 )
 from app.core.config import settings
 from app.services.rag_service import rag_service
+import openai
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -282,6 +284,66 @@ async def clear_cache():
     """Clear all caches (useful for testing)"""
     rag_service.clear_caches()
     return {"message": "All caches cleared successfully"}
+
+
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe recorded voice input into text for the chat composer."""
+    raw_content_type = (file.content_type or "").strip().lower()
+    normalized_content_type = raw_content_type.split(";")[0].strip()
+    allowed_types = {
+        "audio/webm",
+        "audio/mp4",
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/mpga",
+        "audio/ogg",
+        "audio/opus",
+        "application/octet-stream",
+    }
+
+    logger.info(
+        "Received transcription upload: filename=%s content_type=%s normalized_content_type=%s",
+        file.filename,
+        file.content_type,
+        normalized_content_type or "<empty>",
+    )
+
+    if normalized_content_type and normalized_content_type not in allowed_types and not normalized_content_type.startswith("audio/"):
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported audio format. Please try recording again."
+        )
+
+    try:
+        audio_bytes = await file.read()
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Empty audio upload received.")
+
+        audio_file = BytesIO(audio_bytes)
+        audio_file.name = file.filename or "voice-input.webm"
+
+        transcription = openai.Audio.transcribe(
+            model="whisper-1",
+            file=audio_file,
+            response_format="json",
+        )
+
+        transcript_text = (transcription.get("text") or "").strip()
+        if not transcript_text:
+            raise HTTPException(status_code=422, detail="No speech was detected in the recording.")
+
+        return {"text": transcript_text}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Voice transcription failed: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Voice transcription is temporarily unavailable."
+        )
 
 @app.get("/{full_path:path}")
 async def frontend_app(full_path: str):

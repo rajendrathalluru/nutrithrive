@@ -84,8 +84,43 @@ export class BackendService {
     return { recipes, backendData };
   }
 
+  async transcribeAudio(audioBlob: Blob): Promise<string> {
+    const formData = new FormData();
+    const extension = this.getAudioExtension(audioBlob.type);
+    formData.append('file', audioBlob, `voice-input.${extension}`);
+
+    let response: Response;
+
+    try {
+      response = await fetch(`${this.baseUrl}/transcribe`, {
+        method: 'POST',
+        body: formData,
+      });
+    } catch {
+      throw new Error(
+        `Unable to reach the backend at ${this.baseUrl}. Make sure the FastAPI server is running and reachable.`
+      );
+    }
+
+    if (!response.ok) {
+      const errorDetail = await this.extractErrorDetail(response);
+      throw new Error(errorDetail || `Transcription failed: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return typeof data?.text === 'string' ? data.text.trim() : '';
+  }
+
   getBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  private getAudioExtension(mimeType: string): string {
+    if (mimeType.includes('webm')) return 'webm';
+    if (mimeType.includes('mp4')) return 'mp4';
+    if (mimeType.includes('mpeg')) return 'mp3';
+    if (mimeType.includes('wav')) return 'wav';
+    return 'webm';
   }
 
   private transformBackendResponse(backendData: any): Recipe[] {
