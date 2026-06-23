@@ -19,6 +19,7 @@ class ResponseGenerator:
             return "I couldn't find recipes matching your needs."
         
         try:
+            recipe_count = len(source_docs)
             constraints = intent_data.get("constraints", {})
             constraint_mentions = []
             
@@ -32,8 +33,9 @@ class ResponseGenerator:
             constraint_text = ", ".join(constraint_mentions) if constraint_mentions else ""
             
             # Recipe info without cancer-focused language
+            highlighted_docs = source_docs[:min(3, recipe_count)]
             recipe_info = []
-            for i, doc in enumerate(source_docs[:3]):
+            for i, doc in enumerate(highlighted_docs):
                 info = f"Recipe {i+1}: {doc['name']} - {len(doc.get('ingredients', []))} ingredients"
                 
                 # Add AICR compliance info
@@ -52,15 +54,18 @@ class ResponseGenerator:
 
 Query: "{query}"
 Constraints: {constraint_text or 'flexible'}
+Total recipes found: {recipe_count}
 
-Recipes (all nutrition-optimized):
+Highlighted recipes:
 {chr(10).join(recipe_info)}
 
 Brief response (under 150 words):
 1. Acknowledge their recipe needs positively
-2. Recommend 2-3 recipes highlighting nutritional benefits (protein, easy to prepare, nourishing)
+2. State the exact total number of recipes found using this exact number: {recipe_count}
+3. Highlight up to the first {min(3, recipe_count)} recipes with nutritional benefits (protein, easy to prepare, nourishing)
 3. Mention these follow evidence-based nutrition guidelines
 4. Brief encouragement about enjoying wholesome, satisfying meals
+5. Do not mention any recipe count other than {recipe_count}
 
 Focus on:
 - Nutritional benefits and flavor
@@ -71,49 +76,16 @@ Avoid medical terminology or health condition references.
 """
 
             response = self.llm.predict(response_prompt)
-            
-            # Enhanced recipe list with nutrition-focused language
-            recipe_list = "\n\n📋 **Your Nutrition-Optimized Recipes:**\n"
-            for i, doc in enumerate(source_docs[:3]):
-                recipe_list += f"\n**{i+1}. {doc['name']}**"
-                
-                # Add badges with updated language
-                aicr_compliance = doc.get("aicr_compliance", {})
-                if aicr_compliance.get("overall_compliant"):
-                    recipe_list += " 🌱"
-                if doc.get("generated_by_llm"):
-                    recipe_list += " ✨"
-                
-                # Add nutrition highlights
-                highlights = []
-                if doc.get("protein_grams"):
-                    highlights.append(f"Protein: {doc['protein_grams']}g")
-                
-                aicr_details = aicr_compliance.get("details", {})
-                if aicr_details.get("protein_source"):
-                    highlights.append(f"Contains {aicr_details['protein_source']}")
-                
-                if highlights:
-                    recipe_list += f"\n   💫 {', '.join(highlights)}"
-                
-                # Updated benefit descriptions
-                if doc.get("nutrition_benefits"):
-                    benefit = doc["nutrition_benefits"]
-                    if len(benefit) > 100:
-                        benefit = benefit[:97] + "..."
-                    recipe_list += f"\n   💡 {benefit}"
-                elif doc.get("helpful_tips"):
-                    recipe_list += f"\n   💡 {doc['helpful_tips'][0]}"
-            
-            # Add AICR footer with updated language
-            recipe_list += "\n\n🌱 = Nutrition Optimized | ✨ = Custom Generated"
-            recipe_list += "\n\n*All recipes follow AICR (American Institute for Cancer Research) guidelines for optimal nutrition.*"
-            
-            return (response.strip() + recipe_list)[:2500]
+
+            return response.strip()[:1200]
             
         except Exception as e:
             logger.error(f"Error generating response: {e}")
-            return f"Found {len(source_docs)} nutrition-optimized recipes: " + ", ".join([d['name'] for d in source_docs[:3]])
+            highlighted_names = ", ".join([d['name'] for d in source_docs[:3]])
+            return (
+                f"I found {len(source_docs)} recipe{'s' if len(source_docs) != 1 else ''} "
+                f"that match your request. Highlights include {highlighted_names}."
+            )
     
     def generate_helpful_no_results_message(self, query: str, intent_data: Dict[str, Any]) -> str:
         """Generate a helpful message when no recipes can be found or generated"""

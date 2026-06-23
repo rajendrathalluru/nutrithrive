@@ -135,7 +135,7 @@ class RecipeRAGService:
         start_time = time.time()
         
         try:
-            if self._contains_phi_like_content(query):
+            if self._contains_phi_like_content(query, conversation_history):
                 logger.info("Detected PHI-like content, returning privacy redirect response")
                 return self._build_phi_redirect_response(query, mode, conversation_history)
 
@@ -264,8 +264,11 @@ class RecipeRAGService:
                 "source_documents": []
             }
 
-    def _contains_phi_like_content(self, query: str) -> bool:
+    def _contains_phi_like_content(self, query: str, conversation_history: Optional[List[Dict]] = None) -> bool:
         normalized = query.lower()
+
+        if self._is_safe_recipe_follow_up_query(normalized, conversation_history):
+            return False
 
         strong_identifier_patterns = [
             r"\b\d{3}-\d{2}-\d{4}\b",  # SSN
@@ -300,13 +303,9 @@ class RecipeRAGService:
 
         direct_personal_patterns = [
             r"\bmy name is\s+[a-z]+(?:\s+[a-z]+)?\b",
-            r"\bi am\s+[a-z]+(?:\s+[a-z]+)?\b",
-            r"\bi'm\s+[a-z]+(?:\s+[a-z]+)?\b",
-            r"\bfor\s+[a-z]+(?:\s+[a-z]+){0,2}\b",
             r"\bfor my\s+(?:mother|father|mom|dad|son|daughter|wife|husband|brother|sister|friend|patient)\b",
             r"\bpatient\s+[a-z]+(?:\s+[a-z]+){0,2}\b",
             r"\bmember\s+[a-z]+(?:\s+[a-z]+){0,2}\b",
-            r"\bfor\s+[a-z]+(?:\s+[a-z]+){1,2}\b",
             r"\blive at\b",
             r"\bmy address is\b",
             r"\bmy phone number is\b",
@@ -322,11 +321,9 @@ class RecipeRAGService:
         has_strong_identifier = any(re.search(pattern, normalized) for pattern in strong_identifier_patterns)
         has_direct_personal_info = any(re.search(pattern, normalized) for pattern in direct_personal_patterns)
         has_identifier_value = any(re.search(pattern, normalized) for pattern in identifier_value_patterns)
-        has_name_like_reference = bool(
-            re.search(r"\b(?:for|patient|member)\s+[a-z]+(?:\s+[a-z]+){0,2}\b", normalized)
-        )
+        has_name_like_reference = self._has_name_like_reference(normalized)
         has_explicit_identity_phrase = bool(
-            re.search(r"\b(?:my name is|patient\s+[a-z]+|member\s+[a-z]+|for my\s+(?:mother|father|mom|dad|son|daughter|wife|husband|brother|sister|friend|patient)|for\s+[a-z]+(?:\s+[a-z]+){0,2})\b", normalized)
+            re.search(r"\b(?:my name is|patient\s+[a-z]+|member\s+[a-z]+|for my\s+(?:mother|father|mom|dad|son|daughter|wife|husband|brother|sister|friend|patient))\b", normalized)
         )
 
         return (
@@ -335,6 +332,62 @@ class RecipeRAGService:
             (has_direct_personal_info and has_health_context and has_explicit_identity_phrase) or
             (has_name_like_reference and has_health_context)
         )
+
+    def _has_name_like_reference(self, normalized_query: str) -> bool:
+        name_reference_matches = re.finditer(r"\b(?:for|patient|member)\s+([a-z]+(?:\s+[a-z]+){0,2})\b", normalized_query)
+        excluded_terms = {
+            "breakfast", "lunch", "dinner", "snack", "dessert", "meal", "meals", "recipe", "recipes",
+            "diet", "diets", "nutrition", "healthy", "nutritious", "vegetarian", "vegan", "protein",
+            "chinese", "indian", "mexican", "italian", "mediterranean", "thai", "japanese", "korean",
+            "more", "other", "another", "missing", "these", "those", "them", "options", "ideas",
+            "today", "tonight", "week", "weekend", "runner", "running", "muscle", "cramps"
+        }
+
+        for match in name_reference_matches:
+            candidate = match.group(1).strip()
+            candidate_tokens = [token for token in candidate.split() if token]
+            if candidate_tokens and all(token not in excluded_terms for token in candidate_tokens):
+                return True
+
+        return False
+
+    def _is_safe_recipe_follow_up_query(
+        self,
+        normalized_query: str,
+        conversation_history: Optional[List[Dict]] = None
+    ) -> bool:
+        if not conversation_history:
+            return False
+
+        follow_up_patterns = [
+            r"\bother recipes?\b",
+            r"\bmissing recipes?\b",
+            r"\bshow me (?:the )?(?:other|rest|remaining)\b",
+            r"\bwhat are the other\b",
+            r"\bcan i see (?:the )?(?:other|rest|remaining)\b",
+            r"\bmore recipes?\b",
+            r"\bmore options\b",
+            r"\bshow (?:them|those|more)\b",
+        ]
+        recipe_reference_terms = ("recipe", "recipes", "meal", "meals", "breakfast", "lunch", "dinner", "snack")
+
+        if not any(re.search(pattern, normalized_query) for pattern in follow_up_patterns):
+            return False
+
+        sanitized_history = []
+        for msg in conversation_history or []:
+            if isinstance(msg, dict):
+                content = str(msg.get("content", "")).lower()
+                role = str(msg.get("role", "")).lower()
+                if content and role:
+                    sanitized_history.append({"role": role, "content": content})
+
+        recent_assistant_recipe_reply = any(
+            msg["role"] == "assistant" and any(term in msg["content"] for term in recipe_reference_terms)
+            for msg in sanitized_history[-4:]
+        )
+
+        return recent_assistant_recipe_reply
 
     def _build_phi_redirect_response(
         self,
