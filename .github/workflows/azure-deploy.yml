@@ -13,6 +13,9 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     environment: thrivewell
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout repository
@@ -20,36 +23,31 @@ jobs:
 
       - name: Validate deployment secrets
         env:
-          AZURE_ACR_LOGIN_SERVER: ${{ secrets.AZURE_ACR_LOGIN_SERVER }}
-          AZURE_ACR_USERNAME: ${{ secrets.AZURE_ACR_USERNAME }}
-          AZURE_ACR_PASSWORD: ${{ secrets.AZURE_ACR_PASSWORD }}
           AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
           AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
         run: |
-          test -n "$AZURE_ACR_LOGIN_SERVER" || { echo "Missing secret: AZURE_ACR_LOGIN_SERVER"; exit 1; }
-          test -n "$AZURE_ACR_USERNAME" || { echo "Missing secret: AZURE_ACR_USERNAME"; exit 1; }
-          test -n "$AZURE_ACR_PASSWORD" || { echo "Missing secret: AZURE_ACR_PASSWORD"; exit 1; }
           test -n "$AZURE_WEBAPP_NAME" || { echo "Missing secret: AZURE_WEBAPP_NAME"; exit 1; }
           test -n "$AZURE_WEBAPP_PUBLISH_PROFILE" || { echo "Missing secret: AZURE_WEBAPP_PUBLISH_PROFILE"; exit 1; }
 
-      - name: Log in to Azure Container Registry
+      - name: Log in to GitHub Container Registry
         env:
-          AZURE_ACR_LOGIN_SERVER: ${{ secrets.AZURE_ACR_LOGIN_SERVER }}
-          AZURE_ACR_USERNAME: ${{ secrets.AZURE_ACR_USERNAME }}
-          AZURE_ACR_PASSWORD: ${{ secrets.AZURE_ACR_PASSWORD }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "$AZURE_ACR_PASSWORD" | docker login "$AZURE_ACR_LOGIN_SERVER" --username "$AZURE_ACR_USERNAME" --password-stdin
+          echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
 
       - name: Build and push container image
+        env:
+          GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/thrivewell
         run: |
-          docker build -t ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${IMAGE_NAME}:${{ github.sha }} .
-          docker tag ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${IMAGE_NAME}:${{ github.sha }} ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${IMAGE_NAME}:latest
-          docker push ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${IMAGE_NAME}:${{ github.sha }}
-          docker push ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${IMAGE_NAME}:latest
+          docker build -t $GHCR_IMAGE:${{ github.sha }} .
+          docker tag $GHCR_IMAGE:${{ github.sha }} $GHCR_IMAGE:latest
+          docker push $GHCR_IMAGE:${{ github.sha }}
+          docker push $GHCR_IMAGE:latest
 
       - name: Deploy container to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          images: ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+          images: ghcr.io/${{ github.repository_owner }}/thrivewell:latest

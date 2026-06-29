@@ -173,13 +173,12 @@ This repo now includes a GitHub Actions workflow at [.github/workflows/azure-dep
 Recommended Azure architecture:
 
 - GitHub repository as source
-- Azure Container Registry to store the built image
+- GitHub Container Registry to store the built image
 - Azure App Service to run the single container
-- GitHub Actions to build from the root `Dockerfile`, push to ACR, and deploy to App Service using a publish profile
+- GitHub Actions to build from the root `Dockerfile`, push to GHCR, and deploy to App Service using a publish profile
 
 ### Azure resources you need
 
-- An Azure Container Registry
 - An Azure App Service Web App for Linux using Docker
 - A resource group containing those resources
 
@@ -192,17 +191,11 @@ In GitHub:
 3. Go to `Secrets and variables` -> `Actions`
 4. Add these repository secrets:
 
-- `AZURE_ACR_LOGIN_SERVER`
-- `AZURE_ACR_USERNAME`
-- `AZURE_ACR_PASSWORD`
 - `AZURE_WEBAPP_NAME`
 - `AZURE_WEBAPP_PUBLISH_PROFILE`
 
 ### Secret meanings
 
-- `AZURE_ACR_LOGIN_SERVER`: for example `yourregistry.azurecr.io`
-- `AZURE_ACR_USERNAME`: registry username
-- `AZURE_ACR_PASSWORD`: registry password
 - `AZURE_WEBAPP_NAME`: the Azure App Service name
 - `AZURE_WEBAPP_PUBLISH_PROFILE`: the downloaded App Service publish profile XML
 
@@ -220,11 +213,12 @@ In the Azure Web App:
 - `WEBSITES_PORT=8000`
 - `CORS_ORIGINS=https://your-app-name.azurewebsites.net`
 
-3. In the container configuration for the Web App, make sure it points to your Azure Container Registry image:
+3. In the container configuration for the Web App, switch to `Other container registries` and use GHCR:
 
-- registry: your ACR
-- image: `thrivewell`
-- tag: `latest`
+- registry server URL: `https://ghcr.io`
+- image and tag: `ghcr.io/<github-owner>/thrivewell:latest`
+- registry username: your GitHub username
+- registry password: a GitHub personal access token with `read:packages`
 
 ### App Service configuration
 
@@ -238,9 +232,9 @@ Your Azure Web App should be:
 
 On every push to `main`, the workflow:
 
-1. Logs into Azure Container Registry
+1. Logs into GitHub Container Registry
 2. Builds the root `Dockerfile`
-3. Pushes the image with both commit SHA and `latest` tags
+3. Pushes the image with both commit SHA and `latest` tags to `ghcr.io`
 4. Deploys the `latest` image to Azure App Service using the publish profile
 
 You can also run it manually from the GitHub Actions tab with `workflow_dispatch`.
