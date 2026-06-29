@@ -17,11 +17,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Azure login
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
       - name: Log in to Azure Container Registry
         uses: azure/docker-login@v2
         with:
@@ -36,31 +31,9 @@ jobs:
           docker push ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${IMAGE_NAME}:${{ github.sha }}
           docker push ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${IMAGE_NAME}:latest
 
-      - name: Point App Service to latest image
-        run: |
-          az webapp config container set \
-            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
-            --container-image-name ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${IMAGE_NAME}:latest \
-            --container-registry-url https://${{ secrets.AZURE_ACR_LOGIN_SERVER }} \
-            --container-registry-user ${{ secrets.AZURE_ACR_USERNAME }} \
-            --container-registry-password ${{ secrets.AZURE_ACR_PASSWORD }}
-
-      - name: Apply App Service settings
-        run: |
-          az webapp config appsettings set \
-            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --name ${{ secrets.AZURE_WEBAPP_NAME }} \
-            --settings \
-              OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' \
-              DATA_FILE_PATH='app/data/Recipe.csv' \
-              API_HOST='0.0.0.0' \
-              PORT='8000' \
-              WEBSITES_PORT='8000' \
-              CORS_ORIGINS='${{ secrets.AZURE_CORS_ORIGINS }}'
-
-      - name: Restart App Service
-        run: |
-          az webapp restart \
-            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --name ${{ secrets.AZURE_WEBAPP_NAME }}
+      - name: Deploy container to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          images: ${{ secrets.AZURE_ACR_LOGIN_SERVER }}/${IMAGE_NAME}:latest

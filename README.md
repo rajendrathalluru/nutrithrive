@@ -175,7 +175,7 @@ Recommended Azure architecture:
 - GitHub repository as source
 - Azure Container Registry to store the built image
 - Azure App Service to run the single container
-- GitHub Actions to build from the root `Dockerfile`, push to ACR, and update App Service
+- GitHub Actions to build from the root `Dockerfile`, push to ACR, and deploy to App Service using a publish profile
 
 ### Azure resources you need
 
@@ -192,25 +192,39 @@ In GitHub:
 3. Go to `Secrets and variables` -> `Actions`
 4. Add these repository secrets:
 
-- `AZURE_CREDENTIALS`
 - `AZURE_ACR_LOGIN_SERVER`
 - `AZURE_ACR_USERNAME`
 - `AZURE_ACR_PASSWORD`
-- `AZURE_RESOURCE_GROUP`
 - `AZURE_WEBAPP_NAME`
-- `AZURE_CORS_ORIGINS`
-- `OPENAI_API_KEY`
+- `AZURE_WEBAPP_PUBLISH_PROFILE`
 
 ### Secret meanings
 
-- `AZURE_CREDENTIALS`: Azure service principal JSON used by `azure/login`
 - `AZURE_ACR_LOGIN_SERVER`: for example `yourregistry.azurecr.io`
 - `AZURE_ACR_USERNAME`: registry username
 - `AZURE_ACR_PASSWORD`: registry password
-- `AZURE_RESOURCE_GROUP`: the resource group name
 - `AZURE_WEBAPP_NAME`: the Azure App Service name
-- `AZURE_CORS_ORIGINS`: for example `https://your-app-name.azurewebsites.net`
-- `OPENAI_API_KEY`: your production OpenAI API key
+- `AZURE_WEBAPP_PUBLISH_PROFILE`: the downloaded App Service publish profile XML
+
+### Azure Portal settings to configure once
+
+In the Azure Web App:
+
+1. Open `Settings` -> `Environment variables`
+2. Add:
+
+- `OPENAI_API_KEY`
+- `DATA_FILE_PATH=app/data/Recipe.csv`
+- `API_HOST=0.0.0.0`
+- `PORT=8000`
+- `WEBSITES_PORT=8000`
+- `CORS_ORIGINS=https://your-app-name.azurewebsites.net`
+
+3. In the container configuration for the Web App, make sure it points to your Azure Container Registry image:
+
+- registry: your ACR
+- image: `thrivewell`
+- tag: `latest`
 
 ### App Service configuration
 
@@ -220,26 +234,14 @@ Your Azure Web App should be:
 - `Operating System`: Linux
 - configured to pull from your Azure Container Registry
 
-The workflow also reapplies these required runtime settings on each deploy:
-
-- `OPENAI_API_KEY`
-- `DATA_FILE_PATH=app/data/Recipe.csv`
-- `API_HOST=0.0.0.0`
-- `PORT=8000`
-- `WEBSITES_PORT=8000`
-- `CORS_ORIGINS=<your Azure app URL>`
-
 ### How deployment works
 
 On every push to `main`, the workflow:
 
-1. Logs into Azure
-2. Logs into Azure Container Registry
-3. Builds the root `Dockerfile`
-4. Pushes the image with both commit SHA and `latest` tags
-5. Updates App Service to use the `latest` image
-6. Reapplies required app settings
-7. Restarts the web app
+1. Logs into Azure Container Registry
+2. Builds the root `Dockerfile`
+3. Pushes the image with both commit SHA and `latest` tags
+4. Deploys the `latest` image to Azure App Service using the publish profile
 
 You can also run it manually from the GitHub Actions tab with `workflow_dispatch`.
 
