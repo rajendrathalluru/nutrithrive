@@ -166,6 +166,83 @@ The same root `Dockerfile` can be used on:
 
 For any platform, expose port `8000` and set `OPENAI_API_KEY`.
 
+## Deploy to Azure with GitHub Actions
+
+This repo now includes a GitHub Actions workflow at [.github/workflows/azure-deploy.yml](/Users/rajendrathalluru/Documents/nutrithrive-research/.github/workflows/azure-deploy.yml).
+
+Recommended Azure architecture:
+
+- GitHub repository as source
+- Azure Container Registry to store the built image
+- Azure App Service to run the single container
+- GitHub Actions to build from the root `Dockerfile`, push to ACR, and update App Service
+
+### Azure resources you need
+
+- An Azure Container Registry
+- An Azure App Service Web App for Linux using Docker
+- A resource group containing those resources
+
+### GitHub repository secrets to add
+
+In GitHub:
+
+1. Open your repository
+2. Go to `Settings`
+3. Go to `Secrets and variables` -> `Actions`
+4. Add these repository secrets:
+
+- `AZURE_CREDENTIALS`
+- `AZURE_ACR_LOGIN_SERVER`
+- `AZURE_ACR_USERNAME`
+- `AZURE_ACR_PASSWORD`
+- `AZURE_RESOURCE_GROUP`
+- `AZURE_WEBAPP_NAME`
+- `AZURE_CORS_ORIGINS`
+- `OPENAI_API_KEY`
+
+### Secret meanings
+
+- `AZURE_CREDENTIALS`: Azure service principal JSON used by `azure/login`
+- `AZURE_ACR_LOGIN_SERVER`: for example `yourregistry.azurecr.io`
+- `AZURE_ACR_USERNAME`: registry username
+- `AZURE_ACR_PASSWORD`: registry password
+- `AZURE_RESOURCE_GROUP`: the resource group name
+- `AZURE_WEBAPP_NAME`: the Azure App Service name
+- `AZURE_CORS_ORIGINS`: for example `https://your-app-name.azurewebsites.net`
+- `OPENAI_API_KEY`: your production OpenAI API key
+
+### App Service configuration
+
+Your Azure Web App should be:
+
+- `Publish`: Docker Container
+- `Operating System`: Linux
+- configured to pull from your Azure Container Registry
+
+The workflow also reapplies these required runtime settings on each deploy:
+
+- `OPENAI_API_KEY`
+- `DATA_FILE_PATH=app/data/Recipe.csv`
+- `API_HOST=0.0.0.0`
+- `PORT=8000`
+- `WEBSITES_PORT=8000`
+- `CORS_ORIGINS=<your Azure app URL>`
+
+### How deployment works
+
+On every push to `main`, the workflow:
+
+1. Logs into Azure
+2. Logs into Azure Container Registry
+3. Builds the root `Dockerfile`
+4. Pushes the image with both commit SHA and `latest` tags
+5. Updates App Service to use the `latest` image
+6. Reapplies required app settings
+7. Restarts the web app
+
+You can also run it manually from the GitHub Actions tab with `workflow_dispatch`.
+
 ## API endpoints
 
 ### `GET /health`
