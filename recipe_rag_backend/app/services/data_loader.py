@@ -1,7 +1,10 @@
 # app/services/data_loader.py
 import pandas as pd
 import logging
+import hashlib
+import re
 from typing import List
+from pathlib import Path
 from langchain.schema import Document
 from app.core.config import settings
 
@@ -15,14 +18,20 @@ class DataLoader:
         
     def load_data(self, file_path: str = None) -> pd.DataFrame:
         try:
-            file_path = file_path or settings.DATA_FILE_PATH
+            configured_path = Path(file_path) if file_path else settings.data_file_path
+            file_path = configured_path.expanduser().resolve()
             logger.info(f"Loading data from: {file_path}")
+
+            if not file_path.exists():
+                raise FileNotFoundError(f"Recipe data file not found: {file_path}")
             
             self.df = pd.read_csv(file_path)
             self.recipes_count = len(self.df)
             logger.info(f"Successfully loaded {self.recipes_count} recipes")
             
             self._clean_data()
+            self._deduplicate_recipes()
+            self._assign_recipe_ids()
             return self.df
             
         except Exception as e:
@@ -35,13 +44,6 @@ class DataLoader:
         for col in text_columns:
             if col in self.df.columns:
                 self.df[col] = self.df[col].astype(str).apply(self._clean_text)
-
-        self.recipe_lookup = {}
-        if 'Name' in self.df.columns:
-            for _, row in self.df.iterrows():
-                name_key = self._normalize_name(row.get('Name', ''))
-                if name_key and name_key not in self.recipe_lookup:
-                    self.recipe_lookup[name_key] = row.to_dict()
     
     def _clean_text(self, text: str) -> str:
         if not text:
@@ -81,6 +83,7 @@ Directions: {row['Directions']}
 Notes: {row['Notes'] if row['Notes'] else 'No additional notes'}
 """
             metadata = {
+                "recipe_id": row.get('recipe_id') or self._build_recipe_id(row.to_dict()),
                 "name": row['Name'],
                 "type": row['Type'],
                 "calories": float(row['Calories']) if row['Calories'] and str(row['Calories']).replace('.', '').isdigit() else 0,
@@ -93,6 +96,56 @@ Notes: {row['Notes'] if row['Notes'] else 'No additional notes'}
 
     def _normalize_name(self, name: str) -> str:
         return ' '.join(str(name).lower().split())
+
+    def _slugify_name(self, name: str) -> str:
+        slug = re.sub(r'[^a-z0-9]+', '-', self._normalize_name(name)).strip('-')
+        return slug or "recipe"
+
+    def _build_recipe_id(self, row: dict) -> str:
+        normalized_name = self._normalize_name(row.get('Name', ''))
+        normalized_type = self._normalize_name(row.get('Type', ''))
+        calories = str(row.get('Calories', '')).strip()
+        fingerprint = f"{normalized_name}|{normalized_type}|{calories}"
+        digest = hashlib.md5(fingerprint.encode("utf-8")).hexdigest()[:10]
+        return f"{self._slugify_name(row.get('Name', ''))}-{digest}"
+
+    def _deduplicate_recipes(self) -> None:
+        if self.df is None or 'Name' not in self.df.columns:
+            return
+
+        before = len(self.df)
+        normalized_names = self.df['Name'].astype(str).map(self._normalize_name)
+        self.df = (
+            self.df.assign(_normalized_name=normalized_names)
+            .loc[lambda frame: frame['_normalized_name'].astype(bool)]
+            .drop_duplicates(subset='_normalized_name', keep='last')
+            .drop(columns=['_normalized_name'])
+            .reset_index(drop=True)
+        )
+
+        removed = before - len(self.df)
+        if removed > 0:
+            logger.info("Removed %s duplicate recipe rows during data load", removed)
+
+        self.recipes_count = len(self.df)
+
+    def _assign_recipe_ids(self) -> None:
+        if self.df is None:
+            return
+
+        self.recipe_lookup = {}
+        recipe_ids = []
+        for _, row in self.df.iterrows():
+            row_dict = row.to_dict()
+            recipe_id = self._build_recipe_id(row_dict)
+            row_dict["recipe_id"] = recipe_id
+            recipe_ids.append(recipe_id)
+
+            name_key = self._normalize_name(row_dict.get('Name', ''))
+            if name_key:
+                self.recipe_lookup[name_key] = row_dict
+
+        self.df['recipe_id'] = recipe_ids
 
     def get_recipe_record(self, name: str):
         if not name:

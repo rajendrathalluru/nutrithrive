@@ -1,4 +1,4 @@
-import { Recipe } from '../types';
+import { BackendHealth, Recipe } from '../types';
 import { cleanBackendText, formatIngredients, formatInstructions } from '../utils/textCleaner';
 
 export class BackendService {
@@ -29,28 +29,47 @@ export class BackendService {
     return BackendService.instance;
   }
 
-  async checkHealth(): Promise<boolean> {
+  async getHealth(): Promise<BackendHealth> {
     try {
       const response = await fetch(`${this.baseUrl}/health`);
       if (!response.ok) {
-        return false;
+        return {
+          status: 'offline',
+          message: 'Recipe service is unavailable.',
+          model_loaded: false,
+          recipes_count: 0
+        };
       }
       const health = await response.json();
-      return health.status === 'healthy';
+      return {
+        status: health.status === 'healthy' || health.status === 'starting' || health.status === 'failed'
+          ? health.status
+          : 'offline',
+        message: typeof health.message === 'string' ? health.message : 'Recipe service status unavailable.',
+        model_loaded: Boolean(health.model_loaded),
+        recipes_count: typeof health.recipes_count === 'number' ? health.recipes_count : 0,
+        startup_in_progress: Boolean(health.startup_in_progress),
+        initialization_error: typeof health.initialization_error === 'string' ? health.initialization_error : null
+      };
     } catch {
-      return false;
+      return {
+        status: 'offline',
+        message: 'Recipe service is offline.',
+        model_loaded: false,
+        recipes_count: 0
+      };
     }
+  }
+
+  async checkHealth(): Promise<boolean> {
+    const health = await this.getHealth();
+    return health.status === 'healthy';
   }
 
   async searchRecipes(
     query: string,
     conversationHistory: Array<{role: string, content: string}> = []
   ): Promise<{ recipes: Recipe[], backendData: any }> {
-    console.log('🔍 Sending query to backend with conversation history:', {
-      query,
-      historyLength: conversationHistory.length
-    });
-
     let response: Response;
 
     try {
@@ -77,8 +96,6 @@ export class BackendService {
     }
 
     const backendData = await response.json();
-    console.log('📦 Full backend response:', backendData);
-
     const recipes = this.transformBackendResponse(backendData);
 
     return { recipes, backendData };
@@ -159,8 +176,6 @@ export class BackendService {
   }
 
   private transformBackendResponse(backendData: any): Recipe[] {
-    console.log('🔄 Transforming backend data:', backendData);
-    
     let recipeDocs: any[] = [];
     
     if (Array.isArray(backendData.source_documents)) {
@@ -170,12 +185,10 @@ export class BackendService {
     } else if (Array.isArray(backendData.recipes)) {
       recipeDocs = backendData.recipes;
     } else {
-      console.log('❌ No recipe documents found in backend response');
       return [];
     }
 
     if (recipeDocs.length === 0) {
-      console.log('❌ Empty recipe documents array');
       return [];
     }
 
@@ -183,9 +196,8 @@ export class BackendService {
 
     recipeDocs.forEach((doc: any, index: number) => {
       try {
-        // Clean all text fields from backend
         const recipe: Recipe = {
-          id: doc.id || `recipe-${index}-${Date.now()}`,
+          id: doc.recipe_id || doc.id || `recipe-${index}`,
           title: cleanBackendText(doc.name || doc.title || 'Recipe'),
           description: cleanBackendText(doc.description || ''),
           type: cleanBackendText(doc.type || ''),
@@ -213,10 +225,8 @@ export class BackendService {
         };
 
         recipes.push(recipe);
-        console.log(`✅ Processed recipe: ${recipe.title}`, recipe);
-        
-      } catch (error) {
-        console.error(`❌ Error processing recipe ${index}:`, error);
+      } catch {
+        return;
       }
     });
 

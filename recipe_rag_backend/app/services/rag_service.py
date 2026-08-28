@@ -1,6 +1,8 @@
 import logging
 import time
 import re
+import hashlib
+import threading
 from typing import List, Dict, Any, Optional
 
 from app.core.config import settings
@@ -22,6 +24,7 @@ class RecipeRAGService:
         self.data_loader = DataLoader()
         self.is_initialized = False
         self.initialization_error = None
+        self._initialization_lock = threading.Lock()
         
         # Initialize modular services
         self.intent_analyzer = IntentAnalyzer()
@@ -29,60 +32,120 @@ class RecipeRAGService:
         self.recipe_enhancer = RecipeEnhancer()
         self.search_engine = SearchEngine()
         self.response_generator = ResponseGenerator()
+
+    def _normalize_recipe_name(self, recipe_name: str) -> str:
+        return " ".join(str(recipe_name).strip().lower().split())
+
+    def _ensure_recipe_id(self, recipe: Dict[str, Any]) -> Dict[str, Any]:
+        if recipe.get("recipe_id"):
+            return recipe
+
+        normalized_name = self._normalize_recipe_name(recipe.get("name", ""))
+        normalized_type = self._normalize_recipe_name(recipe.get("type", ""))
+        calories = str(recipe.get("calories", "")).strip()
+        slug = re.sub(r"[^a-z0-9]+", "-", normalized_name).strip("-") or "recipe"
+        digest = hashlib.md5(f"{normalized_name}|{normalized_type}|{calories}".encode("utf-8")).hexdigest()[:10]
+
+        recipe_with_id = dict(recipe)
+        recipe_with_id["recipe_id"] = f"{slug}-{digest}"
+        return recipe_with_id
+
+    def _get_recipe_identity(self, recipe: Dict[str, Any]) -> str:
+        recipe = self._ensure_recipe_id(recipe)
+        recipe_id = str(recipe.get("recipe_id", "")).strip()
+        if recipe_id:
+            return recipe_id
+        return self._normalize_recipe_name(recipe.get("name", ""))
+
+    def _deduplicate_recipes(self, recipes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        deduplicated: List[Dict[str, Any]] = []
+        seen_identities = set()
+
+        for recipe in recipes:
+            recipe = self._ensure_recipe_id(recipe)
+            identity = self._get_recipe_identity(recipe)
+            if not identity or identity in seen_identities:
+                continue
+
+            seen_identities.add(identity)
+            deduplicated.append(recipe)
+
+        return deduplicated
+
+    def _build_recipe_data_from_doc(self, doc: Any) -> Dict[str, Any]:
+        recipe_id = self.search_engine.safe_get_metadata(doc, "recipe_id", "")
+        recipe_name = self.search_engine.safe_get_metadata(doc, "name")
+        full_recipe_record = self.data_loader.get_recipe_record(recipe_name)
+        recipe_content = self.data_loader.build_recipe_text(full_recipe_record) or doc.page_content
+        recipe_details = self.search_engine.extract_recipe_details(recipe_content)
+
+        if full_recipe_record:
+            recipe_id = full_recipe_record.get("recipe_id", recipe_id)
+
+        return {
+            "recipe_id": recipe_id,
+            "name": recipe_name,
+            "type": self.search_engine.safe_get_metadata(doc, "type"),
+            "calories": self.search_engine.safe_get_metadata(doc, "calories", 0),
+            "content": recipe_content,
+            "youtube_link": self.search_engine.safe_get_metadata(doc, "youtube_link", ""),
+            "database_record_found": bool(full_recipe_record),
+            **recipe_details
+        }
         
     def initialize(self):
-        try:
-            if not settings.OPENAI_API_KEY:
-                raise ValueError("OPENAI_API_KEY not found")
-            
-            from langchain.embeddings import OpenAIEmbeddings
-            from langchain.vectorstores import FAISS
-            from langchain.text_splitter import RecursiveCharacterTextSplitter
-            from langchain.chat_models import ChatOpenAI
-            
-            self.embeddings = OpenAIEmbeddings(
-                model=settings.EMBEDDING_MODEL,
-                openai_api_key=settings.OPENAI_API_KEY
-            )
-            
-            self.llm = ChatOpenAI(
-                model_name=settings.LLM_MODEL,
-                temperature=settings.LLM_TEMPERATURE,
-                max_tokens=settings.LLM_MAX_TOKENS,
-                openai_api_key=settings.OPENAI_API_KEY
-            )
-            
-            # Initialize modular services with LLM and embeddings
-            self.intent_analyzer.initialize(self.llm)
-            self.recipe_verifier.initialize(self.llm)
-            self.recipe_enhancer.initialize(self.llm, aicr_service)
-            self.search_engine.initialize(self.vector_store, self.llm)
-            self.response_generator.initialize(self.llm)
-            
-            self.data_loader.load_data()
-            documents = self.data_loader.prepare_documents()
-            
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=settings.CHUNK_SIZE,
-                chunk_overlap=settings.CHUNK_OVERLAP
-            )
-            split_docs = text_splitter.split_documents(documents)
-            
-            logger.info(f"Creating vector store with {len(split_docs)} document chunks")
-            self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
-            
-            # Update search engine with vector store
-            self.search_engine.vector_store = self.vector_store
-            
-            self.is_initialized = True
-            self.initialization_error = None
-            logger.info("RAG system initialized successfully")
-            
-        except Exception as e:
-            self.is_initialized = False
-            self.initialization_error = str(e)
-            logger.error(f"Error initializing RAG system: {e}")
-            raise
+        with self._initialization_lock:
+            if self.is_initialized:
+                return
+
+            try:
+                if not settings.OPENAI_API_KEY:
+                    raise ValueError("OPENAI_API_KEY not found")
+                
+                from langchain.embeddings import OpenAIEmbeddings
+                from langchain.vectorstores import FAISS
+                from langchain.text_splitter import RecursiveCharacterTextSplitter
+                from langchain.chat_models import ChatOpenAI
+                
+                self.embeddings = OpenAIEmbeddings(
+                    model=settings.EMBEDDING_MODEL,
+                    openai_api_key=settings.OPENAI_API_KEY
+                )
+                
+                self.llm = ChatOpenAI(
+                    model_name=settings.LLM_MODEL,
+                    temperature=settings.LLM_TEMPERATURE,
+                    max_tokens=settings.LLM_MAX_TOKENS,
+                    openai_api_key=settings.OPENAI_API_KEY
+                )
+                
+                self.data_loader.load_data()
+                documents = self.data_loader.prepare_documents()
+                
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=settings.CHUNK_SIZE,
+                    chunk_overlap=settings.CHUNK_OVERLAP
+                )
+                split_docs = text_splitter.split_documents(documents)
+                
+                logger.info(f"Creating vector store with {len(split_docs)} document chunks")
+                self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
+
+                self.intent_analyzer.initialize(self.llm)
+                self.recipe_verifier.initialize(self.llm)
+                self.recipe_enhancer.initialize(self.llm, aicr_service)
+                self.search_engine.initialize(self.vector_store, self.llm)
+                self.response_generator.initialize(self.llm)
+                
+                self.is_initialized = True
+                self.initialization_error = None
+                logger.info("RAG system initialized successfully")
+                
+            except Exception as e:
+                self.is_initialized = False
+                self.initialization_error = str(e)
+                logger.error(f"Error initializing RAG system: {e}")
+                raise
 
     def _classify_recipe_source_tier(self, recipe: Dict[str, Any]) -> str:
         if recipe.get("generated_by_llm"):
@@ -160,24 +223,12 @@ class RecipeRAGService:
             candidate_recipes = []
             for doc in reranked_docs:
                 try:
-                    recipe_name = self.search_engine.safe_get_metadata(doc, "name")
-                    full_recipe_record = self.data_loader.get_recipe_record(recipe_name)
-                    recipe_content = self.data_loader.build_recipe_text(full_recipe_record) or doc.page_content
-                    recipe_details = self.search_engine.extract_recipe_details(recipe_content)
-                    recipe_data = {
-                        "name": recipe_name,
-                        "type": self.search_engine.safe_get_metadata(doc, "type"),
-                        "calories": self.search_engine.safe_get_metadata(doc, "calories", 0),
-                        "content": recipe_content,
-                        "youtube_link": self.search_engine.safe_get_metadata(doc, "youtube_link", ""),
-                        "database_record_found": bool(full_recipe_record),
-                        **recipe_details
-                    }
-                    candidate_recipes.append(recipe_data)
+                    candidate_recipes.append(self._build_recipe_data_from_doc(doc))
                 except Exception as e:
                     logger.error(f"Error extracting recipe: {e}")
                     continue
             
+            candidate_recipes = self._deduplicate_recipes(candidate_recipes)
             logger.info(f"Extraction complete: {time.time() - start_time:.2f}s")
 
             # Step 4.5: Fill missing ingredients/instructions before verification
@@ -216,6 +267,7 @@ class RecipeRAGService:
             
             # Step 7: PARALLEL ENHANCEMENT with AICR guidelines
             source_docs = self.recipe_enhancer.batch_enhance_recipes(source_docs, intent_data)
+            source_docs = self._deduplicate_recipes(source_docs)
             source_docs = self._annotate_recipe_source_tiers(source_docs)
             logger.info(f"Enhancement complete: {time.time() - start_time:.2f}s")
             
@@ -340,7 +392,8 @@ class RecipeRAGService:
             "diet", "diets", "nutrition", "healthy", "nutritious", "vegetarian", "vegan", "protein",
             "chinese", "indian", "mexican", "italian", "mediterranean", "thai", "japanese", "korean",
             "more", "other", "another", "missing", "these", "those", "them", "options", "ideas",
-            "today", "tonight", "week", "weekend", "runner", "running", "muscle", "cramps"
+            "today", "tonight", "week", "weekend", "runner", "running", "muscle", "cramps",
+            "me", "myself", "us", "ourselves", "you", "yourself", "someone", "anyone"
         }
 
         for match in name_reference_matches:
@@ -630,19 +683,7 @@ class RecipeRAGService:
         recipes = []
         for doc in reranked_docs:
             try:
-                recipe_name = self.search_engine.safe_get_metadata(doc, "name")
-                full_recipe_record = self.data_loader.get_recipe_record(recipe_name)
-                recipe_content = self.data_loader.build_recipe_text(full_recipe_record) or doc.page_content
-                recipe_details = self.search_engine.extract_recipe_details(recipe_content)
-                recipe = {
-                    "name": recipe_name,
-                    "type": self.search_engine.safe_get_metadata(doc, "type"),
-                    "calories": self.search_engine.safe_get_metadata(doc, "calories", 0),
-                    "content": recipe_content,
-                    "youtube_link": self.search_engine.safe_get_metadata(doc, "youtube_link", ""),
-                    "database_record_found": bool(full_recipe_record),
-                    **recipe_details
-                }
+                recipe = self._build_recipe_data_from_doc(doc)
                 
                 # Add AICR validation to search results
                 aicr_compliance = aicr_service.validate_recipe_compliance(recipe)
@@ -653,10 +694,12 @@ class RecipeRAGService:
                 logger.error(f"Error processing document: {e}")
                 continue
 
+        recipes = self._deduplicate_recipes(recipes)
         return self._annotate_recipe_source_tiers(recipes)
     
     def get_system_info(self) -> Dict[str, Any]:
         """Get system information"""
+        aicr_guidelines = aicr_service.get_guidelines()
         return {
             "initialized": self.is_initialized,
             "initialization_error": self.initialization_error,
@@ -680,8 +723,8 @@ class RecipeRAGService:
             "cache_statistics": self.get_combined_cache_stats(),
             "aicr_guidelines": {
                 "loaded": aicr_service._initialized,
-                "source": aicr_service.get_guidelines()["metadata"]["source"],
-                "version": aicr_service.get_guidelines()["metadata"]["version"]
+                "source": aicr_guidelines["metadata"]["source"],
+                "version": aicr_guidelines["metadata"]["version"]
             }
         }
     

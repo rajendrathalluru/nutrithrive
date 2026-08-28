@@ -1,7 +1,11 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
+
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
@@ -23,5 +27,12 @@ class Settings:
     def cors_origins(self) -> list[str]:
         origins = [origin.strip() for origin in self.CORS_ORIGINS_RAW.split(",") if origin.strip()]
         return origins or ["http://localhost:3000"]
+
+    @property
+    def data_file_path(self) -> Path:
+        configured_path = Path(self.DATA_FILE_PATH)
+        if configured_path.is_absolute():
+            return configured_path
+        return BASE_DIR / configured_path
 
 settings = Settings()

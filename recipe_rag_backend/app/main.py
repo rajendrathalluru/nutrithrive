@@ -30,10 +30,27 @@ startup_in_progress = False
 
 # ============= NEW: Conversation Context Models =============
 from pydantic import BaseModel
+from pydantic import field_validator
 
 class ChatMessage(BaseModel):
     role: str
     content: str
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"user", "assistant", "system"}:
+            raise ValueError("Conversation message role must be user, assistant, or system.")
+        return normalized
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Conversation message content must not be empty.")
+        return normalized
 
 class ConversationQueryRequest(RecipeRequest):
     """Extended request with conversation history"""
@@ -141,6 +158,17 @@ def _initialize_rag_system():
         startup_in_progress = False
 
 
+def _ensure_rag_ready() -> None:
+    if rag_service.is_initialized:
+        return
+
+    detail = "Recipe engine is warming up. Please try again in a moment."
+    if startup_error and not startup_in_progress:
+        detail = "Recipe engine failed to initialize. Check server configuration and logs."
+
+    raise HTTPException(status_code=503, detail=detail)
+
+
 @app.on_event("startup")
 async def startup_event():
     global startup_in_progress
@@ -154,17 +182,25 @@ async def startup_event():
 async def health_check():
     """Check system health and status"""
     system_info = rag_service.get_system_info()
+    status = (
+        "healthy"
+        if system_info["initialized"]
+        else "starting"
+        if startup_in_progress
+        else "failed"
+    )
     return HealthCheck(
-        status="healthy" if system_info["initialized"] else "unhealthy",
+        status=status,
         message=(
             "Service is running"
             if system_info["initialized"]
-            else "Service initialization in progress"
+            else "Recipe engine is warming up"
             if startup_in_progress
-            else "Service initialization failed"
+            else "Recipe engine failed to initialize"
         ),
         model_loaded=system_info["initialized"],
         recipes_count=system_info["recipes_loaded"],
+        startup_in_progress=startup_in_progress,
         initialization_error=system_info.get("initialization_error"),
         instruction_cache_size=system_info.get("instruction_cache_size", 0),
         supports_dynamic_adaptation=system_info.get("supports_dynamic_adaptation", True),
@@ -208,8 +244,7 @@ async def search_recipes(request: RecipeRequest):
     - No special adaptations needed
     """
     try:
-        if not rag_service.is_initialized:
-            raise HTTPException(status_code=503, detail="RAG system not initialized")
+        _ensure_rag_ready()
             
         results = rag_service.search_recipes(request.query, request.k)
         return SearchResponse(
@@ -248,11 +283,7 @@ async def ask_question(request: ConversationQueryRequest):  # UPDATED: Use new r
     - User: "Which ones are high in protein?" (understands previous context)
     """
     try:
-        if not rag_service.is_initialized:
-            raise HTTPException(
-                status_code=503, 
-                detail="RAG system not initialized. Please try again in a moment."
-            )
+        _ensure_rag_ready()
         
         logger.info(f"Processing query: {request.query}")
         logger.info(f"Conversation history length: {len(request.conversation_history) if request.conversation_history else 0}")
@@ -308,11 +339,7 @@ async def ask_question_v1(request: RecipeRequest):
     Use this if you don't need conversation context.
     """
     try:
-        if not rag_service.is_initialized:
-            raise HTTPException(
-                status_code=503, 
-                detail="RAG system not initialized. Please try again in a moment."
-            )
+        _ensure_rag_ready()
         
         logger.info(f"Processing query (v1): {request.query}")
         

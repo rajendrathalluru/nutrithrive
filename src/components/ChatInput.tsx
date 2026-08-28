@@ -5,6 +5,8 @@ import { BackendService } from '../services/backendService';
 interface ChatInputProps {
   input: string;
   isLoading: boolean;
+  backendReady: boolean;
+  backendStatusMessage: string;
   onInputChange: (value: string) => void;
   onSend: () => void;
   onKeyPress: (e: React.KeyboardEvent) => void;
@@ -15,6 +17,8 @@ const backendService = BackendService.getInstance();
 const ChatInput: React.FC<ChatInputProps> = ({
   input,
   isLoading,
+  backendReady,
+  backendStatusMessage,
   onInputChange,
   onSend
 }) => {
@@ -269,13 +273,18 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (!isListening && !isTranscribing && !isConnectingVoice) {
+      if (!isListening && !isTranscribing && !isConnectingVoice && backendReady) {
         onSend();
       }
     }
   };
 
   const startVoiceInput = async () => {
+    if (!backendReady) {
+      setVoiceError(backendStatusMessage);
+      return;
+    }
+
     if (!voiceSupported || isConnectingVoice) {
       setVoiceError('Voice input is not supported in this browser.');
       return;
@@ -344,6 +353,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     : 'Describe your dietary needs, ingredients available, or ask for recipe ideas...';
 
   const statusText = voiceError
+    || (!backendReady
+      ? backendStatusMessage
+      : '')
     || (isConnectingVoice
       ? 'Connecting live voice session...'
       : isListening
@@ -385,7 +397,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 <button
                   type="button"
                   onClick={handleToggleVoice}
-                  disabled={isConnectingVoice || isTranscribing}
+                  disabled={!backendReady || isConnectingVoice || isTranscribing}
                   className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-300"
                   aria-label="Start voice input"
                   title="Start voice input"
@@ -415,7 +427,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             {!isListening && (
               <button
                 onClick={onSend}
-                disabled={!input.trim() || isLoading || isConnectingVoice || isTranscribing}
+                disabled={!backendReady || !input.trim() || isLoading || isConnectingVoice || isTranscribing}
                 className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 shadow-lg shadow-slate-900/15"
                 aria-label="Send message"
               >

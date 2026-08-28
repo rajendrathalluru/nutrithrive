@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Menu } from 'lucide-react';
-import { Chat, Message, NutriThriveChatbotProps } from '../types';
+import { BackendHealth, Chat, Message, NutriThriveChatbotProps } from '../types';
 import {BackendService} from '../services/backendService';
 import Sidebar from './Sidebar';
 import ChatInput from './ChatInput';
@@ -28,7 +28,14 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [backendConnected, setBackendConnected] = useState<boolean | null>(null);
+  const [backendHealth, setBackendHealth] = useState<BackendHealth>({
+    status: 'starting',
+    message: 'Recipe engine is warming up',
+    model_loaded: false,
+    recipes_count: 0,
+    startup_in_progress: true,
+    initialization_error: null
+  });
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const backendService = BackendService.getInstance();
@@ -56,15 +63,31 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
     scrollToBottom();
   }, [messages]);
 
-  // Check backend connection on component mount
   useEffect(() => {
-    const checkBackend = async () => {
-      const connected = await backendService.checkHealth();
-      setBackendConnected(connected);
+    let cancelled = false;
+
+    const pollBackendHealth = async () => {
+      const nextHealth = await backendService.getHealth();
+      if (!cancelled) {
+        setBackendHealth(nextHealth);
+      }
     };
-    
-    checkBackend();
+
+    void pollBackendHealth();
+    const intervalId = window.setInterval(() => {
+      void pollBackendHealth();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, [backendService]);
+
+  const backendReady = backendHealth.status === 'healthy';
+  const backendStatusMessage = backendHealth.status === 'starting'
+    ? 'Recipe engine is warming up'
+    : backendHealth.message;
 
   const createNewChat = () => {
     const newChat: Chat = {
@@ -88,7 +111,7 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
 
   // Use useCallback to memoize the send function
   const handleSend = useCallback(async () => {
-    if (!input.trim() || isLoading || !currentChat) return;
+    if (!input.trim() || isLoading || !currentChat || !backendReady) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -135,17 +158,17 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
           content: msg.content
         }));
 
-      console.log('📝 Sending conversation history:', {
-        length: historyForBackend.length,
-        messages: historyForBackend.map(m => ({ role: m.role, content: m.content.slice(0, 50) + '...' }))
-      });
-
       // Pass conversation history to backend
       const { recipes, backendData } = await backendService.searchRecipes(
         input, 
         historyForBackend
       );
-      setBackendConnected(true);
+      setBackendHealth((previous) => ({
+        ...previous,
+        status: 'healthy',
+        message: 'Service is running',
+        model_loaded: true
+      }));
       
       // Use the exact response content from backend
       const responseContent = backendData?.response || 
@@ -172,7 +195,13 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
           : chat
       ));
     } catch (error) {
-      setBackendConnected(false);
+      setBackendHealth({
+        status: 'offline',
+        message: 'Recipe service is offline.',
+        model_loaded: false,
+        recipes_count: 0,
+        initialization_error: error instanceof Error ? error.message : null
+      });
       const errorText = error instanceof Error
         ? error.message
         : `Unable to connect to the backend service at ${backendService.getBaseUrl()}.`;
@@ -196,7 +225,7 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, currentChat, currentChatId, backendService]);
+  }, [input, isLoading, currentChat, currentChatId, backendReady, backendService]);
 
   // Handle Enter key in input
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
@@ -245,15 +274,19 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
                 {conversationHistory.length > 1 && `${conversationHistory.length} messages`}
               </div>
               <div className={`flex items-center gap-2 text-sm rounded-full px-3 py-2 border ${
-                backendConnected === true ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : 
-                backendConnected === false ? 'text-rose-700 bg-rose-50 border-rose-100' : 'text-amber-700 bg-amber-50 border-amber-100'
+                backendHealth.status === 'healthy' ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : 
+                backendHealth.status === 'starting' ? 'text-amber-700 bg-amber-50 border-amber-100' :
+                'text-rose-700 bg-rose-50 border-rose-100'
               }`}>
                 <div className={`w-2 h-2 rounded-full ${
-                  backendConnected === true ? 'bg-emerald-500' : 
-                  backendConnected === false ? 'bg-rose-500' : 'bg-amber-500'
+                  backendHealth.status === 'healthy' ? 'bg-emerald-500' : 
+                  backendHealth.status === 'starting' ? 'bg-amber-500' : 'bg-rose-500'
                 }`} />
-                {backendConnected === true ? 'Connected' : 
-                 backendConnected === false ? 'Offline' : 'Connecting...'}
+                {backendHealth.status === 'healthy'
+                  ? 'Connected'
+                  : backendHealth.status === 'starting'
+                    ? 'Warming up'
+                    : 'Offline'}
               </div>
             </div>
           </div>
@@ -274,6 +307,8 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
           <ChatInput
             input={input}
             isLoading={isLoading}
+            backendReady={backendReady}
+            backendStatusMessage={backendStatusMessage}
             onInputChange={setInput}
             onSend={handleSend}
             onKeyPress={handleKeyPress}

@@ -57,3 +57,12 @@ export interface QueryRequest {
   mode: string;
   conversation_history?: ChatMessage[];
 }
+
+export interface BackendHealth {
+  status: 'healthy' | 'starting' | 'failed' | 'offline';
+  message: string;
+  model_loaded: boolean;
+  recipes_count: number;
+  startup_in_progress?: boolean;
+  initialization_error?: string | null;
+}
