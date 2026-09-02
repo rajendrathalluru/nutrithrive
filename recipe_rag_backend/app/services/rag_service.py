@@ -101,7 +101,8 @@ class RecipeRAGService:
     def _normalize_recipe_request(self, query: str) -> str:
         replacements = {
             r"\bmaggie\b": "Maggi",
-            r"\bbindi\b": "Bhindi"
+            r"\bbindi\b": "Bhindi",
+            r"\bpanner\b": "Paneer"
         }
         normalized_query = query
         for pattern, replacement in replacements.items():
@@ -314,6 +315,14 @@ class RecipeRAGService:
                     intent_data,
                     failed_recipes
                 )
+
+                if not generated_recipes:
+                    logger.warning("Initial AI recipe generation returned no usable recipes - retrying once")
+                    generated_recipes = self.recipe_enhancer.generate_fallback_recipes(
+                        f"Create a complete {normalized_recipe_request} with ingredients and step-by-step instructions.",
+                        intent_data,
+                        []
+                    )
                 
                 if generated_recipes:
                     source_docs = generated_recipes

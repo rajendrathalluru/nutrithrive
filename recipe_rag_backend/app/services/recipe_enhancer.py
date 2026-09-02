@@ -387,8 +387,8 @@ OUTPUT FORMAT (valid JSON only):
     {{
         "name": "Nutrition-Optimized Recipe Name",
         "type": "Main Dish|Side Dish|Soup|Smoothie|Breakfast|Snack",
-        "calories": estimated_number,
-        "protein_grams": estimated_grams (aim for 20-30g),
+        "calories": 420,
+        "protein_grams": 24,
         "ingredients": [
             "1 cup ingredient one",
             "4 oz ingredient two",
@@ -406,6 +406,7 @@ OUTPUT FORMAT (valid JSON only):
     }}
 ]
 
+Return only the JSON array. Use JSON numbers for calories and protein_grams, with no comments, placeholders, or markdown fences.
 Generate practical, safe, nutrition-optimized recipes that meet ALL constraints and AICR guidelines.
 """
 
@@ -487,12 +488,30 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
         cleaned = cleaned.strip()
 
         try:
-            return json.loads(cleaned)
+            payload = json.loads(cleaned)
         except json.JSONDecodeError:
             match = re.search(r"\[\s*\{.*\}\s*\]", cleaned, re.DOTALL)
             if match:
-                return json.loads(match.group(0))
-            raise
+                payload = json.loads(match.group(0))
+            else:
+                object_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+                if not object_match:
+                    raise
+                payload = json.loads(object_match.group(0))
+
+        if isinstance(payload, list):
+            return [recipe for recipe in payload if isinstance(recipe, dict)]
+
+        if isinstance(payload, dict):
+            for key in ("recipes", "results", "data"):
+                recipes = payload.get(key)
+                if isinstance(recipes, list):
+                    return [recipe for recipe in recipes if isinstance(recipe, dict)]
+
+            if payload.get("name") and isinstance(payload.get("ingredients"), list):
+                return [payload]
+
+        return []
 
     def generate_helpful_no_results_message(self, query: str, intent_data: Dict[str, Any]) -> str:
         """Generate a helpful message when no recipes can be found or generated"""
