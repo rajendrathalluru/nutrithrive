@@ -240,8 +240,6 @@ export class BackendService {
     const tags = [];
     
     if (doc.type) tags.push(cleanBackendText(doc.type));
-    if (doc.aicr_compliance?.overall_compliant) tags.push('AICR Verified');
-    if (doc.instructions_generated) tags.push('AI Enhanced');
     if (doc.dynamically_adapted) tags.push('Adapted');
     
     // Add equipment tags
