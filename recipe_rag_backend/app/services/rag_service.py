@@ -72,6 +72,35 @@ class RecipeRAGService:
 
         return deduplicated
 
+    def _has_database_match_for_specific_request(
+        self,
+        query: str,
+        recipes: List[Dict[str, Any]]
+    ) -> bool:
+        generic_terms = {
+            "a", "an", "and", "any", "can", "for", "give", "how", "i", "make", "me",
+            "please", "recipe", "recipes", "show", "the", "to", "want", "with"
+        }
+        query_terms = {
+            term for term in re.findall(r"[a-z0-9]+", query.lower())
+            if len(term) >= 4 and term not in generic_terms
+        }
+
+        if not query_terms:
+            return True
+
+        recipe_text = " ".join(
+            " ".join(
+                str(recipe.get(field, ""))
+                for field in ("name", "type", "description", "ingredients", "content")
+            ).lower()
+            for recipe in recipes
+        )
+        return any(term in recipe_text for term in query_terms)
+
+    def _normalize_recipe_request(self, query: str) -> str:
+        return re.sub(r"\bmaggie\b", "Maggi", query, flags=re.IGNORECASE)
+
     def _build_recipe_data_from_doc(self, doc: Any) -> Dict[str, Any]:
         recipe_id = self.search_engine.safe_get_metadata(doc, "recipe_id", "")
         recipe_name = self.search_engine.safe_get_metadata(doc, "name")
@@ -260,15 +289,20 @@ class RecipeRAGService:
             # Separate passed/failed
             verified_recipes = [r for r in candidate_recipes if r.get("verification_details", {}).get("passes_verification")]
             failed_recipes = [r for r in candidate_recipes if not r.get("verification_details", {}).get("passes_verification")]
+            has_database_match = self._has_database_match_for_specific_request(query, candidate_recipes)
             
             logger.info(f"Verification: {len(verified_recipes)} passed, {len(failed_recipes)} failed")
             
             # Step 6: Generate fallback if needed with AICR guidelines
             source_docs = verified_recipes
             
-            if not verified_recipes:
-                logger.warning("No recipes passed - generating AICR-compliant custom recipes")
-                generated_recipes = self.recipe_enhancer.generate_fallback_recipes(effective_query, intent_data, failed_recipes)
+            if not verified_recipes or not has_database_match:
+                logger.warning("No relevant database recipe found - generating AICR-compliant custom recipes")
+                generated_recipes = self.recipe_enhancer.generate_fallback_recipes(
+                    self._normalize_recipe_request(query),
+                    intent_data,
+                    failed_recipes
+                )
                 
                 if generated_recipes:
                     source_docs = generated_recipes
@@ -404,7 +438,7 @@ class RecipeRAGService:
         )
 
     def _has_name_like_reference(self, normalized_query: str) -> bool:
-        name_reference_matches = re.finditer(r"\b(?:for|patient|member)\s+([a-z]+(?:\s+[a-z]+){0,2})\b", normalized_query)
+        name_reference_matches = re.finditer(r"\b(?:patient|member)\s+([a-z]+(?:\s+[a-z]+){0,2})\b", normalized_query)
         excluded_terms = {
             "breakfast", "lunch", "dinner", "snack", "dessert", "meal", "meals", "recipe", "recipes",
             "diet", "diets", "nutrition", "healthy", "nutritious", "vegetarian", "vegan", "protein",
