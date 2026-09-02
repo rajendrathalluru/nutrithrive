@@ -20,6 +20,9 @@ export interface Recipe {
   aicrVerified: boolean;
   instructionsGenerated?: boolean;
   source?: string;
+  sourceLabel?: string;
+  sourceUrl?: string;
+  sourceName?: string;
   verificationDetails?: any;
   helpfulTips?: string[];
   ingredientAdaptations?: string[];

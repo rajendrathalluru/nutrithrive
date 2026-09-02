@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle, Zap, AlertCircle, FileText, Hash, Users, Clock } from 'lucide-react';
+import { CheckCircle, Zap, AlertCircle, FileText, Hash, Users, Clock, ExternalLink } from 'lucide-react';
 import { Recipe } from '../types';
 
 interface RecipeCardProps {
@@ -14,6 +14,11 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
   const ingredientAdaptations = Array.isArray(recipe.ingredientAdaptations)
     ? recipe.ingredientAdaptations.filter(Boolean)
     : [];
+  const isAiGenerated = recipe.source === 'llm_generated';
+  const sourceLabel = recipe.sourceLabel || (isAiGenerated ? 'AI Generated' : 'Sourced from AICR');
+  const sourceUrl = typeof recipe.sourceUrl === 'string' && /^https?:\/\//i.test(recipe.sourceUrl)
+    ? recipe.sourceUrl
+    : '';
   const nutritionItems = [
     recipe.nutrition?.protein !== undefined && recipe.nutrition?.protein !== null
       ? { label: 'protein', value: `${recipe.nutrition.protein}g` }
@@ -33,6 +38,14 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
         <div className="flex items-start justify-between mb-3">
           <h3 className="font-semibold text-slate-900 text-xl leading-tight">{recipe.title}</h3>
           <div className="flex flex-col items-end gap-1">
+            <span className={`text-xs px-2.5 py-1 rounded-full flex items-center gap-1 border ${
+              isAiGenerated
+                ? 'bg-violet-50 text-violet-700 border-violet-100'
+                : 'bg-sky-50 text-sky-700 border-sky-100'
+            }`}>
+              {isAiGenerated && <Zap className="w-3 h-3" />}
+              {sourceLabel}
+            </span>
             {recipe.aicrVerified && (
               <span className="bg-emerald-50 text-emerald-700 text-xs px-2.5 py-1 rounded-full flex items-center gap-1 border border-emerald-100">
                 <CheckCircle className="w-3 h-3" />
@@ -93,6 +106,18 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
               </span>
             ))}
           </div>
+        )}
+
+        {sourceUrl && !isAiGenerated && (
+          <a
+            href={sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-sky-700 hover:text-sky-800"
+          >
+            View original recipe from {recipe.sourceName || 'AICR'}
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
         )}
         
         {/* Expand/Collapse Button */}

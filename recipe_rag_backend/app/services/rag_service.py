@@ -82,6 +82,17 @@ class RecipeRAGService:
         if full_recipe_record:
             recipe_id = full_recipe_record.get("recipe_id", recipe_id)
 
+        recipe_link = (
+            full_recipe_record.get("Recipe Link", "")
+            if full_recipe_record
+            else self.search_engine.safe_get_metadata(doc, "recipe_link", "")
+        )
+        source_name = (
+            full_recipe_record.get("Source Name (AICR or ACS)", "")
+            if full_recipe_record
+            else self.search_engine.safe_get_metadata(doc, "source_name", "")
+        )
+
         return {
             "recipe_id": recipe_id,
             "name": recipe_name,
@@ -89,6 +100,8 @@ class RecipeRAGService:
             "calories": self.search_engine.safe_get_metadata(doc, "calories", 0),
             "content": recipe_content,
             "youtube_link": self.search_engine.safe_get_metadata(doc, "youtube_link", ""),
+            "recipe_link": recipe_link,
+            "source_name": source_name,
             "database_record_found": bool(full_recipe_record),
             **recipe_details
         }
@@ -169,6 +182,11 @@ class RecipeRAGService:
             source_tier = self._classify_recipe_source_tier(annotated_recipe)
             annotated_recipe["source_tier"] = source_tier
             annotated_recipe["source"] = source_tier
+            annotated_recipe["source_label"] = (
+                "AI Generated"
+                if source_tier == "llm_generated"
+                else f"Sourced from {annotated_recipe.get('source_name') or 'AICR'}"
+            )
             annotated_recipes.append(annotated_recipe)
         return annotated_recipes
 

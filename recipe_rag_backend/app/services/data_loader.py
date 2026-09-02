@@ -40,7 +40,10 @@ class DataLoader:
     
     def _clean_data(self):
         self.df = self.df.fillna('')
-        text_columns = ['Name', 'Type', 'Description', 'Ingredients', 'Directions', 'Notes', 'YT Link']
+        text_columns = [
+            'Name', 'Type', 'Description', 'Ingredients', 'Directions', 'Notes', 'YT Link',
+            'Recipe Link', 'Source Name (AICR or ACS)'
+        ]
         for col in text_columns:
             if col in self.df.columns:
                 self.df[col] = self.df[col].astype(str).apply(self._clean_text)
@@ -88,7 +91,9 @@ Notes: {row['Notes'] if row['Notes'] else 'No additional notes'}
                 "type": row['Type'],
                 "calories": float(row['Calories']) if row['Calories'] and str(row['Calories']).replace('.', '').isdigit() else 0,
                 "has_video": bool(row['YT Link']),
-                "youtube_link": row['YT Link'] if row['YT Link'] else ""
+                "youtube_link": row['YT Link'] if row['YT Link'] else "",
+                "recipe_link": row.get('Recipe Link', ''),
+                "source_name": row.get('Source Name (AICR or ACS)', '')
             }
             documents.append(Document(page_content=recipe_text, metadata=metadata))
         
