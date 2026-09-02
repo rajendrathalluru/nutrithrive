@@ -477,6 +477,41 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             logger.error(traceback.format_exc())
             return []
 
+    def generate_structured_fallback_recipe(
+        self,
+        query: str,
+        intent_data: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        recipe_name = re.sub(r"\s+", " ", query).strip().title() or "Custom Recipe"
+        recipe = {
+            "name": recipe_name,
+            "type": "CUSTOM",
+            "description": f"AI-generated recipe created for the request: {query}.",
+            "ingredients": [],
+            "instructions": [],
+            "needs_instruction_generation": True,
+            "generated_by_llm": True
+        }
+
+        enhanced_recipe = self.enhance_single_recipe(recipe, intent_data, True)
+        ingredients = [item for item in enhanced_recipe.get("ingredients", []) if str(item).strip()]
+        instructions = [item for item in enhanced_recipe.get("instructions", []) if str(item).strip()]
+        if not ingredients or not instructions:
+            logger.error("Structured recipe fallback returned incomplete content for '%s'", recipe_name)
+            return []
+
+        aicr_compliance = self.aicr_service.validate_recipe_compliance(enhanced_recipe)
+        enhanced_recipe["aicr_compliance"] = aicr_compliance
+        enhanced_recipe["generated_by_llm"] = True
+        enhanced_recipe["meets_requirements"] = aicr_compliance["overall_compliant"]
+        enhanced_recipe["verification_details"] = {
+            "passes_verification": aicr_compliance["overall_compliant"],
+            "verification_score": aicr_compliance["score"],
+            "reasoning": f"AI-generated recipe with compliance score: {aicr_compliance['score']}/100",
+            "constraint_violations": aicr_compliance["warnings"]
+        }
+        return [enhanced_recipe]
+
     def _parse_generated_recipe_response(self, response: str) -> List[Dict[str, Any]]:
         cleaned = response.strip()
         if cleaned.startswith("```json"):

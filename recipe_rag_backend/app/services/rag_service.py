@@ -102,7 +102,8 @@ class RecipeRAGService:
         replacements = {
             r"\bmaggie\b": "Maggi",
             r"\bbindi\b": "Bhindi",
-            r"\bpanner\b": "Paneer"
+            r"\bpanner\b": "Paneer",
+            r"\baneer\b": "Paneer"
         }
         normalized_query = query
         for pattern, replacement in replacements.items():
@@ -322,6 +323,13 @@ class RecipeRAGService:
                         f"Create a complete {normalized_recipe_request} with ingredients and step-by-step instructions.",
                         intent_data,
                         []
+                    )
+
+                if not generated_recipes:
+                    logger.warning("JSON recipe generation failed - using structured recipe fallback")
+                    generated_recipes = self.recipe_enhancer.generate_structured_fallback_recipe(
+                        normalized_recipe_request,
+                        intent_data
                     )
                 
                 if generated_recipes:
