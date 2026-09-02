@@ -96,10 +96,17 @@ class RecipeRAGService:
             ).lower()
             for recipe in recipes
         )
-        return any(term in recipe_text for term in query_terms)
+        return all(term in recipe_text for term in query_terms)
 
     def _normalize_recipe_request(self, query: str) -> str:
-        return re.sub(r"\bmaggie\b", "Maggi", query, flags=re.IGNORECASE)
+        replacements = {
+            r"\bmaggie\b": "Maggi",
+            r"\bbindi\b": "Bhindi"
+        }
+        normalized_query = query
+        for pattern, replacement in replacements.items():
+            normalized_query = re.sub(pattern, replacement, normalized_query, flags=re.IGNORECASE)
+        return normalized_query
 
     def _build_recipe_data_from_doc(self, doc: Any) -> Dict[str, Any]:
         recipe_id = self.search_engine.safe_get_metadata(doc, "recipe_id", "")
@@ -289,7 +296,11 @@ class RecipeRAGService:
             # Separate passed/failed
             verified_recipes = [r for r in candidate_recipes if r.get("verification_details", {}).get("passes_verification")]
             failed_recipes = [r for r in candidate_recipes if not r.get("verification_details", {}).get("passes_verification")]
-            has_database_match = self._has_database_match_for_specific_request(query, candidate_recipes)
+            normalized_recipe_request = self._normalize_recipe_request(query)
+            has_database_match = self._has_database_match_for_specific_request(
+                normalized_recipe_request,
+                candidate_recipes
+            )
             
             logger.info(f"Verification: {len(verified_recipes)} passed, {len(failed_recipes)} failed")
             
@@ -299,7 +310,7 @@ class RecipeRAGService:
             if not verified_recipes or not has_database_match:
                 logger.warning("No relevant database recipe found - generating AICR-compliant custom recipes")
                 generated_recipes = self.recipe_enhancer.generate_fallback_recipes(
-                    self._normalize_recipe_request(query),
+                    normalized_recipe_request,
                     intent_data,
                     failed_recipes
                 )
