@@ -235,7 +235,7 @@ On every push to `main`, the workflow:
 1. Logs into GitHub Container Registry
 2. Builds the root `Dockerfile`
 3. Pushes the image with both commit SHA and `latest` tags to `ghcr.io`
-4. Deploys the `latest` image to Azure App Service using the publish profile
+4. Deploys the commit-specific image to Azure App Service using the publish profile
 
 You can also run it manually from the GitHub Actions tab with `workflow_dispatch`.
 
