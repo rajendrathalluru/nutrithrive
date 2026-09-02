@@ -449,10 +449,21 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
                 if aicr_compliance["overall_compliant"]:
                     formatted_recipes.append(formatted_recipe)
                     logger.info(f"✓ Recipe '{formatted_recipe['name']}' AICR validated - Score: {aicr_compliance['score']}")
+                elif formatted_recipe["ingredients"] and formatted_recipe["instructions"]:
+                    formatted_recipes.append(formatted_recipe)
+                    logger.warning(
+                        "Returning AI-generated recipe '%s' with AICR validation warnings - Score: %s",
+                        formatted_recipe["name"],
+                        aicr_compliance["score"]
+                    )
                 else:
-                    logger.warning(f"✗ Recipe '{formatted_recipe['name']}' failed AICR validation - Score: {aicr_compliance['score']}")
+                    logger.warning(
+                        "Discarding incomplete AI-generated recipe '%s' - Score: %s",
+                        formatted_recipe["name"],
+                        aicr_compliance["score"]
+                    )
             
-            logger.info(f"Generated {len(formatted_recipes)} AICR-compliant recipes")
+            logger.info(f"Generated {len(formatted_recipes)} AI recipes")
             return formatted_recipes
             
         except json.JSONDecodeError as e:

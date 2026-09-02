@@ -44,21 +44,7 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
                 <Zap className="w-3 h-3" />
                 {sourceLabel}
               </span>
-            ) : sourceUrl ? (
-              <a
-                href={sourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="bg-sky-50 text-sky-700 text-xs px-2.5 py-1 rounded-full flex items-center gap-1 border border-sky-100 hover:bg-sky-100"
-              >
-                {sourceName}
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            ) : (
-              <span className="bg-sky-50 text-sky-700 text-xs px-2.5 py-1 rounded-full border border-sky-100">
-                {sourceName}
-              </span>
-            )}
+            ) : null}
           </div>
         </div>
         
@@ -107,6 +93,18 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
               </span>
             ))}
           </div>
+        )}
+
+        {!isAiGenerated && sourceUrl && (
+          <a
+            href={sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-sky-700 underline underline-offset-2 hover:text-sky-800"
+          >
+            Source: {sourceName}
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
         )}
 
         {/* Expand/Collapse Button */}
