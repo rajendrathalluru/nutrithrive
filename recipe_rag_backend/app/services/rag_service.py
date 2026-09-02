@@ -283,6 +283,11 @@ class RecipeRAGService:
                     continue
             
             candidate_recipes = self._deduplicate_recipes(candidate_recipes)
+            normalized_recipe_request = self._normalize_recipe_request(query)
+            has_database_match = self._has_database_match_for_specific_request(
+                normalized_recipe_request,
+                candidate_recipes
+            )
             logger.info(f"Extraction complete: {time.time() - start_time:.2f}s")
 
             # Step 4.5: Fill missing ingredients/instructions before verification
@@ -296,11 +301,6 @@ class RecipeRAGService:
             # Separate passed/failed
             verified_recipes = [r for r in candidate_recipes if r.get("verification_details", {}).get("passes_verification")]
             failed_recipes = [r for r in candidate_recipes if not r.get("verification_details", {}).get("passes_verification")]
-            normalized_recipe_request = self._normalize_recipe_request(query)
-            has_database_match = self._has_database_match_for_specific_request(
-                normalized_recipe_request,
-                candidate_recipes
-            )
             
             logger.info(f"Verification: {len(verified_recipes)} passed, {len(failed_recipes)} failed")
             
