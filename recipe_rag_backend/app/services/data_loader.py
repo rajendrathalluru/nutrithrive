@@ -61,7 +61,6 @@ class DataLoader:
         for unicode_char, ascii_char in replacements.items():
             text = text.replace(unicode_char, ascii_char)
         
-        text = text.encode('ascii', 'ignore').decode('ascii')
         lines = []
         for raw_line in text.splitlines():
             cleaned_line = ' '.join(raw_line.split()).strip()
