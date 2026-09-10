@@ -155,7 +155,9 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
         .filter(msg => !msg.isLoading)
         .map(msg => ({
           role: msg.role,
-          content: msg.content
+          content: msg.role === 'assistant' && msg.recipes?.length
+            ? `${msg.content}\nPreviously shown recipes: ${msg.recipes.map(recipe => recipe.title).join(' | ')}`
+            : msg.content
         }));
 
       // Pass conversation history to backend

@@ -15,6 +15,7 @@ from app.services.search_engine import SearchEngine
 from app.services.response_generator import ResponseGenerator
 
 logger = logging.getLogger(__name__)
+MAX_RECIPES_PER_RESPONSE = 3
 
 class RecipeRAGService:
     def __init__(self):
@@ -109,6 +110,64 @@ class RecipeRAGService:
         for pattern, replacement in replacements.items():
             normalized_query = re.sub(pattern, replacement, normalized_query, flags=re.IGNORECASE)
         return normalized_query
+
+    def _is_more_recipes_query(self, query: str) -> bool:
+        normalized = re.sub(r"\s+", " ", query.lower()).strip()
+        patterns = [
+            r"\bmore recipes?\b",
+            r"\bmore options?\b",
+            r"\banother recipes?\b",
+            r"\bother recipes?\b",
+            r"\bshow (?:me )?(?:more|others?)\b",
+            r"\bwhat else\b"
+        ]
+        return any(re.search(pattern, normalized) for pattern in patterns)
+
+    def _get_previous_recipe_request(
+        self,
+        conversation_history: Optional[List[Dict]] = None
+    ) -> Optional[str]:
+        for message in reversed(conversation_history or []):
+            if not isinstance(message, dict) or str(message.get("role", "")).lower() != "user":
+                continue
+
+            content = str(message.get("content", "")).strip()
+            if content and not self._is_more_recipes_query(content):
+                return content
+
+        return None
+
+    def _get_previously_shown_recipe_names(
+        self,
+        conversation_history: Optional[List[Dict]] = None
+    ) -> set[str]:
+        shown_names: set[str] = set()
+        marker = "previously shown recipes:"
+
+        for message in conversation_history or []:
+            if not isinstance(message, dict) or str(message.get("role", "")).lower() != "assistant":
+                continue
+
+            content = str(message.get("content", ""))
+            for line in content.splitlines():
+                if marker not in line.lower():
+                    continue
+                names = line.split(":", 1)[1].split("|")
+                shown_names.update(self._normalize_recipe_name(name) for name in names if name.strip())
+
+        return shown_names
+
+    def _exclude_previously_shown_recipes(
+        self,
+        recipes: List[Dict[str, Any]],
+        shown_names: set[str]
+    ) -> List[Dict[str, Any]]:
+        if not shown_names:
+            return recipes
+        return [
+            recipe for recipe in recipes
+            if self._normalize_recipe_name(recipe.get("name", "")) not in shown_names
+        ]
 
     def _build_recipe_data_from_doc(self, doc: Any) -> Dict[str, Any]:
         recipe_id = self.search_engine.safe_get_metadata(doc, "recipe_id", "")
@@ -262,10 +321,15 @@ class RecipeRAGService:
                 logger.info("Detected small-talk query, returning conversational response")
                 return self._build_small_talk_response(query, mode, conversation_history)
 
+            is_more_request = self._is_more_recipes_query(query)
+            previous_recipe_request = self._get_previous_recipe_request(conversation_history)
+            recipe_request_query = previous_recipe_request if is_more_request and previous_recipe_request else query
+            previously_shown_names = self._get_previously_shown_recipe_names(conversation_history)
+
             # Step 1: Enhanced intent understanding with conversation context
-            intent_data = self.intent_analyzer.understand_query_intent_with_context(query, conversation_history)
+            intent_data = self.intent_analyzer.understand_query_intent_with_context(recipe_request_query, conversation_history)
             logger.info(f"Intent analysis: {time.time() - start_time:.2f}s")
-            effective_query = intent_data.get("search_strategy", {}).get("enhanced_query") or query
+            effective_query = intent_data.get("search_strategy", {}).get("enhanced_query") or recipe_request_query
             
             # Step 2: Multi-query search
             docs = self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
@@ -285,7 +349,7 @@ class RecipeRAGService:
                     continue
             
             candidate_recipes = self._deduplicate_recipes(candidate_recipes)
-            normalized_recipe_request = self._normalize_recipe_request(query)
+            normalized_recipe_request = self._normalize_recipe_request(recipe_request_query)
             has_database_match = self._has_database_match_for_specific_request(
                 normalized_recipe_request,
                 candidate_recipes
@@ -311,8 +375,14 @@ class RecipeRAGService:
             
             if not verified_recipes or not has_database_match:
                 logger.warning("No relevant database recipe found - generating AICR-compliant custom recipes")
+                generation_query = normalized_recipe_request
+                if is_more_request and previously_shown_names:
+                    generation_query += (
+                        ". Generate different recipes and do not repeat: "
+                        + ", ".join(sorted(previously_shown_names))
+                    )
                 generated_recipes = self.recipe_enhancer.generate_fallback_recipes(
-                    normalized_recipe_request,
+                    generation_query,
                     intent_data,
                     failed_recipes
                 )
@@ -349,7 +419,21 @@ class RecipeRAGService:
             source_docs = self.recipe_enhancer.batch_enhance_recipes(source_docs, intent_data)
             source_docs = self._deduplicate_recipes(source_docs)
             source_docs = self._annotate_recipe_source_tiers(source_docs)
+            if is_more_request:
+                source_docs = self._exclude_previously_shown_recipes(source_docs, previously_shown_names)
+            source_docs = source_docs[:MAX_RECIPES_PER_RESPONSE]
             logger.info(f"Enhancement complete: {time.time() - start_time:.2f}s")
+
+            if not source_docs:
+                return {
+                    "query": query,
+                    "response": "I don't have additional matching recipes to show right now.",
+                    "source": "no_results",
+                    "matches_found": 0,
+                    "mode": mode,
+                    "intent_analysis": intent_data,
+                    "source_documents": []
+                }
             
             # Step 8: Generate response
             response_text = self.response_generator.generate_personalized_response(effective_query, source_docs, intent_data)
@@ -775,7 +859,7 @@ class RecipeRAGService:
                 continue
 
         recipes = self._deduplicate_recipes(recipes)
-        return self._annotate_recipe_source_tiers(recipes)
+        return self._annotate_recipe_source_tiers(recipes)[:MAX_RECIPES_PER_RESPONSE]
     
     def get_system_info(self) -> Dict[str, Any]:
         """Get system information"""
