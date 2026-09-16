@@ -203,6 +203,13 @@ Return {top_k} best indices as JSON:
             end = normalized.find(".", match.end())
             end = len(normalized) if end == -1 else end + 1
             snippet = normalized[start:end].strip()
+            if "Description:" in snippet:
+                snippet = snippet.split("Description:", 1)[1].strip()
+            snippet = re.sub(r"^(?:Directions|Notes):\s*", "", snippet)
+            for field_marker in (" Calories:", " Ingredients:", " Directions:", " Notes:"):
+                marker_index = snippet.find(field_marker)
+                if marker_index > 0:
+                    snippet = snippet[:marker_index].strip()
             if snippet and snippet not in snippets:
                 snippets.append(snippet)
 

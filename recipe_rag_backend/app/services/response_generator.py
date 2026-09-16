@@ -31,6 +31,9 @@ class ResponseGenerator:
                 constraint_mentions.append(f"{', '.join(constraints['dietary_restrictions'])} diet")
             if constraints.get("leftover_friendly"):
                 constraint_mentions.append("suitable for leftovers and multiple sittings")
+
+            if constraints.get("leftover_friendly"):
+                return self._generate_leftover_friendly_response(source_docs)
             
             constraint_text = ", ".join(constraint_mentions) if constraint_mentions else ""
             
@@ -91,6 +94,22 @@ Avoid medical terminology or health condition references.
                 f"I found {len(source_docs)} recipe{'s' if len(source_docs) != 1 else ''} "
                 f"that match your request. Highlights include {highlighted_names}."
             )
+
+    def _generate_leftover_friendly_response(self, source_docs: List[Dict]) -> str:
+        recipe_count = len(source_docs)
+        lines = [
+            f"I found {recipe_count} recipe{'s' if recipe_count != 1 else ''} that can be divided across multiple sittings:"
+        ]
+
+        for recipe in source_docs[:3]:
+            evidence = str(
+                recipe.get("storage_evidence") or recipe.get("storage_instructions") or ""
+            ).strip()
+            evidence = evidence[:320].rstrip()
+            lines.append(f"• {recipe.get('name', 'Recipe')}: {evidence}")
+
+        lines.append("Open a recipe card for ingredients, directions, and complete storage guidance.")
+        return "\n".join(lines)
     
     def generate_helpful_no_results_message(self, query: str, intent_data: Dict[str, Any]) -> str:
         """Generate a helpful message when no recipes can be found or generated"""

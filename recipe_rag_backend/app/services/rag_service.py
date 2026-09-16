@@ -113,7 +113,7 @@ class RecipeRAGService:
 
         matching_recipes = []
         for recipe in recipes:
-            evidence = self.search_engine.extract_storage_evidence(recipe.get("content", ""))
+            evidence = self._get_recipe_storage_evidence(recipe)
             if not evidence:
                 continue
             recipe_with_evidence = dict(recipe)
@@ -121,6 +121,21 @@ class RecipeRAGService:
             matching_recipes.append(recipe_with_evidence)
 
         return matching_recipes
+
+    def _get_recipe_storage_evidence(self, recipe: Dict[str, Any]) -> str:
+        explicit_guidance = str(
+            recipe.get("storage_evidence") or recipe.get("storage_instructions") or ""
+        ).strip()
+        if explicit_guidance:
+            return explicit_guidance
+
+        searchable_fields = [
+            recipe.get("content", ""),
+            recipe.get("description", ""),
+            " ".join(str(item) for item in recipe.get("instructions", []) if item),
+            " ".join(str(item) for item in recipe.get("helpful_tips", []) if item),
+        ]
+        return self.search_engine.extract_storage_evidence("\n".join(map(str, searchable_fields)))
 
     def _normalize_recipe_request(self, query: str) -> str:
         replacements = {
@@ -196,22 +211,11 @@ class RecipeRAGService:
         recipe_id = self.search_engine.safe_get_metadata(doc, "recipe_id", "")
         recipe_name = self.search_engine.safe_get_metadata(doc, "name")
         full_recipe_record = self.data_loader.get_recipe_record(recipe_name)
+        if full_recipe_record:
+            return self._build_recipe_data_from_record(full_recipe_record)
+
         recipe_content = self.data_loader.build_recipe_text(full_recipe_record) or doc.page_content
         recipe_details = self.search_engine.extract_recipe_details(recipe_content)
-
-        if full_recipe_record:
-            recipe_id = full_recipe_record.get("recipe_id", recipe_id)
-
-        recipe_link = (
-            full_recipe_record.get("Recipe Link", "")
-            if full_recipe_record
-            else self.search_engine.safe_get_metadata(doc, "recipe_link", "")
-        )
-        source_name = (
-            full_recipe_record.get("Source Name (AICR or ACS)", "")
-            if full_recipe_record
-            else self.search_engine.safe_get_metadata(doc, "source_name", "")
-        )
 
         return {
             "recipe_id": recipe_id,
@@ -220,11 +224,54 @@ class RecipeRAGService:
             "calories": self.search_engine.safe_get_metadata(doc, "calories", 0),
             "content": recipe_content,
             "youtube_link": self.search_engine.safe_get_metadata(doc, "youtube_link", ""),
-            "recipe_link": recipe_link,
-            "source_name": source_name,
-            "database_record_found": bool(full_recipe_record),
+            "recipe_link": self.search_engine.safe_get_metadata(doc, "recipe_link", ""),
+            "source_name": self.search_engine.safe_get_metadata(doc, "source_name", ""),
+            "database_record_found": False,
             **recipe_details
         }
+
+    def _build_recipe_data_from_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        recipe_content = self.data_loader.build_recipe_text(record)
+        recipe_details = self.search_engine.extract_recipe_details(recipe_content)
+        calories = record.get("Calories", 0)
+        try:
+            calories = float(calories) if calories != "" else 0
+        except (TypeError, ValueError):
+            calories = 0
+
+        return {
+            "recipe_id": record.get("recipe_id", ""),
+            "name": record.get("Name", "Unknown"),
+            "type": record.get("Type", "Unknown"),
+            "calories": calories,
+            "content": recipe_content,
+            "youtube_link": record.get("YT Link", ""),
+            "recipe_link": record.get("Recipe Link", ""),
+            "source_name": record.get("Source Name (AICR or ACS)", ""),
+            "database_record_found": True,
+            **recipe_details
+        }
+
+    def _get_leftover_friendly_database_recipes(self, limit: int) -> List[Dict[str, Any]]:
+        if self.data_loader.df is None:
+            return []
+
+        ranked_recipes = []
+        for _, row in self.data_loader.df.iterrows():
+            record = row.to_dict()
+            recipe_content = self.data_loader.build_recipe_text(record)
+            storage_evidence = self.search_engine.extract_storage_evidence(recipe_content)
+            if not storage_evidence:
+                continue
+
+            recipe = self._build_recipe_data_from_record(record)
+            recipe["storage_evidence"] = storage_evidence
+            ranked_recipes.append((self.search_engine.storage_evidence_score(recipe_content), recipe))
+
+        ranked_recipes.sort(
+            key=lambda item: (-item[0], self._normalize_recipe_name(item[1].get("name", "")))
+        )
+        return [recipe for _, recipe in ranked_recipes[:limit]]
         
     def initialize(self):
         with self._initialization_lock:
@@ -370,9 +417,14 @@ class RecipeRAGService:
                 except Exception as e:
                     logger.error(f"Error extracting recipe: {e}")
                     continue
-            
+
             candidate_recipes = self._deduplicate_recipes(candidate_recipes)
             candidate_recipes = self._apply_deterministic_constraints(candidate_recipes, intent_data)
+            if (
+                intent_data.get("constraints", {}).get("leftover_friendly")
+                and not candidate_recipes
+            ):
+                candidate_recipes = self._get_leftover_friendly_database_recipes(settings.SEARCH_K)
             normalized_recipe_request = self._normalize_recipe_request(recipe_request_query)
             has_database_match = self._has_database_match_for_specific_request(
                 normalized_recipe_request,
@@ -443,6 +495,7 @@ class RecipeRAGService:
             # Step 7: PARALLEL ENHANCEMENT with AICR guidelines
             source_docs = self.recipe_enhancer.batch_enhance_recipes(source_docs, intent_data)
             source_docs = self._deduplicate_recipes(source_docs)
+            source_docs = self._apply_deterministic_constraints(source_docs, intent_data)
             source_docs = self._annotate_recipe_source_tiers(source_docs)
             if is_more_request:
                 source_docs = self._exclude_previously_shown_recipes(source_docs, previously_shown_names)

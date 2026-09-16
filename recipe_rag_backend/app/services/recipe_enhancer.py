@@ -430,6 +430,7 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             # STEP 5: Validate with AICR Service
             formatted_recipes = []
             for i, recipe in enumerate(generated_recipes[:3]):
+                storage_instructions = str(recipe.get("storage_instructions", "")).strip()
                 
                 # Validate against AICR guidelines
                 aicr_compliance = self.aicr_service.validate_recipe_compliance(recipe)
@@ -443,8 +444,8 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
                     "instructions": recipe.get("instructions", []),
                     "description": recipe.get("description", "Custom generated recipe for optimal nutrition"),
                     "nutrition_benefits": recipe.get("nutrition_benefits", ""),
-                    "storage_instructions": recipe.get("storage_instructions", ""),
-                    "storage_evidence": recipe.get("storage_instructions", ""),
+                    "storage_instructions": storage_instructions,
+                    "storage_evidence": storage_instructions,
                     "aicr_compliance": aicr_compliance,
                     "generated_by_llm": True,
                     "meets_requirements": aicr_compliance["overall_compliant"],
