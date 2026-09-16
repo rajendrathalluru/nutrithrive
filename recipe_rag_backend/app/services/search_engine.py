@@ -7,6 +7,28 @@ from langchain.schema import Document
 logger = logging.getLogger(__name__)
 
 class SearchEngine:
+    STORAGE_EVIDENCE_PATTERNS = [
+        re.compile(r"\b(?:refrigerate|freeze|store) (?:the )?leftovers?\b", re.IGNORECASE),
+        re.compile(
+            r"\bleftovers? (?:are|is|keep|keeps|can|may|will|store|stores|refrigerate|freeze)\b",
+            re.IGNORECASE
+        ),
+        re.compile(r"\b(?:good|great) leftovers?\b", re.IGNORECASE),
+        re.compile(
+            r"\bleftover [a-z][a-z -]{0,40} (?:keeps?|stores?|can be (?:frozen|refrigerated))\b",
+            re.IGNORECASE
+        ),
+        re.compile(r"\bmeal[- ]prep\b", re.IGNORECASE),
+        re.compile(r"\bmake[- ]ahead\b", re.IGNORECASE),
+        re.compile(r"\bbatch[- ]cook(?:ing|ed)?\b", re.IGNORECASE),
+        re.compile(
+            r"\b(?:store|stored|keeps?|refrigerate(?:d)?|freeze|frozen)\b.{0,100}"
+            r"\b(?:up to\s+)?\d+\s*(?:days?|weeks?|months?)\b",
+            re.IGNORECASE
+        ),
+        re.compile(r"\b(?:throughout the week|all week)\b", re.IGNORECASE)
+    ]
+
     def __init__(self):
         self.vector_store = None
         self.llm = None
@@ -63,6 +85,12 @@ class SearchEngine:
         
         if constraints.get("max_ingredients"):
             queries.append(f"simple {constraints['max_ingredients']} ingredient recipes")
+
+        if constraints.get("leftover_friendly"):
+            queries.extend([
+                "leftover friendly recipes refrigerate reheat stores for days",
+                "meal prep make ahead batch cooking freezer recipes"
+            ])
         
         if preferences.get("cuisine_types") or preferences.get("flavor_profiles"):
             cuisine_query = ""
@@ -87,19 +115,33 @@ class SearchEngine:
             return []
         
         try:
+            constraints = intent_data.get("constraints", {})
+            ranked_docs = docs
+            if constraints.get("leftover_friendly"):
+                ranked_docs = sorted(
+                    docs,
+                    key=lambda doc: self.storage_evidence_score(doc.page_content),
+                    reverse=True
+                )
+
             doc_summaries = []
-            for i, doc in enumerate(docs[:15]):
+            for i, doc in enumerate(ranked_docs[:15]):
                 name = self.safe_get_metadata(doc, "name")
                 recipe_type = self.safe_get_metadata(doc, "type")
-                doc_summaries.append(f"{i}. {name} ({recipe_type})")
-            
-            constraints = intent_data.get("constraints", {})
+                evidence = self.extract_storage_evidence(doc.page_content)
+                evidence_text = evidence or doc.page_content[:240].replace("\n", " ")
+                doc_summaries.append(f"{i}. {name} ({recipe_type}) — {evidence_text}")
             
             constraints_text = "Requirements:\n"
             if constraints.get("max_ingredients"):
                 constraints_text += f"- Max {constraints['max_ingredients']} ingredients\n"
             if constraints.get("dietary_restrictions"):
                 constraints_text += f"- {', '.join(constraints['dietary_restrictions'])}\n"
+            if constraints.get("leftover_friendly"):
+                constraints_text += (
+                    "- MUST be suitable for multiple sittings, with explicit evidence that it stores, "
+                    "refrigerates, freezes, reheats, or works for meal prep\n"
+                )
             
             rerank_prompt = f"""Rank these nutritious recipes: "{query}"
 
@@ -128,15 +170,43 @@ Return {top_k} best indices as JSON:
             
             reranked_docs = []
             for idx in selected_indices[:top_k]:
-                if 0 <= idx < len(docs):
-                    reranked_docs.append(docs[idx])
+                if 0 <= idx < len(ranked_docs):
+                    reranked_docs.append(ranked_docs[idx])
             
             logger.info(f"Reranked: selected {len(reranked_docs)} documents")
             return reranked_docs
             
         except Exception as e:
             logger.error(f"Error in reranking: {e}")
+            if intent_data.get("constraints", {}).get("leftover_friendly"):
+                return sorted(
+                    docs,
+                    key=lambda doc: self.storage_evidence_score(doc.page_content),
+                    reverse=True
+                )[:top_k]
             return docs[:top_k]
+
+    def storage_evidence_score(self, text: str) -> int:
+        return sum(1 for pattern in self.STORAGE_EVIDENCE_PATTERNS if pattern.search(str(text)))
+
+    def extract_storage_evidence(self, text: str) -> str:
+        normalized = re.sub(r"\s+", " ", str(text)).strip()
+        if not normalized:
+            return ""
+
+        snippets = []
+        for pattern in self.STORAGE_EVIDENCE_PATTERNS:
+            match = pattern.search(normalized)
+            if not match:
+                continue
+            start = max(0, normalized.rfind(".", 0, match.start()) + 1)
+            end = normalized.find(".", match.end())
+            end = len(normalized) if end == -1 else end + 1
+            snippet = normalized[start:end].strip()
+            if snippet and snippet not in snippets:
+                snippets.append(snippet)
+
+        return " ".join(snippets[:2])
     
     def extract_recipe_details(self, content: str) -> Dict[str, Any]:
         """Extract structured recipe details"""

@@ -29,6 +29,8 @@ class ResponseGenerator:
                 constraint_mentions.append(f"at least {constraints['min_ingredients']} ingredients")
             if constraints.get("dietary_restrictions"):
                 constraint_mentions.append(f"{', '.join(constraints['dietary_restrictions'])} diet")
+            if constraints.get("leftover_friendly"):
+                constraint_mentions.append("suitable for leftovers and multiple sittings")
             
             constraint_text = ", ".join(constraint_mentions) if constraint_mentions else ""
             
@@ -46,6 +48,8 @@ class ResponseGenerator:
                 # Add protein info if available
                 if doc.get("protein_grams"):
                     info += f", {doc['protein_grams']}g protein"
+                if doc.get("storage_evidence"):
+                    info += f". Storage evidence: {doc['storage_evidence']}"
                 
                 recipe_info.append(info)
             
@@ -63,9 +67,10 @@ Brief response (under 150 words):
 1. Acknowledge their recipe needs positively
 2. State the exact total number of recipes found using this exact number: {recipe_count}
 3. Highlight up to the first {min(3, recipe_count)} recipes with nutritional benefits (protein, easy to prepare, nourishing)
-3. Mention these follow evidence-based nutrition guidelines
-4. Brief encouragement about enjoying wholesome, satisfying meals
-5. Do not mention any recipe count other than {recipe_count}
+4. If leftover-friendly storage is requested, explicitly explain why each highlighted recipe can be divided across multiple sittings and summarize only the supplied storage evidence
+5. Mention these follow evidence-based nutrition guidelines
+6. Brief encouragement about enjoying wholesome, satisfying meals
+7. Do not mention any recipe count other than {recipe_count}
 
 Focus on:
 - Nutritional benefits and flavor
@@ -100,6 +105,8 @@ Avoid medical terminology or health condition references.
             constraint_summary.append(f"{', '.join(constraints['dietary_restrictions'])} diet")
         if constraints.get("equipment_only"):
             constraint_summary.append(f"using only {', '.join(constraints['equipment_only'])}")
+        if constraints.get("leftover_friendly"):
+            constraint_summary.append("suitable for storing and eating across multiple sittings")
         
         if constraint_summary:
             return f"I couldn't find or generate AICR-compliant recipes that meet all your requirements ({', '.join(constraint_summary)}). This combination might be too specific. Could you try:\n\n• Relaxing some constraints\n• Changing ingredient count requirements\n• Asking about different types of recipes\n• Being more flexible with dietary restrictions"

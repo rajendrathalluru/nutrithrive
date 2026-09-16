@@ -135,6 +135,16 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
                 </ul>
               </div>
             )}
+
+            {recipe.storageGuidance && (
+              <div className="bg-sky-50 rounded-2xl p-4 border border-sky-100">
+                <h4 className="font-medium text-sky-900 mb-2 flex items-center gap-2">
+                  <Clock className="w-4 h-4" />
+                  Storage &amp; Leftovers
+                </h4>
+                <p className="text-sm text-sky-800 leading-6">{recipe.storageGuidance}</p>
+              </div>
+            )}
             
             {/* Ingredients */}
             {ingredients.length > 0 && (

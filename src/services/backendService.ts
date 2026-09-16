@@ -213,6 +213,7 @@ export class BackendService {
           sourceName: doc.source_name || '',
           verificationDetails: doc.verification_details,
           helpfulTips: doc.helpful_tips ? doc.helpful_tips.map((tip: string) => cleanBackendText(tip)) : [],
+          storageGuidance: cleanBackendText(doc.storage_evidence || doc.storage_instructions || ''),
           ingredientAdaptations: doc.ingredient_adaptations ? doc.ingredient_adaptations.map((adapt: string) => cleanBackendText(adapt)) : [],
           aicrCompliance: doc.aicr_compliance,
           dynamicallyAdapted: doc.dynamically_adapted || false,

@@ -36,7 +36,7 @@ class IntentAnalyzer:
             
         except Exception as e:
             logger.error(f"Error understanding query intent: {e}")
-            return self._get_fallback_intent_data(query)
+            return self._post_process_intent(query, self._get_fallback_intent_data(query))
     
     def understand_query_intent_with_context(self, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
         """Enhanced intent analysis with conversation context"""
@@ -154,7 +154,8 @@ Extract the following information:
                 "dietary_restrictions": [],
                 "allergens_to_avoid": [],
                 "health_conditions": [],
-                "skill_level": None
+                "skill_level": None,
+                "leftover_friendly": False
             },
             "preferences": {
                 "cuisine_types": [],
@@ -195,6 +196,7 @@ Extract the following information:
         constraints.setdefault("dietary_restrictions", [])
         constraints.setdefault("allergens_to_avoid", [])
         constraints.setdefault("health_conditions", [])
+        constraints.setdefault("leftover_friendly", False)
         preferences.setdefault("cuisine_types", [])
         preferences.setdefault("meal_types", [])
         preferences.setdefault("nutritional_goals", [])
@@ -205,6 +207,7 @@ Extract the following information:
         meal_types = self._extract_meal_types(query_lower)
         nutritional_goals = self._extract_nutrition_goals(query_lower)
         symptoms = self._extract_symptoms(query_lower)
+        leftover_friendly = self._requests_leftover_friendly(query_lower)
 
         if cuisines:
             preferences["cuisine_types"] = self._merge_unique(preferences["cuisine_types"], cuisines)
@@ -214,6 +217,8 @@ Extract the following information:
             preferences["nutritional_goals"] = self._merge_unique(preferences["nutritional_goals"], nutritional_goals)
         if symptoms:
             cancer_specific["symptoms"] = self._merge_unique(cancer_specific["symptoms"], symptoms)
+        if leftover_friendly:
+            constraints["leftover_friendly"] = True
 
         if self._mentions_red_meat_avoidance(query_lower):
             constraints["avoid_red_meat"] = True
@@ -238,6 +243,8 @@ Extract the following information:
                     constraints["dietary_restrictions"],
                     ["avoid red meat"]
                 )
+            if previous_context["leftover_friendly"]:
+                constraints["leftover_friendly"] = True
 
         strategy["primary_focus"] = strategy.get("primary_focus") or query
         strategy["search_keywords"] = self._build_search_keywords(query, preferences, constraints, cancer_specific)
@@ -251,6 +258,7 @@ Extract the following information:
         nutritional_goals: List[str] = []
         symptoms: List[str] = []
         avoid_red_meat = False
+        leftover_friendly = False
 
         for msg in self._sanitize_conversation_history(conversation_history):
             if msg.get("role") != "user":
@@ -261,13 +269,15 @@ Extract the following information:
             nutritional_goals = self._merge_unique(nutritional_goals, self._extract_nutrition_goals(content))
             symptoms = self._merge_unique(symptoms, self._extract_symptoms(content))
             avoid_red_meat = avoid_red_meat or self._mentions_red_meat_avoidance(content)
+            leftover_friendly = leftover_friendly or self._requests_leftover_friendly(content)
 
         return {
             "cuisine_types": cuisine_types,
             "meal_types": meal_types,
             "nutritional_goals": nutritional_goals,
             "symptoms": symptoms,
-            "avoid_red_meat": avoid_red_meat
+            "avoid_red_meat": avoid_red_meat,
+            "leftover_friendly": leftover_friendly
         }
 
     def _is_follow_up_query(self, query_lower: str) -> bool:
@@ -332,6 +342,23 @@ Extract the following information:
         ]
         return any(pattern in text for pattern in patterns)
 
+    def _requests_leftover_friendly(self, text: str) -> bool:
+        patterns = [
+            r"\b(?:do not|don[’']t|dont|does not|doesn[’']t|doesnt) (?:need|require|have) to (?:finish(?:ing|ed)?|eat(?:ing|en)?|consume(?:d|ing)?)\b",
+            r"\bnot (?:need|required) to (?:finish(?:ing|ed)?|eat(?:ing|en)?|consume(?:d|ing)?)\b",
+            r"\b(?:finish(?:ing|ed)?|eat(?:ing|en)?|consume(?:d|ing)?) in one sitting\b",
+            r"\b(?:save|keep)(?: (?:it|them|some|the rest))? for later\b",
+            r"\b(?:good|great|suitable) (?:as|for) leftovers?\b",
+            r"\bleftover[- ]friendly\b",
+            r"\b(?:stores?|keeps?) well\b",
+            r"\bmeal[- ]prep\b",
+            r"\bmake[- ]ahead\b",
+            r"\bbatch[- ]cook(?:ing|ed)?\b",
+            r"\b(?:eat|enjoy) (?:it|them|some) (?:over time|later|the next day)\b",
+            r"\bmultiple (?:meals|days|servings)\b"
+        ]
+        return any(re.search(pattern, text) for pattern in patterns)
+
     def _build_search_keywords(
         self,
         query: str,
@@ -347,6 +374,8 @@ Extract the following information:
         keywords.extend(cancer_specific.get("symptoms", [])[:2])
         if constraints.get("avoid_red_meat"):
             keywords.append("no red meat")
+        if constraints.get("leftover_friendly"):
+            keywords.extend(["leftover friendly", "meal prep", "stores well"])
         return list(dict.fromkeys([keyword for keyword in keywords if keyword]))
 
     def _build_enhanced_query(
@@ -367,6 +396,8 @@ Extract the following information:
             parts.extend(cancer_specific["symptoms"][:1])
         if constraints.get("avoid_red_meat"):
             parts.append("without red meat or pork")
+        if constraints.get("leftover_friendly"):
+            parts.append("leftover friendly make ahead stores well refrigerate or freeze")
         return " ".join(dict.fromkeys([part for part in parts if part]))
 
     def _merge_unique(self, existing: List[str], incoming: List[str]) -> List[str]:

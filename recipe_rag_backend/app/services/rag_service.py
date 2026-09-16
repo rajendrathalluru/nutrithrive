@@ -76,8 +76,12 @@ class RecipeRAGService:
     def _has_database_match_for_specific_request(
         self,
         query: str,
-        recipes: List[Dict[str, Any]]
+        recipes: List[Dict[str, Any]],
+        intent_data: Optional[Dict[str, Any]] = None
     ) -> bool:
+        if intent_data and intent_data.get("constraints", {}).get("leftover_friendly"):
+            return any(recipe.get("storage_evidence") for recipe in recipes)
+
         generic_terms = {
             "a", "an", "and", "any", "can", "for", "give", "how", "i", "make", "me",
             "please", "recipe", "recipes", "show", "the", "to", "want", "with"
@@ -98,6 +102,25 @@ class RecipeRAGService:
             for recipe in recipes
         )
         return all(term in recipe_text for term in query_terms)
+
+    def _apply_deterministic_constraints(
+        self,
+        recipes: List[Dict[str, Any]],
+        intent_data: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        if not intent_data.get("constraints", {}).get("leftover_friendly"):
+            return recipes
+
+        matching_recipes = []
+        for recipe in recipes:
+            evidence = self.search_engine.extract_storage_evidence(recipe.get("content", ""))
+            if not evidence:
+                continue
+            recipe_with_evidence = dict(recipe)
+            recipe_with_evidence["storage_evidence"] = evidence
+            matching_recipes.append(recipe_with_evidence)
+
+        return matching_recipes
 
     def _normalize_recipe_request(self, query: str) -> str:
         replacements = {
@@ -349,10 +372,12 @@ class RecipeRAGService:
                     continue
             
             candidate_recipes = self._deduplicate_recipes(candidate_recipes)
+            candidate_recipes = self._apply_deterministic_constraints(candidate_recipes, intent_data)
             normalized_recipe_request = self._normalize_recipe_request(recipe_request_query)
             has_database_match = self._has_database_match_for_specific_request(
                 normalized_recipe_request,
-                candidate_recipes
+                candidate_recipes,
+                intent_data
             )
             logger.info(f"Extraction complete: {time.time() - start_time:.2f}s")
 
@@ -859,6 +884,7 @@ class RecipeRAGService:
                 continue
 
         recipes = self._deduplicate_recipes(recipes)
+        recipes = self._apply_deterministic_constraints(recipes, intent_data)
         return self._annotate_recipe_source_tiers(recipes)[:MAX_RECIPES_PER_RESPONSE]
     
     def get_system_info(self) -> Dict[str, Any]:

@@ -102,7 +102,8 @@ class RecipeEnhancer:
             "allergens_to_avoid",
             "health_conditions",
             "skill_level",
-            "avoid_red_meat"
+            "avoid_red_meat",
+            "leftover_friendly"
         ]
         preference_keys_that_need_adaptation = [
             "texture_preferences",
@@ -343,6 +344,10 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
                 explicit_rules.append(
                     "- Do NOT use beef, pork, lamb, bacon, sausage, ham, salami, pepperoni, or other red/processed meats."
                 )
+            if constraints.get("leftover_friendly"):
+                explicit_rules.append(
+                    "- Recipes MUST be safe and practical to divide across multiple sittings. Include specific refrigeration or freezing duration and reheating guidance."
+                )
             if nutritional_goals:
                 explicit_rules.append(
                     f"- Nutritional focus to preserve: {', '.join(nutritional_goals)}."
@@ -378,6 +383,7 @@ CONSTRAINT COMPLIANCE:
 - If min_ingredients exists → recipes MUST have ≥ that number  
 - If dietary_restrictions exist → full compliance required
 - If equipment_only exists → use only that equipment
+- If leftover_friendly is true → include safe storage duration and reheating or thawing guidance
 
 IMPORTANT FOLLOW-UP RULES:
 {chr(10).join(explicit_rules)}
@@ -401,6 +407,7 @@ OUTPUT FORMAT (valid JSON only):
         ],
         "description": "Why this recipe meets user needs and AICR guidelines",
         "nutrition_benefits": "Specific benefits (high protein 25g, easy to digest, nourishing)",
+        "storage_instructions": "How long to refrigerate or freeze leftovers and how to reheat safely",
         "generated_by_llm": true,
         "meets_requirements": true
     }}
@@ -436,6 +443,8 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
                     "instructions": recipe.get("instructions", []),
                     "description": recipe.get("description", "Custom generated recipe for optimal nutrition"),
                     "nutrition_benefits": recipe.get("nutrition_benefits", ""),
+                    "storage_instructions": recipe.get("storage_instructions", ""),
+                    "storage_evidence": recipe.get("storage_instructions", ""),
                     "aicr_compliance": aicr_compliance,
                     "generated_by_llm": True,
                     "meets_requirements": aicr_compliance["overall_compliant"],

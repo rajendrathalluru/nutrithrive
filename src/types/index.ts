@@ -25,6 +25,7 @@ export interface Recipe {
   sourceName?: string;
   verificationDetails?: any;
   helpfulTips?: string[];
+  storageGuidance?: string;
   ingredientAdaptations?: string[];
   aicrCompliance?: any;
   dynamicallyAdapted?: boolean;

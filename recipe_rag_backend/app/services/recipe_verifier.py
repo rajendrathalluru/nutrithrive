@@ -36,6 +36,8 @@ class RecipeVerifier:
                     "id": i,
                     "name": recipe.get("name", "Unknown"),
                     "type": recipe.get("type", "Unknown"),
+                    "description": recipe.get("description", "")[:300],
+                    "storage_evidence": recipe.get("storage_evidence", "")[:400],
                     "ingredients": recipe.get("ingredients", [])[:15],
                     "ingredient_count": len(recipe.get("ingredients", []))
                 })
