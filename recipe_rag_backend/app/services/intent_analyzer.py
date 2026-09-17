@@ -326,7 +326,7 @@ Extract the following information:
         return list(dict.fromkeys(found))
 
     def _extract_symptoms(self, text: str) -> List[str]:
-        symptom_map = ["nausea", "mouth sores", "difficulty swallowing", "low appetite", "taste changes"]
+        symptom_map = ["nausea", "mouth sores", "difficulty swallowing", "low appetite", "taste changes", "fever"]
         return [symptom for symptom in symptom_map if symptom in text]
 
     def _mentions_red_meat_avoidance(self, text: str) -> bool:

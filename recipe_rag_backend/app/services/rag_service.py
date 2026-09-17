@@ -811,6 +811,7 @@ class RecipeRAGService:
             "vegetarian",
             "vegan",
             "nausea",
+            "fever",
             "swallow",
             "appetite"
         }

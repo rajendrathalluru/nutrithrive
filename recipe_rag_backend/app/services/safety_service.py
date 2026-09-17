@@ -32,6 +32,27 @@ class SafetyService:
         r"\bsomeone is (?:here|with me) now\b",
     ]
 
+    _CRISIS_FOLLOW_UP_PATTERNS = [
+        r"\b(?:these|those|the) thoughts\b",
+        r"\b(?:still|again) (?:feel|feeling|having|thinking)\b",
+        r"\b(?:not safe|in danger|have a plan|access to means)\b",
+        r"\b(?:help me|stay with me|what now|what should i do)\b",
+        r"\bwhat can i eat(?: now)?\b",
+        r"\b(?:getting|feeling) worse\b",
+    ]
+
+    _SHORT_CRISIS_REPLIES = {
+        "yes",
+        "no",
+        "maybe",
+        "i don't know",
+        "i dont know",
+        "not sure",
+        "i am not safe",
+        "i'm not safe",
+        "im not safe",
+    }
+
     def should_intercept(
         self,
         query: str,
@@ -43,13 +64,15 @@ class SafetyService:
         if self._states_current_safety(query):
             return False
 
+        if not self._is_crisis_follow_up(query):
+            return False
+
         for message in reversed(conversation_history or []):
             if not isinstance(message, dict):
                 continue
             if str(message.get("role", "")).lower() != "user":
                 continue
-            if self.contains_crisis_language(str(message.get("content", ""))):
-                return True
+            return self.contains_crisis_language(str(message.get("content", "")))
 
         return False
 
@@ -110,6 +133,12 @@ class SafetyService:
     def _states_current_safety(self, text: str) -> bool:
         normalized = self._normalize(text)
         return any(re.search(pattern, normalized) for pattern in self._CURRENT_SAFETY_PATTERNS)
+
+    def _is_crisis_follow_up(self, text: str) -> bool:
+        normalized = self._normalize(text).strip(" .!?\t\n")
+        if normalized in self._SHORT_CRISIS_REPLIES:
+            return True
+        return any(re.search(pattern, normalized) for pattern in self._CRISIS_FOLLOW_UP_PATTERNS)
 
     def _normalize(self, text: str) -> str:
         normalized = str(text or "").lower().strip()
