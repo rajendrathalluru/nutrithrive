@@ -13,6 +13,7 @@ from app.services.recipe_verifier import RecipeVerifier
 from app.services.recipe_enhancer import RecipeEnhancer
 from app.services.search_engine import SearchEngine
 from app.services.response_generator import ResponseGenerator
+from app.services.safety_service import safety_service
 
 logger = logging.getLogger(__name__)
 MAX_RECIPES_PER_RESPONSE = 3
@@ -376,10 +377,18 @@ class RecipeRAGService:
         """
         Main entry point with conversation context support
         """
+        if safety_service.should_intercept(query, conversation_history):
+            logger.warning("Detected self-harm crisis language; returning safety response")
+            return safety_service.build_crisis_response(query, mode, conversation_history)
+
         if not self.is_initialized:
             raise ValueError("RAG system not initialized")
-        
-        logger.info(f"Processing query: '{query}' with {len(conversation_history or [])} previous messages")
+
+        logger.info(
+            "Processing recipe query (%s characters) with %s previous messages",
+            len(query),
+            len(conversation_history or []),
+        )
         start_time = time.time()
         
         try:

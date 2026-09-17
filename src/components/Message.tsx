@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2, Sparkles, User2 } from 'lucide-react';
+import { ExternalLink, Loader2, MessageCircle, Phone, Sparkles, User2 } from 'lucide-react';
 import { Message as MessageType } from '../types';
 import RecipeCard from './RecipeCard';
 import { cleanBackendText } from '../utils/textCleaner';
@@ -10,6 +10,7 @@ interface MessageProps {
 
 const Message: React.FC<MessageProps> = ({ message }) => {
   const cleanedContent = cleanBackendText(message.content);
+  const isSafetyRedirect = Boolean(message.backendData?.safety_redirect);
 
   return (
     <div className={`flex gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>
@@ -29,11 +30,16 @@ const Message: React.FC<MessageProps> = ({ message }) => {
           </span>
         </div>
 
-        <div className={`rounded-[24px] p-5 ${
+        <div
+          role={isSafetyRedirect ? 'alert' : undefined}
+          className={`rounded-[24px] p-5 ${
           message.role === 'user' 
             ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/10' 
+            : isSafetyRedirect
+              ? 'border-2 border-rose-200 bg-rose-50 text-slate-900 shadow-lg shadow-rose-900/5'
             : 'glass-panel text-slate-800'
-        }`}>
+          }`}
+        >
           {message.isLoading ? (
             <div className="flex items-center gap-2 text-sm">
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -41,6 +47,34 @@ const Message: React.FC<MessageProps> = ({ message }) => {
             </div>
           ) : (
             <p className="whitespace-pre-wrap leading-7 text-[15px]">{cleanedContent}</p>
+          )}
+
+          {isSafetyRedirect && !message.isLoading && (
+            <div className="mt-5 flex flex-wrap gap-2 border-t border-rose-200 pt-4">
+              <a
+                href="tel:988"
+                className="inline-flex items-center gap-2 rounded-xl bg-rose-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-800"
+              >
+                <Phone className="h-4 w-4" />
+                Call 988
+              </a>
+              <a
+                href="sms:988"
+                className="inline-flex items-center gap-2 rounded-xl border border-rose-300 bg-white px-4 py-2.5 text-sm font-semibold text-rose-800 hover:bg-rose-100"
+              >
+                <MessageCircle className="h-4 w-4" />
+                Text 988
+              </a>
+              <a
+                href="https://findahelpline.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-100"
+              >
+                International help
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            </div>
           )}
         </div>
         

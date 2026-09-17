@@ -20,6 +20,7 @@ from app.models.schemas import (
 )
 from app.core.config import settings
 from app.services.rag_service import rag_service
+from app.services.safety_service import safety_service
 import openai
 import requests
 
@@ -283,11 +284,6 @@ async def ask_question(request: ConversationQueryRequest):  # UPDATED: Use new r
     - User: "Which ones are high in protein?" (understands previous context)
     """
     try:
-        _ensure_rag_ready()
-        
-        logger.info(f"Processing query: {request.query}")
-        logger.info(f"Conversation history length: {len(request.conversation_history) if request.conversation_history else 0}")
-        
         # Convert conversation history to the format expected by RAG service
         conv_history = None
         if request.conversation_history:
@@ -295,7 +291,18 @@ async def ask_question(request: ConversationQueryRequest):  # UPDATED: Use new r
                 {"role": msg.role, "content": msg.content}
                 for msg in request.conversation_history
             ]
-            logger.info(f"Using conversation context with {len(conv_history)} messages")
+
+        if safety_service.should_intercept(request.query, conv_history):
+            logger.warning("Detected self-harm crisis language at API boundary")
+            return safety_service.build_crisis_response(request.query, request.mode, conv_history)
+
+        _ensure_rag_ready()
+
+        logger.info(
+            "Processing recipe query (%s characters) with %s previous messages",
+            len(request.query),
+            len(conv_history or []),
+        )
         
         # Get the full response from RAG service with conversation context
         response_data = rag_service.ask_question(
@@ -339,9 +346,13 @@ async def ask_question_v1(request: RecipeRequest):
     Use this if you don't need conversation context.
     """
     try:
+        if safety_service.should_intercept(request.query):
+            logger.warning("Detected self-harm crisis language at legacy API boundary")
+            return safety_service.build_crisis_response(request.query, request.mode)
+
         _ensure_rag_ready()
-        
-        logger.info(f"Processing query (v1): {request.query}")
+
+        logger.info("Processing legacy recipe query (%s characters)", len(request.query))
         
         # Get response without conversation context
         response_data = rag_service.ask_question(request.query, request.mode)
