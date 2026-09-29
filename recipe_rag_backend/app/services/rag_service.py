@@ -84,6 +84,7 @@ class RecipeRAGService:
         generic_terms = {
             "what", "some", "that", "are", "the", "and", "any", "can", "for", "give",
             "how", "make", "please", "recipe", "recipes", "show", "want", "with", "without",
+            "you", "provide", "rely", "using", "need", "could", "would",
             "meal", "meals", "dinner", "lunch", "breakfast", "food", "foods"
         }
         search_text = " ".join([

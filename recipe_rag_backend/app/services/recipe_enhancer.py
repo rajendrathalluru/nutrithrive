@@ -4,6 +4,7 @@ import re
 import hashlib
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,8 @@ class RecipeEnhancer:
 USER REQUIREMENTS:
 {json.dumps(intent_data, indent=2)}
 
+{INGREDIENT_STORAGE_RULES}
+
 YOUR TASK - Generate ALL of the following in ONE response:
 
 1. INGREDIENTS:
@@ -414,6 +417,8 @@ USER QUERY: "{query}"
 USER REQUIREMENTS:
 {json.dumps(intent_data, indent=2)}
 {failure_context}
+
+{INGREDIENT_STORAGE_RULES}
 
 {self._build_grounding_context(grounding_recipes)}
 

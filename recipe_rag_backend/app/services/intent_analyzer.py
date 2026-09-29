@@ -2,6 +2,7 @@ import logging
 import json
 import re
 from typing import Dict, Any, List, Optional
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,10 @@ equipment, budget, and preparation time. Preserve additional explicit requiremen
 search_strategy.must_match_criteria rather than silently dropping them.
 Extract mild, spicy, sweet, savory, and other flavor requests into preferences.flavor_profiles.
 Keep the original meaning in search_strategy.primary_focus and search_strategy.enhanced_query.
+Expand conceptual requests into concrete ingredient and cooking terms in search_strategy.search_keywords
+and enhanced_query, while preserving the request. For example, shelf-stable meals should retrieve pantry
+recipes using canned beans, canned vegetables, dry grains, and dried legumes even without that exact phrase.
+{INGREDIENT_STORAGE_RULES}
 Do not infer ingredient counts, protein targets, storage needs, or medical conditions from recipes
 previously suggested by the assistant. Only user messages establish requirements.
 Do not narrow a broad request for meals to breakfast or snacks unless the user asks for that.
@@ -194,7 +199,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
                 "allergens_to_avoid": [],
                 "health_conditions": [],
                 "skill_level": None,
-                "leftover_friendly": False
+                "leftover_friendly": False,
+                "ingredient_storage": None
             },
             "preferences": {
                 "cuisine_types": [],
@@ -236,6 +242,7 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         constraints.setdefault("allergens_to_avoid", [])
         constraints.setdefault("health_conditions", [])
         constraints.setdefault("leftover_friendly", False)
+        constraints.setdefault("ingredient_storage", None)
         preferences.setdefault("cuisine_types", [])
         preferences.setdefault("meal_types", [])
         preferences.setdefault("nutritional_goals", [])
@@ -286,8 +293,17 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
                 constraints["leftover_friendly"] = True
 
         strategy["primary_focus"] = strategy.get("primary_focus") or query
-        strategy["search_keywords"] = self._build_search_keywords(query, preferences, constraints, cancer_specific)
-        strategy["enhanced_query"] = self._build_enhanced_query(query, preferences, constraints, cancer_specific)
+        semantic_keywords = strategy.get("search_keywords", [])
+        if not isinstance(semantic_keywords, list):
+            semantic_keywords = []
+        semantic_keywords = [keyword.strip() for keyword in semantic_keywords if isinstance(keyword, str) and keyword.strip()]
+        strategy["search_keywords"] = self._merge_unique(
+            semantic_keywords, self._build_search_keywords(query, preferences, constraints, cancer_specific)
+        )
+        semantic_query = strategy.get("enhanced_query")
+        if not isinstance(semantic_query, str) or not semantic_query.strip():
+            semantic_query = query
+        strategy["enhanced_query"] = self._build_enhanced_query(semantic_query, preferences, constraints, cancer_specific)
 
         return intent_data
 
@@ -406,7 +422,7 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         cancer_specific: Dict[str, Any]
     ) -> List[str]:
         keywords = []
-        keywords.extend(str(query).split()[:5])
+        keywords.extend(str(query).split())
         keywords.extend(preferences.get("cuisine_types", [])[:2])
         keywords.extend(preferences.get("meal_types", [])[:2])
         keywords.extend(preferences.get("nutritional_goals", [])[:2])

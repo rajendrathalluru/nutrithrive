@@ -1,6 +1,7 @@
 import logging
 import json
 from typing import List, Dict, Any
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ For comparisons, compare the referenced recipes rather than inventing or searchi
 If suggesting a substitution, preserve active restrictions and the recipe's dietary identity, and do
 not claim equivalent or increased protein without supporting data. Identify suggestions as adaptations.
 Do not infer a medical condition. Keep the answer concise and name the recipe being discussed.
+{INGREDIENT_STORAGE_RULES}
 """
         try:
             return self.llm.predict(prompt).strip()
@@ -84,6 +86,8 @@ Total recipes found: {recipe_count}
 
 Highlighted recipes:
 {chr(10).join(recipe_info)}
+
+{INGREDIENT_STORAGE_RULES}
 
 Brief response (under 150 words):
 1. Acknowledge their recipe needs positively

@@ -5,6 +5,7 @@ import hashlib
 import re
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,7 @@ Verify EACH recipe (by id) against ALL constraints in "constraints" section.
 - ANY constraint violation = FAIL for that recipe
 
 {self.RELEVANCE_RULES}
+{INGREDIENT_STORAGE_RULES}
 
 Return ONLY valid JSON array with results for EACH recipe:
 [
@@ -297,6 +299,7 @@ Evaluate this recipe against ALL constraints intelligently:
 - ANY constraint violation = FAIL
 
 {self.RELEVANCE_RULES}
+{INGREDIENT_STORAGE_RULES}
 
 Return ONLY valid JSON:
 {{

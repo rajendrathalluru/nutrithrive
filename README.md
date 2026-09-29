@@ -29,6 +29,8 @@ For “more recipes,” intent is rebuilt from prior user requests rather than t
 
 Conversation context belongs to the active chat. Requests carry that chat's user turns and structured recipe references; the backend does not share conversation memory between chats. Intent resolution retains earlier user requirements, applies later changes, and produces a standalone request for retrieval and verification. References such as “the second one” resolve against recipe IDs from that chat. Questions about a shown recipe are answered from its details; explicit modifications use the selected recipe as generation context and remain labeled AI Generated (`conversation_guided` for prior AI recipes). Ambiguous references request clarification. All user turns and recipe references are available to intent resolution, with assistant prose limited to the last six turns. Chat history currently lasts for the mounted application session; this does not add persistence across page reloads.
 
+Intent processing preserves semantic search expansions (for example, “shelf-stable meals” → canned beans, dried lentils, rice) for vector retrieval and CSV candidate ranking. Pantry-based requests and strictly shelf-stable-only requests are distinguished by `constraints.ingredient_storage`. Shared prompt rules apply across intent analysis, verification, generation, and summaries; pantry ingredients do not imply room-temperature storage of the prepared meal.
+
 Run offline backend regression tests from the repository root:
 
 ```bash

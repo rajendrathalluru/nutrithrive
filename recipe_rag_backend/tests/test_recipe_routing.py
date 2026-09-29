@@ -10,6 +10,8 @@ from app.services.recipe_enhancer import RecipeEnhancer
 from app.services.recipe_verifier import RecipeVerifier
 from app.services.intent_analyzer import IntentAnalyzer
 from app.services.response_generator import ResponseGenerator
+from app.services.search_engine import SearchEngine
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
 
 
 def recipe_record(name, relevance="match", generated=False):
@@ -312,6 +314,81 @@ class RecipeRoutingTests(unittest.TestCase):
 
 
 class GenerationAndVerificationTests(unittest.TestCase):
+    def test_pantry_paraphrases_retrieve_same_csv_candidates_with_semantic_intent(self):
+        service = RecipeRAGService()
+        service.data_loader.load_data(str(Path(__file__).parents[1] / "app/data/Recipe.csv"))
+        candidate_names = []
+        for query in [
+            "Show meals that rely on shelf-stable foods.",
+            "can you provide me recipes that rely on shelf-stable foods.",
+        ]:
+            analyzer = IntentAnalyzer()
+            intent = analyzer._get_fallback_intent_data(query)
+            intent["search_strategy"] = {
+                "search_keywords": ["canned beans", "canned tomatoes", "dried lentils", "rice", "pasta"],
+                "enhanced_query": "pantry meals with canned beans tomatoes dried lentils rice pasta",
+            }
+            intent = analyzer._post_process_intent(query, intent)
+            candidates = service._get_database_search_candidates(query, intent, set(), 8)
+            candidate_names.append([recipe["name"] for recipe in candidates])
+        self.assertTrue(candidate_names[0])
+        self.assertEqual(candidate_names[0], candidate_names[1])
+        self.assertIn("Tuna, Brown Rice and White Bean Salad", candidate_names[0])
+
+    def test_vector_search_uses_semantic_keywords(self):
+        engine = SearchEngine()
+        vector_store = Mock(similarity_search=Mock(return_value=[]))
+        engine.initialize(vector_store, Mock())
+        engine.multi_query_search("shelf-stable meals", {
+            "search_strategy": {"search_keywords": ["canned beans", "dried lentils", "rice"]}
+        }, 8)
+        self.assertEqual(vector_store.similarity_search.call_args.args[0], "canned beans dried lentils rice")
+
+    def test_empty_search_strategy_still_searches_original_query(self):
+        engine = SearchEngine()
+        vector_store = Mock(similarity_search=Mock(return_value=[]))
+        engine.initialize(vector_store, Mock())
+        engine.multi_query_search("shelf-stable meals", {}, 8)
+        self.assertEqual(vector_store.similarity_search.call_args.args[0], "shelf-stable meals")
+
+    def test_query_keywords_keep_ingredient_form_beyond_first_five_words(self):
+        analyzer = IntentAnalyzer()
+        result = analyzer._post_process_intent("Show meals that rely on shelf-stable foods", {})
+        self.assertIn("shelf-stable", result["search_strategy"]["search_keywords"])
+
+    def test_storage_rules_reach_intent_verification_and_generation(self):
+        analyzer = IntentAnalyzer()
+        self.assertIn(INGREDIENT_STORAGE_RULES, analyzer._build_intent_prompt("pantry meals"))
+        verifier = RecipeVerifier()
+        self.assertIn(INGREDIENT_STORAGE_RULES, verifier._build_batch_verification_prompt([], {}))
+        self.assertIn(INGREDIENT_STORAGE_RULES, verifier._build_individual_verification_prompt({}, {}))
+        enhancer = RecipeEnhancer()
+        llm = Mock(predict=Mock(return_value=json.dumps([recipe_record("Bean Bowl", generated=True)])))
+        enhancer.initialize(llm, aicr_service)
+        enhancer.generate_fallback_recipes("pantry meals", {"constraints": {"ingredient_storage": "shelf_stable_only"}}, [])
+        self.assertIn(INGREDIENT_STORAGE_RULES, llm.predict.call_args.args[0])
+        self.assertIn('"ingredient_storage": "shelf_stable_only"', llm.predict.call_args.args[0])
+        generator = ResponseGenerator()
+        generator.initialize(llm)
+        generator.generate_personalized_response("pantry meals", [recipe_record("Bean Bowl")], {})
+        self.assertIn(INGREDIENT_STORAGE_RULES, llm.predict.call_args.args[0])
+
+    def test_semantic_pantry_search_terms_survive_intent_processing(self):
+        analyzer = IntentAnalyzer()
+        query = "Show meals that rely on shelf-stable foods."
+        intent = analyzer._get_fallback_intent_data(query)
+        intent["constraints"]["ingredient_storage"] = "pantry_based"
+        intent["search_strategy"] = {
+            "search_keywords": ["canned beans", "canned tomatoes", "dried lentils", "rice", "pasta"],
+            "enhanced_query": "pantry meals with canned beans tomatoes dried lentils rice pasta",
+        }
+        result = analyzer._post_process_intent(query, intent)
+        self.assertIn("canned beans", result["search_strategy"]["search_keywords"])
+        self.assertIn("dried lentils", result["search_strategy"]["search_keywords"])
+        self.assertIn("pantry meals", result["search_strategy"]["enhanced_query"])
+        self.assertFalse(result["constraints"]["leftover_friendly"])
+        self.assertEqual(result["constraints"]["ingredient_storage"], "pantry_based")
+
     def test_question_prompt_contains_actual_recipe_and_marks_unknown_facts(self):
         generator = ResponseGenerator()
         llm = Mock(predict=Mock(return_value="The recipe does not specify a freezing duration."))

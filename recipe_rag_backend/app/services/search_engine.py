@@ -43,6 +43,8 @@ class SearchEngine:
         seen_content = set()
         
         search_queries = self._generate_contextual_search_queries(intent_data)
+        if not search_queries and original_query.strip():
+            search_queries = [original_query.strip()]
         
         for i, search_query in enumerate(search_queries):
             try:
@@ -72,6 +74,12 @@ class SearchEngine:
         
         if strategy.get("enhanced_query"):
             queries.append(strategy["enhanced_query"])
+
+        search_keywords = strategy.get("search_keywords", [])
+        if isinstance(search_keywords, list):
+            semantic_query = " ".join(keyword.strip() for keyword in search_keywords[:10] if isinstance(keyword, str) and keyword.strip())
+            if semantic_query:
+                queries.append(semantic_query)
         
         if constraints.get("ingredients_must_use") or constraints.get("ingredients_available"):
             ingredients = constraints.get("ingredients_must_use") or constraints.get("ingredients_available")
