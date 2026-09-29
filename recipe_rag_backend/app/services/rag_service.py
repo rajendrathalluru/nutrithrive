@@ -649,13 +649,40 @@ class RecipeRAGService:
                     }
             
             # Step 7: PARALLEL ENHANCEMENT with AICR guidelines
-            source_docs = self.recipe_enhancer.batch_enhance_recipes(source_docs[:MAX_RECIPES_PER_RESPONSE], intent_data)
+            selected_recipes = source_docs[:MAX_RECIPES_PER_RESPONSE]
+            selected_ids = {self._get_recipe_identity(recipe) for recipe in selected_recipes}
+            enhanced_candidates = self.recipe_enhancer.batch_enhance_recipes(selected_recipes, intent_data)
+            source_docs = enhanced_candidates
             if any(
                 recipe.get("dynamically_adapted") or recipe.get("guidance_generated")
                 or recipe.get("helpful_tips") or recipe.get("ingredient_adaptations")
                 for recipe in source_docs
             ):
                 source_docs = self._validate_final_recipes(source_docs, intent_data)
+            if not source_docs:
+                remaining_database_recipes = [
+                    recipe for recipe in verified_recipes
+                    if self._get_recipe_identity(recipe) not in selected_ids
+                ]
+                source_docs = self._get_verified_matches(remaining_database_recipes, intent_data)[:MAX_RECIPES_PER_RESPONSE]
+                if not source_docs:
+                    correction_references = referenced_recipes if is_recipe_adaptation else [
+                        recipe for recipe in candidate_recipes
+                        if recipe.get("database_record_found")
+                        and recipe.get("verification_details", {}).get("relevance") in {"match", "adaptable"}
+                    ][:3]
+                    logger.warning("Final validation removed all selected recipes; attempting one verified correction")
+                    correction_query = (
+                        f"Create complete recipes for: {normalized_recipe_request}. "
+                        "Correct the reported ingredient and guidance violations without relaxing any user requirements."
+                    )
+                    if excluded_names:
+                        correction_query += " Do not repeat: " + ", ".join(sorted(excluded_names))
+                    corrected_recipes = self.recipe_enhancer.generate_fallback_recipes(
+                        correction_query, intent_data, enhanced_candidates,
+                        grounding_recipes=correction_references
+                    )
+                    source_docs = self._verify_new_generated_recipes(corrected_recipes, intent_data, excluded_names)
             source_docs = self._deduplicate_recipes(source_docs)
             source_docs = self._apply_deterministic_constraints(source_docs, intent_data)
             source_docs = self._annotate_recipe_source_tiers(source_docs)
@@ -667,7 +694,11 @@ class RecipeRAGService:
             if not source_docs:
                 return {
                     "query": query,
-                    "response": "I don't have additional matching recipes to show right now.",
+                    "response": (
+                        "I couldn't verify any additional recipes that meet your requirements right now. Please try again."
+                        if is_more_request else
+                        "I couldn't verify a recipe that meets your requirements right now. Please try again."
+                    ),
                     "source": "no_results",
                     "matches_found": 0,
                     "mode": mode,

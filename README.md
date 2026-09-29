@@ -33,6 +33,8 @@ Intent processing preserves semantic search expansions (for example, “shelf-st
 
 Pantry-based recipes must be achievable without required fresh or refrigerated purchases; fresh garnishes must be explicitly optional. Pantry verification requires a structured assessment of required non-pantry ingredients, unspecified ingredient forms, and conflicting guidance. Missing or adverse assessments fail verification. Generated tips and adaptations trigger final verification; rejected generated guidance may be removed once, followed by another full check. Core ingredient failures remain rejected, and failed generation assessments are passed to the retry.
 
+If final validation removes every selected recipe, unused verified database matches are tried first. If none remain, one additional generation attempt receives the final rejection feedback and relevant recipe references, then undergoes the same verification and follow-up exclusion checks. This bounded recovery does not add another round of optional tips. Initial-request failures and exhausted follow-ups have distinct messages.
+
 Run offline backend regression tests from the repository root:
 
 ```bash
