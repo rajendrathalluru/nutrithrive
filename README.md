@@ -17,6 +17,20 @@ NutriThrive Research is a full-stack AI nutrition assistant focused on diet-base
 React frontend -> FastAPI API -> intent and safety checks -> recipe retrieval -> nutrition filtering -> formatted response
 ```
 
+Recipe selection follows three stages:
+
+1. Return database recipes that pass semantic relevance, user constraints, and nutrition checks. Cuisine and meal type are evaluated by meaning; an entree need not literally contain the word “dinner.” If initial retrieval has no qualifying results, rank additional CSV records by query terms and verify a bounded candidate batch before generating.
+2. If no database recipe qualifies but useful related recipes exist, supply their ingredients, instructions, and source references to the model as context for a new recipe.
+3. If no useful database context is found, generate from the request and configured guidelines alone.
+
+Both generation routes are labeled **AI Generated** and are verified before serving. Generated records include `generation_basis` (`database_guided` or `ai_only`) and `reference_sources` for supplied database context; reference organizations are not represented as authors of generated recipes. Failed generation attempts retain the same context. Responses contain at most three recipes, and follow-up requests exclude previously shown recipes.
+
+Run offline backend regression tests from the repository root:
+
+```bash
+PYTHONPATH=recipe_rag_backend recipe_rag_backend/.venv/bin/python -m unittest discover -s recipe_rag_backend/tests -v
+```
+
 ## Repository structure
 
 ```text

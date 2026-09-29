@@ -74,35 +74,59 @@ class RecipeRAGService:
 
         return deduplicated
 
-    def _has_database_match_for_specific_request(
-        self,
-        query: str,
-        recipes: List[Dict[str, Any]],
-        intent_data: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        if intent_data and intent_data.get("constraints", {}).get("leftover_friendly"):
-            return any(recipe.get("storage_evidence") for recipe in recipes)
+    def _get_database_search_candidates(
+        self, query: str, intent_data: Dict[str, Any], excluded_ids: set[str], limit: int
+    ) -> List[Dict[str, Any]]:
+        if self.data_loader.df is None:
+            return []
 
         generic_terms = {
-            "a", "an", "and", "any", "can", "for", "give", "how", "i", "make", "me",
-            "please", "recipe", "recipes", "show", "the", "to", "want", "with"
+            "what", "some", "that", "are", "the", "and", "any", "can", "for", "give",
+            "how", "make", "please", "recipe", "recipes", "show", "want", "with", "without",
+            "meal", "meals", "dinner", "lunch", "breakfast", "food", "foods"
         }
-        query_terms = {
-            term for term in re.findall(r"[a-z0-9]+", query.lower())
-            if len(term) >= 4 and term not in generic_terms
-        }
+        search_text = " ".join([
+            query,
+            *intent_data.get("search_strategy", {}).get("search_keywords", []),
+            *intent_data.get("preferences", {}).get("cuisine_types", [])
+        ])
+        terms = set(re.findall(r"[a-z0-9]+", search_text.lower())) - generic_terms
+        terms = {term for term in terms if len(term) > 2}
+        ranked = []
+        for _, row in self.data_loader.df.iterrows():
+            record = row.to_dict()
+            if record.get("recipe_id") in excluded_ids:
+                continue
+            title_terms = set(re.findall(r"[a-z0-9]+", str(record.get("Name", "")).lower()))
+            content = self.data_loader.build_recipe_text(record)
+            content_terms = set(re.findall(r"[a-z0-9]+", content.lower()))
+            score = 3 * len(terms & title_terms) + len(terms & content_terms)
+            if not terms:
+                score = 1
+                meal_types = intent_data.get("preferences", {}).get("meal_types", [])
+                recipe_type = str(record.get("Type", "")).lower()
+                if any(meal in {"dinner", "lunch"} for meal in meal_types):
+                    score += 3 * any(label in recipe_type for label in ("entree", "main dish", "one-dish"))
+                elif any(meal in recipe_type for meal in meal_types):
+                    score += 3
+            if intent_data.get("constraints", {}).get("leftover_friendly"):
+                score += self.search_engine.storage_evidence_score(content)
+            if score:
+                ranked.append((score, record))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [self._build_recipe_data_from_record(record) for _, record in ranked[:limit]]
 
-        if not query_terms:
-            return True
+    def _verify_candidates(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
+        return self.recipe_verifier.batch_verify_recipes(prepared, intent_data, aicr_service)
 
-        recipe_text = " ".join(
-            " ".join(
-                str(recipe.get(field, ""))
-                for field in ("name", "type", "description", "ingredients", "content")
-            ).lower()
-            for recipe in recipes
-        )
-        return all(term in recipe_text for term in query_terms)
+    def _get_verified_matches(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        matches = [
+            recipe for recipe in recipes
+            if recipe.get("verification_details", {}).get("passes_verification") is True
+            and recipe.get("verification_details", {}).get("relevance") == "match"
+        ]
+        return self._apply_deterministic_constraints(matches, intent_data)
 
     def _apply_deterministic_constraints(
         self,
@@ -407,6 +431,7 @@ class RecipeRAGService:
 
             # Step 1: Enhanced intent understanding with conversation context
             intent_data = self.intent_analyzer.understand_query_intent_with_context(recipe_request_query, conversation_history)
+            intent_data = {**intent_data, "recipe_request": self._normalize_recipe_request(recipe_request_query)}
             logger.info(f"Intent analysis: {time.time() - start_time:.2f}s")
             effective_query = intent_data.get("search_strategy", {}).get("enhanced_query") or recipe_request_query
             
@@ -428,30 +453,36 @@ class RecipeRAGService:
                     continue
 
             candidate_recipes = self._deduplicate_recipes(candidate_recipes)
-            candidate_recipes = self._apply_deterministic_constraints(candidate_recipes, intent_data)
-            if (
-                intent_data.get("constraints", {}).get("leftover_friendly")
-                and not candidate_recipes
-            ):
-                candidate_recipes = self._get_leftover_friendly_database_recipes(settings.SEARCH_K)
+            if is_more_request:
+                candidate_recipes = self._exclude_previously_shown_recipes(candidate_recipes, previously_shown_names)
             normalized_recipe_request = self._normalize_recipe_request(recipe_request_query)
-            has_database_match = self._has_database_match_for_specific_request(
-                normalized_recipe_request,
-                candidate_recipes,
-                intent_data
-            )
             logger.info(f"Extraction complete: {time.time() - start_time:.2f}s")
 
             # Step 4.5: Fill missing ingredients/instructions before verification
-            candidate_recipes = self.recipe_enhancer.prepare_recipes_for_verification(candidate_recipes, intent_data)
-            logger.info(f"Pre-verification enrichment complete: {time.time() - start_time:.2f}s")
-            
-            # Step 5: BATCH VERIFICATION with AICR validation
-            candidate_recipes = self.recipe_verifier.batch_verify_recipes(candidate_recipes, intent_data, aicr_service)
+            candidate_recipes = self._verify_candidates(candidate_recipes, intent_data)
             logger.info(f"Batch verification complete: {time.time() - start_time:.2f}s")
+
+            verified_recipes = self._get_verified_matches(candidate_recipes, intent_data)
+            if not verified_recipes:
+                seen_ids = {self._get_recipe_identity(recipe) for recipe in candidate_recipes}
+                additional = self._get_database_search_candidates(
+                    normalized_recipe_request, intent_data, seen_ids, settings.SEARCH_K
+                )
+                for doc in docs:
+                    try:
+                        recipe = self._build_recipe_data_from_doc(doc)
+                        if self._get_recipe_identity(recipe) not in seen_ids:
+                            additional.append(recipe)
+                    except Exception as error:
+                        logger.warning("Skipping invalid retrieval candidate: %s", error)
+                additional = self._deduplicate_recipes(additional)
+                if is_more_request:
+                    additional = self._exclude_previously_shown_recipes(additional, previously_shown_names)
+                candidate_recipes.extend(self._verify_candidates(additional[:settings.SEARCH_K], intent_data))
+                candidate_recipes = self._deduplicate_recipes(candidate_recipes)
+                verified_recipes = self._get_verified_matches(candidate_recipes, intent_data)
             
             # Separate passed/failed
-            verified_recipes = [r for r in candidate_recipes if r.get("verification_details", {}).get("passes_verification")]
             failed_recipes = [r for r in candidate_recipes if not r.get("verification_details", {}).get("passes_verification")]
             
             logger.info(f"Verification: {len(verified_recipes)} passed, {len(failed_recipes)} failed")
@@ -459,8 +490,13 @@ class RecipeRAGService:
             # Step 6: Generate fallback if needed with AICR guidelines
             source_docs = verified_recipes
             
-            if not verified_recipes or not has_database_match:
-                logger.warning("No relevant database recipe found - generating AICR-compliant custom recipes")
+            if not verified_recipes:
+                grounding_recipes = [
+                    recipe for recipe in candidate_recipes
+                    if recipe.get("database_record_found")
+                    and recipe.get("verification_details", {}).get("relevance") in {"match", "adaptable"}
+                ][:3]
+                logger.info("Generating recipes with %s database references", len(grounding_recipes))
                 generation_query = normalized_recipe_request
                 if is_more_request and previously_shown_names:
                     generation_query += (
@@ -470,22 +506,34 @@ class RecipeRAGService:
                 generated_recipes = self.recipe_enhancer.generate_fallback_recipes(
                     generation_query,
                     intent_data,
-                    failed_recipes
+                    failed_recipes,
+                    grounding_recipes=grounding_recipes
+                )
+                generated_recipes = self._get_verified_matches(
+                    self._verify_candidates(generated_recipes, intent_data), intent_data
                 )
 
                 if not generated_recipes:
                     logger.warning("Initial AI recipe generation returned no usable recipes - retrying once")
                     generated_recipes = self.recipe_enhancer.generate_fallback_recipes(
-                        f"Create a complete {normalized_recipe_request} with ingredients and step-by-step instructions.",
+                        f"Create complete recipes with ingredients and step-by-step instructions for: {generation_query}",
                         intent_data,
-                        []
+                        failed_recipes,
+                        grounding_recipes=grounding_recipes
+                    )
+                    generated_recipes = self._get_verified_matches(
+                        self._verify_candidates(generated_recipes, intent_data), intent_data
                     )
 
                 if not generated_recipes:
                     logger.warning("JSON recipe generation failed - using structured recipe fallback")
                     generated_recipes = self.recipe_enhancer.generate_structured_fallback_recipe(
-                        normalized_recipe_request,
-                        intent_data
+                        generation_query,
+                        intent_data,
+                        grounding_recipes=grounding_recipes
+                    )
+                    generated_recipes = self._get_verified_matches(
+                        self._verify_candidates(generated_recipes, intent_data), intent_data
                     )
                 
                 if generated_recipes:
@@ -502,7 +550,10 @@ class RecipeRAGService:
                     }
             
             # Step 7: PARALLEL ENHANCEMENT with AICR guidelines
-            source_docs = self.recipe_enhancer.batch_enhance_recipes(source_docs, intent_data)
+            source_docs = self.recipe_enhancer.batch_enhance_recipes(source_docs[:MAX_RECIPES_PER_RESPONSE], intent_data)
+            if any(recipe.get("dynamically_adapted") for recipe in source_docs):
+                source_docs = self._verify_candidates(source_docs, intent_data)
+                source_docs = self._get_verified_matches(source_docs, intent_data)
             source_docs = self._deduplicate_recipes(source_docs)
             source_docs = self._apply_deterministic_constraints(source_docs, intent_data)
             source_docs = self._annotate_recipe_source_tiers(source_docs)

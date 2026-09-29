@@ -465,7 +465,11 @@ class AICRGuidelinesService:
             "chicken", "turkey", "fish", "salmon", "tuna", "shrimp", "beef", "pork", "lamb",
             "bacon", "ham", "sausage", "anchovy"
         ]
-        has_meat_or_fish = any(any(term in ing for term in red_or_animal_meat_terms) for ing in ingredients_lower)
+        has_meat_or_fish = any(
+            re.search(rf"\b{re.escape(term)}s?\b", ingredient)
+            for ingredient in ingredients_lower
+            for term in red_or_animal_meat_terms
+        )
         return not has_meat_or_fish
     
     def extract_focus_areas_from_intent(self, intent_data: Dict[str, Any]) -> List[str]:
