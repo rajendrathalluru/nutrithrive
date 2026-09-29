@@ -25,6 +25,10 @@ Recipe selection follows three stages:
 
 Both generation routes are labeled **AI Generated** and are verified before serving. Generated records include `generation_basis` (`database_guided` or `ai_only`) and `reference_sources` for supplied database context; reference organizations are not represented as authors of generated recipes. Failed generation attempts retain the same context. Responses contain at most three recipes, and follow-up requests exclude previously shown recipes.
 
+For “more recipes,” intent is rebuilt from prior user requests rather than the assistant's recipe descriptions or nutrition claims. Previously shown names are excluded before the CSV candidate limit and before accepting AI output, so repeated generations trigger the existing bounded retry instead of an empty response. Intent prompts specify the full JSON structure, including flavor preferences and explicit user constraints.
+
+Conversation context belongs to the active chat. Requests carry that chat's user turns and structured recipe references; the backend does not share conversation memory between chats. Intent resolution retains earlier user requirements, applies later changes, and produces a standalone request for retrieval and verification. References such as “the second one” resolve against recipe IDs from that chat. Questions about a shown recipe are answered from its details; explicit modifications use the selected recipe as generation context and remain labeled AI Generated (`conversation_guided` for prior AI recipes). Ambiguous references request clarification. All user turns and recipe references are available to intent resolution, with assistant prose limited to the last six turns. Chat history currently lasts for the mounted application session; this does not add persistence across page reloads.
+
 Run offline backend regression tests from the repository root:
 
 ```bash

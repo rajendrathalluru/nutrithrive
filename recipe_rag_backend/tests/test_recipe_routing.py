@@ -8,6 +8,8 @@ from app.services.aicr_guidelines_service import aicr_service
 from app.services.rag_service import RecipeRAGService
 from app.services.recipe_enhancer import RecipeEnhancer
 from app.services.recipe_verifier import RecipeVerifier
+from app.services.intent_analyzer import IntentAnalyzer
+from app.services.response_generator import ResponseGenerator
 
 
 def recipe_record(name, relevance="match", generated=False):
@@ -157,6 +159,121 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual(result["source_documents"][0]["name"], "Another Dinner")
         self.assertEqual(result["intent_analysis"]["recipe_request"], "Chinese dinner recipes")
 
+    def test_more_retries_when_generation_repeats_previous_recipe(self):
+        previous = "Greek Yogurt and Berry Parfait"
+        history = [
+            {"role": "user", "content": "Show meals that taste mild but are still flavorful"},
+            {"role": "assistant", "content": f"Only 4 ingredients and 18g protein.\nPreviously shown recipes: {previous}"},
+        ]
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [
+            [recipe_record(previous, generated=True)],
+            [recipe_record("Mild Vegetable Rice Bowl", generated=True)],
+        ]
+        result = self.ask("more recipes", history)
+        self.assertEqual(result["matches_found"], 1)
+        self.assertEqual(result["source_documents"][0]["name"], "Mild Vegetable Rice Bowl")
+        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 2)
+
+    def test_more_intent_uses_user_requests_not_assistant_claims(self):
+        original = "Show meals that taste mild but are still flavorful"
+        history = [
+            {"role": "user", "content": original},
+            {"role": "assistant", "content": "Only 4 ingredients; 18g protein; store for 1 day."},
+            {"role": "user", "content": "more recipes"},
+            {"role": "assistant", "content": "I couldn't find recipes."},
+        ]
+        self.ask("more recipes", history)
+        arguments = self.service.intent_analyzer.understand_query_intent_with_context.call_args.args
+        self.assertEqual(arguments[0], "more recipes")
+        self.assertEqual(arguments[1], [
+            {"role": "user", "content": original},
+            {"role": "user", "content": "more recipes"},
+        ])
+
+    def test_contextual_refinement_uses_resolved_request_for_retrieval_and_generation(self):
+        resolved = "Mild flavorful vegetarian dinners without onions"
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update({
+            "resolved_query": resolved,
+            "constraints": {"dietary_restrictions": ["vegetarian"]},
+            "search_strategy": {"enhanced_query": resolved},
+        })
+        result = self.ask("without onions", [{"role": "user", "content": "Mild vegetarian dinners"}])
+        self.assertEqual(result["intent_analysis"]["recipe_request"], resolved)
+        self.assertEqual(self.service.search_engine.multi_query_search.call_args.args[0], resolved)
+        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_args.args[0], resolved)
+
+    def test_recipe_question_answers_from_referenced_recipe_without_search(self):
+        recipe = recipe_record("Soup")
+        self.service._is_small_talk_query = RecipeRAGService._is_small_talk_query.__get__(self.service)
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update({
+            "query_type": "recipe_question", "resolved_query": "Can I freeze Soup?",
+            "referenced_recipe_ids": [recipe["recipe_id"]],
+        })
+        self.service.response_generator.answer_recipe_question = Mock(return_value="Storage guidance is not provided.")
+        result = self.ask("Can I freeze it?", [{"role": "assistant", "content": "Soup", "recipes": [recipe]}])
+        self.assertEqual(result["response"], "Storage guidance is not provided.")
+        self.assertEqual(self.service.response_generator.answer_recipe_question.call_args.args[1][0]["ingredients"], recipe["ingredients"])
+        self.service.search_engine.multi_query_search.assert_not_called()
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+
+    def test_more_keeps_constraints_added_in_earlier_more_request(self):
+        history = [
+            {"role": "user", "content": "Mild dinners"},
+            {"role": "user", "content": "more recipes without onions"},
+            {"role": "assistant", "content": "Try soup", "recipes": [recipe_record("Soup")]},
+        ]
+        self.ask("more recipes", history)
+        sent_history = self.service.intent_analyzer.understand_query_intent_with_context.call_args.args[1]
+        self.assertEqual(sent_history[1]["content"], "more recipes without onions")
+        self.assertEqual(sent_history[2]["recipes"][0]["recipe_id"], "soup")
+        self.assertNotIn("Try soup", sent_history[2]["content"])
+
+    def test_missing_reference_does_not_use_another_chats_recipe(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update({
+            "query_type": "recipe_question", "referenced_recipe_ids": ["soup-from-another-chat"],
+        })
+        result = self.ask("Can I freeze it?", [{"role": "user", "content": "Hello"}])
+        self.assertIn("Which recipe", result["response"])
+        self.service.search_engine.multi_query_search.assert_not_called()
+
+    def test_explicit_adaptation_uses_selected_recipe_instead_of_unrelated_search(self):
+        first = recipe_record("First Recipe")
+        second = recipe_record("Second Recipe", "adaptable", generated=True)
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update({
+            "query_type": "recipe_adaptation", "resolved_query": "Make Second Recipe vegetarian",
+            "referenced_recipe_ids": [second["recipe_id"]],
+        })
+        result = self.ask("Make the second one vegetarian", [{"role": "assistant", "content": "Two recipes", "recipes": [first, second]}])
+        self.assertEqual(result["source"], "llm_generated")
+        references = self.service.recipe_enhancer.generate_fallback_recipes.call_args.kwargs["grounding_recipes"]
+        self.assertEqual([recipe["name"] for recipe in references], ["Second Recipe"])
+        self.service.search_engine.multi_query_search.assert_not_called()
+
+    def test_context_resolution_failure_does_not_search_without_previous_constraints(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value["context_resolution_failed"] = True
+        result = self.ask("without onions", [{"role": "user", "content": "Vegetarian dinners"}])
+        self.assertIn("earlier requirements", result["response"])
+        self.service.search_engine.multi_query_search.assert_not_called()
+
+    def test_more_returns_new_recipes_when_generation_also_contains_repeat(self):
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [
+            recipe_record("Previous Dinner", generated=True),
+            recipe_record("New Dinner", generated=True),
+        ]
+        result = self.ask("more recipes", [
+            {"role": "user", "content": "Mild flavorful meals"},
+            {"role": "assistant", "content": "Previously shown recipes: Previous Dinner"},
+        ])
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["New Dinner"])
+        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 1)
+
+    def test_exhausted_more_request_retains_original_context_in_response(self):
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = []
+        result = self.ask("more recipes", [{"role": "user", "content": "Mild flavorful meals"}])
+        self.assertEqual(result["source"], "no_results")
+        self.assertIn("Mild flavorful meals", result["response"])
+        self.assertNotIn("rephras", result["response"].lower())
+
     def test_leftover_requirement_still_requires_evidence(self):
         self.service.intent_analyzer.understand_query_intent_with_context.return_value["constraints"] = {"leftover_friendly": True}
         self.service.search_engine.multi_query_search.return_value = [recipe_record("Fresh Dinner")]
@@ -182,8 +299,75 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertTrue(candidates)
         self.assertTrue(all(any(label in recipe["type"].lower() for label in ("entree", "main dish", "one-dish")) for recipe in candidates))
 
+    def test_csv_rescue_excludes_shown_names_before_applying_limit(self):
+        service = RecipeRAGService()
+        service.data_loader.load_data(str(Path(__file__).parents[1] / "app/data/Recipe.csv"))
+        intent = {"preferences": {"cuisine_types": ["chinese"]}}
+        first = service._get_database_search_candidates("Chinese dinner", intent, set(), 1)
+        self.assertEqual(len(first), 1)
+        shown = {service._normalize_recipe_name(first[0]["name"])}
+        second = service._get_database_search_candidates("Chinese dinner", intent, set(), 1, excluded_names=shown)
+        self.assertEqual(len(second), 1)
+        self.assertNotEqual(first[0]["recipe_id"], second[0]["recipe_id"])
+
 
 class GenerationAndVerificationTests(unittest.TestCase):
+    def test_question_prompt_contains_actual_recipe_and_marks_unknown_facts(self):
+        generator = ResponseGenerator()
+        llm = Mock(predict=Mock(return_value="The recipe does not specify a freezing duration."))
+        generator.initialize(llm)
+        result = generator.answer_recipe_question("Can I freeze Soup?", [recipe_record("Soup")], {})
+        self.assertIn("does not specify", result)
+        prompt = llm.predict.call_args.args[0]
+        self.assertIn("1 cup tofu", prompt)
+        self.assertIn("do not invent nutrition totals or storage durations", prompt)
+
+    def test_early_user_requirements_and_recipe_references_remain_in_long_chat(self):
+        analyzer = IntentAnalyzer()
+        parsed = analyzer._get_fallback_intent_data("Italian vegetarian dinner without peanuts")
+        parsed["preferences"]["cuisine_types"] = ["italian"]
+        parsed["constraints"]["dietary_restrictions"] = ["vegetarian"]
+        analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))))
+        history = [{"role": "user", "content": "I am vegetarian; avoid peanuts. Chinese dinner please."}]
+        history.append({"role": "assistant", "content": "A soup", "recipes": [recipe_record("Soup")]})
+        history.extend({"role": "user", "content": "more recipes"} for _ in range(8))
+        result = analyzer.understand_query_intent_with_context("Italian instead", history)
+        prompt = analyzer.llm.predict.call_args.args[0]
+        self.assertIn("I am vegetarian; avoid peanuts", prompt)
+        self.assertIn('"recipe_id": "soup"', prompt)
+        self.assertEqual(result["preferences"]["cuisine_types"], ["italian"])
+        self.assertIn("Italian vegetarian dinner without peanuts", result["search_strategy"]["enhanced_query"])
+
+    def test_contextual_intents_are_isolated_between_chats(self):
+        analyzer = IntentAnalyzer()
+        vegetarian = analyzer._get_fallback_intent_data("vegetarian dinner")
+        vegetarian["constraints"]["dietary_restrictions"] = ["vegetarian"]
+        fish = analyzer._get_fallback_intent_data("fish dinner")
+        analyzer.initialize(Mock(predict=Mock(side_effect=[json.dumps(vegetarian), json.dumps(fish)])))
+        first = analyzer.understand_query_intent_with_context("more recipes", [{"role": "user", "content": "Vegetarian dinner"}])
+        second = analyzer.understand_query_intent_with_context("more recipes", [{"role": "user", "content": "Fish dinner"}])
+        self.assertEqual(first["constraints"]["dietary_restrictions"], ["vegetarian"])
+        self.assertEqual(second["constraints"]["dietary_restrictions"], [])
+        self.assertNotIn("Vegetarian dinner", analyzer.llm.predict.call_args.args[0])
+
+    def test_intent_prompt_provides_schema_for_mild_meal_follow_up(self):
+        analyzer = IntentAnalyzer()
+        query = "Show meals that taste mild but are still flavorful"
+        parsed = analyzer._get_fallback_intent_data(query)
+        parsed["preferences"]["flavor_profiles"] = ["mild", "flavorful"]
+        llm = Mock(predict=Mock(return_value=json.dumps(parsed)))
+        analyzer.initialize(llm)
+        result = analyzer.understand_query_intent_with_context(query, [{"role": "user", "content": query}])
+        prompt = llm.predict.call_args.args[0]
+        self.assertIn('"flavor_profiles"', prompt)
+        self.assertIn('"constraints"', prompt)
+        self.assertIn("Only user messages establish requirements", prompt)
+        self.assertNotIn("Your existing intent prompt", prompt)
+        self.assertEqual(result["preferences"]["flavor_profiles"], ["mild", "flavorful"])
+        self.assertIsNone(result["constraints"]["max_ingredients"])
+        self.assertFalse(result["constraints"]["leftover_friendly"])
+        self.assertEqual(result["preferences"]["meal_types"], [])
+
     def test_grounded_generation_receives_recipe_content_and_keeps_ai_provenance(self):
         llm = Mock()
         llm.predict.return_value = json.dumps([recipe_record("New Soup", generated=True)])

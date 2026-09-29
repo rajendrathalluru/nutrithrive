@@ -1,4 +1,4 @@
-import { BackendHealth, Recipe } from '../types';
+import { BackendHealth, ChatMessage, Recipe } from '../types';
 import { cleanBackendText, formatIngredients, formatInstructions } from '../utils/textCleaner';
 
 export class BackendService {
@@ -68,7 +68,7 @@ export class BackendService {
 
   async searchRecipes(
     query: string,
-    conversationHistory: Array<{role: string, content: string}> = []
+    conversationHistory: ChatMessage[] = []
   ): Promise<{ recipes: Recipe[], backendData: any }> {
     let response: Response;
 

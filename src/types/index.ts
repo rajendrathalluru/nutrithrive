@@ -54,6 +54,7 @@ export interface NutriThriveChatbotProps {
 export interface ChatMessage {
   role: string;
   content: string;
+  recipes?: Array<Record<string, any>>;
 }
 
 export interface QueryRequest {

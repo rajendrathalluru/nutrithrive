@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import threading
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.models.schemas import (
     RecipeRequest, 
@@ -36,6 +36,7 @@ from pydantic import field_validator
 class ChatMessage(BaseModel):
     role: str
     content: str
+    recipes: Optional[List[Dict[str, Any]]] = None
 
     @field_validator("role")
     @classmethod
@@ -288,7 +289,7 @@ async def ask_question(request: ConversationQueryRequest):  # UPDATED: Use new r
         conv_history = None
         if request.conversation_history:
             conv_history = [
-                {"role": msg.role, "content": msg.content}
+                msg.model_dump(exclude_none=True)
                 for msg in request.conversation_history
             ]
 
@@ -376,7 +377,8 @@ async def system_info():
     info = rag_service.get_system_info()
     # Add conversation context capability info
     info["supports_conversation_context"] = True
-    info["max_conversation_history"] = 6  # Last 3 exchanges
+    info["max_conversation_history"] = None
+    info["conversation_context_policy"] = "All user turns and recipe references within the supplied chat; last six turns of assistant prose."
     info["initialization_error"] = startup_error
     info["startup_in_progress"] = startup_in_progress
     return info

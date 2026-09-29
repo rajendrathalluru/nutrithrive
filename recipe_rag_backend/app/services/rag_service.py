@@ -75,7 +75,8 @@ class RecipeRAGService:
         return deduplicated
 
     def _get_database_search_candidates(
-        self, query: str, intent_data: Dict[str, Any], excluded_ids: set[str], limit: int
+        self, query: str, intent_data: Dict[str, Any], excluded_ids: set[str], limit: int,
+        excluded_names: Optional[set[str]] = None
     ) -> List[Dict[str, Any]]:
         if self.data_loader.df is None:
             return []
@@ -96,6 +97,8 @@ class RecipeRAGService:
         for _, row in self.data_loader.df.iterrows():
             record = row.to_dict()
             if record.get("recipe_id") in excluded_ids:
+                continue
+            if self._normalize_recipe_name(record.get("Name", "")) in (excluded_names or set()):
                 continue
             title_terms = set(re.findall(r"[a-z0-9]+", str(record.get("Name", "")).lower()))
             content = self.data_loader.build_recipe_text(record)
@@ -127,6 +130,12 @@ class RecipeRAGService:
             and recipe.get("verification_details", {}).get("relevance") == "match"
         ]
         return self._apply_deterministic_constraints(matches, intent_data)
+
+    def _verify_new_generated_recipes(
+        self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any], excluded_names: set[str]
+    ) -> List[Dict[str, Any]]:
+        new_recipes = self._exclude_previously_shown_recipes(recipes, excluded_names)
+        return self._get_verified_matches(self._verify_candidates(new_recipes, intent_data), intent_data)
 
     def _apply_deterministic_constraints(
         self,
@@ -231,6 +240,24 @@ class RecipeRAGService:
             recipe for recipe in recipes
             if self._normalize_recipe_name(recipe.get("name", "")) not in shown_names
         ]
+
+    def _get_conversation_recipes(self, conversation_history: Optional[List[Dict]]) -> List[Dict[str, Any]]:
+        recipes = {}
+        for message in conversation_history or []:
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            for recipe in message.get("recipes") or []:
+                if isinstance(recipe, dict) and recipe.get("recipe_id"):
+                    recipes[str(recipe["recipe_id"])] = dict(recipe)
+        return list(recipes.values())
+
+    def _build_context_reply(self, query: str, mode: str, intent_data: Dict[str, Any], response: str) -> Dict[str, Any]:
+        return {
+            "query": query, "mode": mode, "response": response,
+            "source": "recipe_follow_up", "matches_found": 0,
+            "source_documents": [], "intent_analysis": intent_data,
+            "conversation_context_used": True
+        }
 
     def _build_recipe_data_from_doc(self, doc: Any) -> Dict[str, Any]:
         recipe_id = self.search_engine.safe_get_metadata(doc, "recipe_id", "")
@@ -420,7 +447,11 @@ class RecipeRAGService:
                 logger.info("Detected PHI-like content, returning privacy redirect response")
                 return self._build_phi_redirect_response(query, mode, conversation_history)
 
-            if self._is_small_talk_query(query):
+            conversation_recipes = self._get_conversation_recipes(conversation_history)
+            references_previous_recipe = bool(conversation_recipes) and bool(re.search(
+                r"\b(it|them|those|these|that|first|second|third|one|ones)\b", query, re.IGNORECASE
+            ))
+            if self._is_small_talk_query(query) and not references_previous_recipe:
                 logger.info("Detected small-talk query, returning conversational response")
                 return self._build_small_talk_response(query, mode, conversation_history)
 
@@ -428,15 +459,51 @@ class RecipeRAGService:
             previous_recipe_request = self._get_previous_recipe_request(conversation_history)
             recipe_request_query = previous_recipe_request if is_more_request and previous_recipe_request else query
             previously_shown_names = self._get_previously_shown_recipe_names(conversation_history)
+            excluded_names = previously_shown_names if is_more_request else set()
+            intent_history = conversation_history
+            if is_more_request:
+                intent_history = [
+                    ({"role": "assistant", "content": "Previously shown recipe reference data.", "recipes": message["recipes"]}
+                     if message.get("role") == "assistant" else message)
+                    for message in (conversation_history or [])
+                    if isinstance(message, dict)
+                    and (
+                        message.get("role") == "user"
+                        or (message.get("role") == "assistant" and message.get("recipes"))
+                    )
+                ]
 
             # Step 1: Enhanced intent understanding with conversation context
-            intent_data = self.intent_analyzer.understand_query_intent_with_context(recipe_request_query, conversation_history)
+            intent_data = self.intent_analyzer.understand_query_intent_with_context(query, intent_history)
+            if intent_data.get("context_resolution_failed"):
+                return self._build_context_reply(
+                    query, mode, intent_data,
+                    "I couldn't reliably interpret this follow-up. Please try again so I can keep your earlier requirements."
+                )
+            recipe_request_query = str(intent_data.get("resolved_query") or recipe_request_query)
             intent_data = {**intent_data, "recipe_request": self._normalize_recipe_request(recipe_request_query)}
+            query_type = intent_data.get("query_type")
+            reference_ids = intent_data.get("referenced_recipe_ids") or []
+            referenced_recipes = [recipe for recipe in conversation_recipes if recipe["recipe_id"] in reference_ids]
+            if query_type == "clarification" or (
+                query_type in {"recipe_question", "recipe_adaptation"}
+                and (not referenced_recipes or len(referenced_recipes) != len(set(reference_ids)))
+            ):
+                return self._build_context_reply(
+                    query, mode, intent_data,
+                    "Which recipe do you mean? Please use its name or its position in the last recipe list."
+                )
+            if query_type == "recipe_question":
+                return self._build_context_reply(
+                    query, mode, intent_data,
+                    self.response_generator.answer_recipe_question(recipe_request_query, referenced_recipes, intent_data)
+                )
+            is_recipe_adaptation = query_type == "recipe_adaptation"
             logger.info(f"Intent analysis: {time.time() - start_time:.2f}s")
             effective_query = intent_data.get("search_strategy", {}).get("enhanced_query") or recipe_request_query
             
             # Step 2: Multi-query search
-            docs = self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
+            docs = [] if is_recipe_adaptation else self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
             logger.info(f"Search complete: {time.time() - start_time:.2f}s, found {len(docs)} docs")
             
             # Step 3: Reranking
@@ -444,7 +511,7 @@ class RecipeRAGService:
             logger.info(f"Reranking complete: {time.time() - start_time:.2f}s, {len(reranked_docs)} docs")
             
             # Step 4: Extract recipe details
-            candidate_recipes = []
+            candidate_recipes = referenced_recipes if is_recipe_adaptation else []
             for doc in reranked_docs:
                 try:
                     candidate_recipes.append(self._build_recipe_data_from_doc(doc))
@@ -463,10 +530,11 @@ class RecipeRAGService:
             logger.info(f"Batch verification complete: {time.time() - start_time:.2f}s")
 
             verified_recipes = self._get_verified_matches(candidate_recipes, intent_data)
-            if not verified_recipes:
+            if not verified_recipes and not is_recipe_adaptation:
                 seen_ids = {self._get_recipe_identity(recipe) for recipe in candidate_recipes}
                 additional = self._get_database_search_candidates(
-                    normalized_recipe_request, intent_data, seen_ids, settings.SEARCH_K
+                    normalized_recipe_request, intent_data, seen_ids, settings.SEARCH_K,
+                    excluded_names=excluded_names
                 )
                 for doc in docs:
                     try:
@@ -491,7 +559,7 @@ class RecipeRAGService:
             source_docs = verified_recipes
             
             if not verified_recipes:
-                grounding_recipes = [
+                grounding_recipes = referenced_recipes if is_recipe_adaptation else [
                     recipe for recipe in candidate_recipes
                     if recipe.get("database_record_found")
                     and recipe.get("verification_details", {}).get("relevance") in {"match", "adaptable"}
@@ -509,8 +577,8 @@ class RecipeRAGService:
                     failed_recipes,
                     grounding_recipes=grounding_recipes
                 )
-                generated_recipes = self._get_verified_matches(
-                    self._verify_candidates(generated_recipes, intent_data), intent_data
+                generated_recipes = self._verify_new_generated_recipes(
+                    generated_recipes, intent_data, excluded_names
                 )
 
                 if not generated_recipes:
@@ -521,8 +589,8 @@ class RecipeRAGService:
                         failed_recipes,
                         grounding_recipes=grounding_recipes
                     )
-                    generated_recipes = self._get_verified_matches(
-                        self._verify_candidates(generated_recipes, intent_data), intent_data
+                    generated_recipes = self._verify_new_generated_recipes(
+                        generated_recipes, intent_data, excluded_names
                     )
 
                 if not generated_recipes:
@@ -532,8 +600,8 @@ class RecipeRAGService:
                         intent_data,
                         grounding_recipes=grounding_recipes
                     )
-                    generated_recipes = self._get_verified_matches(
-                        self._verify_candidates(generated_recipes, intent_data), intent_data
+                    generated_recipes = self._verify_new_generated_recipes(
+                        generated_recipes, intent_data, excluded_names
                     )
                 
                 if generated_recipes:
@@ -541,7 +609,12 @@ class RecipeRAGService:
                 else:
                     return {
                         "query": query,
-                        "response": self.response_generator.generate_helpful_no_results_message(effective_query, intent_data),
+                        "response": (
+                            f"I couldn't find additional recipes matching your earlier request, \"{recipe_request_query}\", right now. "
+                            "I kept your requirements and excluded recipes already shown."
+                            if is_more_request else
+                            self.response_generator.generate_helpful_no_results_message(effective_query, intent_data)
+                        ),
                         "source": "no_results",
                         "matches_found": 0,
                         "mode": mode,

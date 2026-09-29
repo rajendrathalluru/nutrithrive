@@ -5,6 +5,7 @@ import {BackendService} from '../services/backendService';
 import Sidebar from './Sidebar';
 import ChatInput from './ChatInput';
 import MessageComponent from './Message';
+import { buildConversationHistory } from '../utils/conversationHistory';
 
 const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome }) => {
   const [chats, setChats] = useState<Chat[]>([
@@ -151,14 +152,7 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
 
     try {
       // Build conversation history excluding the current user message and loading messages
-      const historyForBackend = currentChat.messages
-        .filter(msg => !msg.isLoading)
-        .map(msg => ({
-          role: msg.role,
-          content: msg.role === 'assistant' && msg.recipes?.length
-            ? `${msg.content}\nPreviously shown recipes: ${msg.recipes.map(recipe => recipe.title).join(' | ')}`
-            : msg.content
-        }));
+      const historyForBackend = buildConversationHistory(currentChat.messages);
 
       // Pass conversation history to backend
       const { recipes, backendData } = await backendService.searchRecipes(
