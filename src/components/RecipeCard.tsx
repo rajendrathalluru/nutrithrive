@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Zap, AlertCircle, FileText, Hash, Users, Clock, ExternalLink } from 'lucide-react';
 import { Recipe } from '../types';
+import { groupIngredients } from '../utils/ingredientGroups';
 
 interface RecipeCardProps {
   recipe: Recipe;
@@ -10,6 +11,7 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
   const [expanded, setExpanded] = useState(false);
   const helpfulTips = Array.isArray(recipe.helpfulTips) ? recipe.helpfulTips.filter(Boolean) : [];
   const ingredients = Array.isArray(recipe.ingredients) ? recipe.ingredients.filter(Boolean) : [];
+  const ingredientEntries = groupIngredients(ingredients);
   const instructions = Array.isArray(recipe.instructions) ? recipe.instructions.filter(Boolean) : [];
   const ingredientAdaptations = Array.isArray(recipe.ingredientAdaptations)
     ? recipe.ingredientAdaptations.filter(Boolean)
@@ -153,11 +155,19 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
                   <FileText className="w-4 h-4" />
                   Ingredients
                 </h4>
-                <ul className="text-sm text-slate-700 space-y-1">
-                  {ingredients.map((ingredient, idx) => (
-                    <li key={idx} className="flex items-start">
-                      <span className="w-2 h-2 bg-slate-500 rounded-full mt-1.5 mr-2 flex-shrink-0"></span>
-                      {ingredient}
+                <ul aria-label="Ingredients" className="list-disc pl-5 text-sm text-slate-700 space-y-1">
+                  {ingredientEntries.map((entry, idx) => (
+                    <li key={idx} className="pl-1">
+                      {entry.kind === 'section' ? (
+                        <>
+                          <span className="font-medium text-slate-900">{entry.heading}</span>
+                          <ul aria-label={entry.heading.replace(/:$/, '')} className="list-[circle] pl-5 mt-1 space-y-1">
+                            {entry.ingredients.map((ingredient, ingredientIndex) => (
+                              <li key={ingredientIndex} className="pl-1">{ingredient}</li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : entry.text}
                     </li>
                   ))}
                 </ul>
