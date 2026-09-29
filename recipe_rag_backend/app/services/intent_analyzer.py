@@ -2,7 +2,7 @@ import logging
 import json
 import re
 from typing import Dict, Any, List, Optional
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +155,11 @@ Expand conceptual requests into concrete ingredient and cooking terms in search_
 and enhanced_query, while preserving the request. For example, shelf-stable meals should retrieve pantry
 recipes using canned beans, canned vegetables, dry grains, and dried legumes even without that exact phrase.
 {INGREDIENT_STORAGE_RULES}
+{COOKING_ATTENTION_RULES}
 Do not infer ingredient counts, protein targets, storage needs, or medical conditions from recipes
 previously suggested by the assistant. Only user messages establish requirements.
+Pantry/shelf-stable ingredients do not imply hands-off cooking. Set attention_level to null unless the
+user asks to reduce active work or monitoring; examples in these instructions are not user requirements.
 Do not narrow a broad request for meals to breakfast or snacks unless the user asks for that.
 """
 
@@ -200,7 +203,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
                 "health_conditions": [],
                 "skill_level": None,
                 "leftover_friendly": False,
-                "ingredient_storage": None
+                "ingredient_storage": None,
+                "attention_level": None
             },
             "preferences": {
                 "cuisine_types": [],
@@ -243,12 +247,29 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         constraints.setdefault("health_conditions", [])
         constraints.setdefault("leftover_friendly", False)
         constraints.setdefault("ingredient_storage", None)
+        constraints.setdefault("attention_level", None)
         preferences.setdefault("cuisine_types", [])
         preferences.setdefault("meal_types", [])
         preferences.setdefault("nutritional_goals", [])
         cancer_specific.setdefault("symptoms", [])
 
         query_lower = query.lower()
+        attention_query = query_lower.replace("’", "'")
+        attention_evidence = re.search(
+            r"\b(?:attention|monitor(?:ing)?|stirr?ing|hands[- ]off|babysit|watch(?:ing)?|"
+            r"active (?:work|cooking|time)|stand(?:ing)? (?:over|at|by)|low[- ]effort)\b",
+            attention_query,
+        )
+        if constraints.get("attention_level") == "low" and not attention_evidence:
+            constraints["attention_level"] = None
+        rejects_hands_off = re.search(r"\b(?:don't|do not|doesn't|does not)\s+(?:want|need|require)\s+hands[- ]off\b", attention_query)
+        if not rejects_hands_off and re.search(
+            r"\b(?:don'?t|do not|doesn'?t|does not|without|no|little|minimal|less)\s+"
+            r"(?:require\s+|need\s+)?(?:constant\s+|much\s+)?(?:attention|monitoring|stirring)\b"
+            r"|\b(?:hands[- ]off|low[- ]attention)\b",
+            attention_query,
+        ):
+            constraints["attention_level"] = "low"
         cuisines = self._extract_cuisine_types(query_lower)
         meal_types = self._extract_meal_types(query_lower)
         nutritional_goals = self._extract_nutrition_goals(query_lower)
@@ -431,6 +452,10 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             keywords.append("no red meat")
         if constraints.get("leftover_friendly"):
             keywords.extend(["leftover friendly", "meal prep", "stores well"])
+        if constraints.get("ingredient_storage") in {"pantry_based", "shelf_stable_only"}:
+            keywords.extend(["canned beans", "canned vegetables", "dried lentils", "rice", "pasta"])
+        if constraints.get("attention_level") == "low":
+            keywords.extend(["baked", "roasted", "slow cooker", "assembly", "occasional stirring"])
         return list(dict.fromkeys([keyword for keyword in keywords if keyword]))
 
     def _build_enhanced_query(
@@ -453,6 +478,10 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             parts.append("without red meat or pork")
         if constraints.get("leftover_friendly"):
             parts.append("leftover friendly make ahead stores well refrigerate or freeze")
+        if constraints.get("ingredient_storage") in {"pantry_based", "shelf_stable_only"}:
+            parts.append("pantry canned beans canned vegetables dried lentils dry grains")
+        if constraints.get("attention_level") == "low":
+            parts.append("hands-off baking roasting slow cooker assembly minimal active attention")
         return " ".join(dict.fromkeys([part for part in parts if part]))
 
     def _merge_unique(self, existing: List[str], incoming: List[str]) -> List[str]:

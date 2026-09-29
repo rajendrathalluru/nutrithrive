@@ -32,6 +32,9 @@ def model_pass():
         "relevance": "match",
         "verification_score": 100,
         "constraint_violations": [],
+        "constraint_checks": {
+            "constraints.ingredient_storage": {"status": "pass", "evidence": "The ingredients are specified in pantry forms."}
+        },
         "ingredient_storage_check": {
             "required_non_pantry_ingredients": [],
             "unspecified_ingredient_forms": [],
@@ -102,6 +105,16 @@ class PantryValidationTests(unittest.TestCase):
             ("1 teaspoon garlic powder", False),
             ("1 teaspoon garlic salt", False),
             ("1 teaspoon freshly ground black pepper", False),
+            ("1 can fire-roasted, crushed tomatoes with juice", False),
+            ("1 can crushed or diced tomatoes, with juice", False),
+            ("3 tablespoons canola or corn oil", False),
+            ("1 tablespoon canola, corn, or olive oil", False),
+            ("3 tablespoons tomato paste", False),
+            ("1 teaspoon onion, dried", False),
+            ("1 can diced tomatoes, chopped onion", True),
+            ("1 cup frozen corn, canned tomatoes", True),
+            ("1 cup coconut milk", True),
+            ("1 can coconut milk", False),
         ]
         for ingredient, should_fail in examples:
             with self.subTest(ingredient=ingredient):

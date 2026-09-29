@@ -149,6 +149,7 @@ class RecipeRoutingTests(unittest.TestCase):
         verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
             "id": 0, "relevance": "match", "passes_verification": True,
             "constraint_violations": [],
+            "constraint_checks": {"constraints.ingredient_storage": {"status": "pass", "evidence": "Uses pantry ingredients."}},
             "ingredient_storage_check": {
                 "required_non_pantry_ingredients": [], "unspecified_ingredient_forms": [], "conflicting_guidance": [],
             },
@@ -491,7 +492,9 @@ class GenerationAndVerificationTests(unittest.TestCase):
         assessment = {"required_non_pantry_ingredients": [], "unspecified_ingredient_forms": [], "conflicting_guidance": []}
         verifier = RecipeVerifier()
         verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
-            "id": 0, "relevance": "match", "passes_verification": True, "ingredient_storage_check": assessment
+            "id": 0, "relevance": "match", "passes_verification": True, "ingredient_storage_check": assessment,
+            "constraint_violations": [],
+            "constraint_checks": {"constraints.ingredient_storage": {"status": "pass", "evidence": "Canned beans and dry quinoa."}},
         }]))))
         recipe = recipe_record("Quinoa and Black Bean Bowl")
         recipe.update({
@@ -689,6 +692,37 @@ HELPFUL_TIPS:
         enhancer.initialize(Mock(predict=Mock(return_value=json.dumps([recipe_record("Unsafe Dinner", generated=True)]))), guidelines)
         self.assertEqual(enhancer.generate_fallback_recipes("dinner", {}, []), [])
 
+    def test_generation_retry_repairs_full_candidate_and_preserves_grounding(self):
+        rejected = recipe_record("Chickpea Salad", generated=True)
+        rejected["ingredients"] = ["1 can chickpeas", "1 red bell pepper", "2 tbsp fresh parsley"]
+        rejected["instructions"] = ["Dice the pepper and mix with chickpeas and parsley."]
+        rejected["verification_details"] = {
+            "passes_verification": False,
+            "constraint_violations": ["Required fresh pepper and parsley"],
+        }
+        repaired = recipe_record("Pantry Chickpea Salad", generated=True)
+        repaired["ingredients"] = ["1 can chickpeas", "1 can diced tomatoes", "1 tsp dried parsley"]
+        reference = recipe_record("Database Bean Salad")
+        llm = Mock(predict=Mock(return_value=json.dumps([repaired, repaired])))
+        enhancer = RecipeEnhancer()
+        enhancer.initialize(llm, aicr_service)
+
+        result = enhancer.generate_fallback_recipes(
+            "Shelf-stable vegetarian meals", {
+                "constraints": {"ingredient_storage": "pantry_based", "dietary_restrictions": ["vegetarian"]}
+            }, [rejected], [reference]
+        )
+
+        self.assertEqual(len(result), 1)
+        prompt = llm.predict.call_args.args[0]
+        self.assertIn("Repair ONE rejected recipe", prompt)
+        self.assertIn("1 red bell pepper", prompt)
+        self.assertIn("Dice the pepper and mix", prompt)
+        self.assertIn("Required fresh pepper and parsley", prompt)
+        self.assertIn('"dietary_restrictions": ["vegetarian"]', prompt)
+        self.assertEqual(result[0]["generation_basis"], "database_guided")
+        self.assertEqual(result[0]["reference_sources"][0]["recipe_id"], reference["recipe_id"])
+
     def test_verifier_rejects_unrelated_even_if_model_says_pass(self):
         verifier = RecipeVerifier()
         verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
@@ -700,7 +734,7 @@ HELPFUL_TIPS:
     def test_verifier_accepts_semantic_match_and_checks_guidelines(self):
         verifier = RecipeVerifier()
         verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
-            "id": 0, "relevance": "match", "passes_verification": True
+            "id": 0, "relevance": "match", "constraint_checks": {}, "constraint_violations": []
         }]))))
         results = verifier.batch_verify_recipes([recipe_record("Hot-and-Sour Soup")], {"recipe_request": "What are some dinner recipes that are Chinese"}, aicr_service)
         self.assertTrue(results[0]["verification_details"]["passes_verification"])

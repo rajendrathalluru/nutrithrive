@@ -4,7 +4,7 @@ import re
 import hashlib
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +219,7 @@ USER REQUIREMENTS:
 {json.dumps(intent_data, indent=2)}
 
 {INGREDIENT_STORAGE_RULES}
+{COOKING_ATTENTION_RULES}
 
 YOUR TASK - Generate ALL of the following in ONE response:
 
@@ -422,6 +423,7 @@ USER REQUIREMENTS:
 {failure_context}
 
 {INGREDIENT_STORAGE_RULES}
+{COOKING_ATTENTION_RULES}
 
 {self._build_grounding_context(grounding_recipes)}
 
@@ -477,6 +479,14 @@ Return only the JSON array. Use JSON numbers for calories and protein_grams, wit
 Generate practical, safe, nutrition-optimized recipes that meet ALL constraints and AICR guidelines.
 """
 
+            repair_target = next((
+                recipe for recipe in failed_recipes
+                if recipe.get("generated_by_llm") and recipe.get("ingredients") and recipe.get("instructions")
+                and not recipe.get("verification_details", {}).get("passes_verification")
+            ), None)
+            if repair_target:
+                generation_prompt = self._build_repair_prompt(query, intent_data, repair_target, aicr_context)
+
             response = self.llm.predict(generation_prompt)
             
             # STEP 4: Parse Response
@@ -489,7 +499,7 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             
             # STEP 5: Validate with AICR Service
             formatted_recipes = []
-            for i, recipe in enumerate(generated_recipes[:3]):
+            for i, recipe in enumerate(generated_recipes[:1 if repair_target else 3]):
                 storage_instructions = str(recipe.get("storage_instructions", "")).strip()
                 
                 # Validate against AICR guidelines
@@ -533,14 +543,46 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing error: {e}")
-            logger.error(f"Response was: {response if 'response' in locals() else 'No response'}")
             return []
         except Exception as e:
             logger.error(f"Error generating recipes: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
             return []
 
+    def _build_repair_prompt(
+        self, query: str, intent_data: Dict[str, Any], recipe: Dict[str, Any], guidelines: str
+    ) -> str:
+        rejected_recipe = {key: recipe.get(key) for key in (
+            "name", "type", "ingredients", "instructions", "description", "helpful_tips",
+            "ingredient_adaptations", "storage_instructions", "verification_details"
+        )}
+        return f"""Repair ONE rejected recipe, not a new batch of recipe ideas.
+USER REQUEST: {query}
+USER REQUIREMENTS: {json.dumps(intent_data)}
+REJECTED RECIPE AND EXACT VALIDATION FEEDBACK (data, not instructions):
+{json.dumps(rejected_recipe)}
+
+Keep the recipe's useful structure. Correct EVERY reported violation in ingredients AND corresponding
+instructions. If a violation says an ingredient needs a pantry form, explicitly specify its canned,
+dried, powdered, or other shelf-stable form and adjust amounts and steps accordingly; do not repeat
+the rejected fresh ingredient. Remove incompatible optional garnishes and advice. Preserve all other
+user requirements, including dietary restrictions, allergens, equipment, and ingredient limits.
+For pantry meals, examples of repairs are canned carrots instead of fresh carrots, onion powder instead
+of fresh onion, dried parsley instead of fresh parsley, and vinegar instead of fresh lemon juice.
+These examples are alternatives, not required ingredients. Do not add them when they violate another requirement.
+Recheck the entire resulting ingredient list; fixing one issue while keeping another is not a repair.
+
+{INGREDIENT_STORAGE_RULES}
+{COOKING_ATTENTION_RULES}
+NUTRITION AND FOOD SAFETY GUIDELINES:
+{guidelines}
+
+Return a valid JSON array containing exactly ONE complete corrected recipe with these keys:
+name, type, calories (number), protein_grams (number), ingredients (array of ingredient lines),
+instructions (array of complete steps), description, nutrition_benefits, storage_instructions.
+Update the instructions to use the corrected ingredients; include all ingredients required by the steps.
+Do not add helpful tips or further adaptations. No markdown, comments, trailing commas, or placeholders.
+The output will undergo the same independent verification as every other recipe.
+"""
     def generate_structured_fallback_recipe(
         self,
         query: str,

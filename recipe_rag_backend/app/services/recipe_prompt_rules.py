@@ -17,3 +17,12 @@ For these requests specify canned corn rather than unspecified corn, canned pepp
 fresh peppers, and dried herbs rather than required fresh cilantro. Tips and adaptations must also work from pantry
 ingredients: do not recommend adding grilled chicken, refrigerated tofu, raw vegetables, or frozen corn.
 """
+
+COOKING_ATTENTION_RULES = """For hands-off meals, minimal monitoring, or recipes that do not require constant attention,
+set constraints.attention_level='low'. This means little active work after setup, not a short total cooking time.
+Prefer assembly, oven baking, roasting, or suitable slow-cooker methods with explicit timing and occasional checks.
+Do not require any particular appliance unless the user requests it. Constant stirring, repeated turning,
+stir-frying, and continuous frying do not meet low-attention needs. A brief preparation step can be acceptable
+when the main cooking phase is passive. Evaluate the actual instructions, not just the recipe name or equipment.
+Do not infer an arbitrary time limit or ingredient limit. Do not advise leaving stovetop cooking unattended.
+"""

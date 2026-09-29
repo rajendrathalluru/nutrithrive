@@ -21,6 +21,28 @@ NON_PANTRY_FORM = re.compile(r"\b(?:fresh|frozen|refrigerated|raw)\b")
 OPTIONAL = re.compile(r"\b(?:optional|if desired|if using|if you (?:wish|like))\b")
 
 
+def _ingredient_clauses(ingredient: str) -> List[str]:
+    normalized = ingredient.lower()
+    normalized = re.sub(r"\b(?:canola|corn|olive)(?:,?\s+(?:or\s+)?(?:canola|corn|olive))+\s+oil\b", "oil", normalized)
+    normalized = re.sub(r"\b(?:peanut|almond|cashew|seed|nut) butter\b", "nut spread", normalized)
+    normalized = re.sub(
+        r"\b(?:cream of tartar|garlic salt|tomato paste|tomato sauce|corn oil|corn starch|cornstarch)\b",
+        "pantry staple", normalized,
+    )
+    normalized = re.sub(r"\b(?:chicken|beef|fish) (broth|stock)\b", r"\1", normalized)
+    clauses = []
+    for fragment in re.split(r",|;|\+|\b(?:and|or)\b", normalized):
+        has_food = any(pattern.search(fragment) for pattern in (PRODUCE, REFRIGERATED, AMBIGUOUS_FORM))
+        previous_has_food = clauses and any(
+            pattern.search(clauses[-1]) for pattern in (PRODUCE, REFRIGERATED, AMBIGUOUS_FORM)
+        )
+        if clauses and (not has_food or not previous_has_food or fragment.strip().startswith("with ")):
+            clauses[-1] += " " + fragment
+        else:
+            clauses.append(fragment)
+    return clauses
+
+
 def audit_pantry_ingredients(recipe: Dict[str, Any], storage: str) -> Dict[str, List[str]]:
     """Catch known ingredient-form contradictions independently of model judgments."""
     findings = {
@@ -40,9 +62,7 @@ def audit_pantry_ingredients(recipe: Dict[str, Any], storage: str) -> Dict[str, 
             findings["unspecified_ingredient_forms"].append("Invalid ingredient line")
             continue
         normalized = ingredient.lower()
-        for clause in re.split(r",|;|\+|\b(?:and|or)\b", normalized):
-            clause = re.sub(r"\b(?:peanut|almond|cashew|seed|nut) butter\b", "nut spread", clause)
-            clause = re.sub(r"\b(?:cream of tartar|coconut milk|coconut cream|garlic salt)\b", "pantry staple", clause)
+        for clause in _ingredient_clauses(normalized):
             produce = PRODUCE.search(clause)
             refrigerated = REFRIGERATED.search(clause)
             ambiguous = AMBIGUOUS_FORM.search(clause)
