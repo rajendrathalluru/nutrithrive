@@ -31,6 +31,8 @@ Conversation context belongs to the active chat. Requests carry that chat's user
 
 Intent processing preserves semantic search expansions (for example, “shelf-stable meals” → canned beans, dried lentils, rice) for vector retrieval and CSV candidate ranking. Pantry-based requests and strictly shelf-stable-only requests are distinguished by `constraints.ingredient_storage`. Shared prompt rules apply across intent analysis, verification, generation, and summaries; pantry ingredients do not imply room-temperature storage of the prepared meal.
 
+Pantry-based recipes must be achievable without required fresh or refrigerated purchases; fresh garnishes must be explicitly optional. Pantry verification requires a structured assessment of required non-pantry ingredients, unspecified ingredient forms, and conflicting guidance. Missing or adverse assessments fail verification. Generated tips and adaptations trigger final verification; rejected generated guidance may be removed once, followed by another full check. Core ingredient failures remain rejected, and failed generation assessments are passed to the retry.
+
 Run offline backend regression tests from the repository root:
 
 ```bash

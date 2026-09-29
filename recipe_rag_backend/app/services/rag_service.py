@@ -138,6 +138,29 @@ class RecipeRAGService:
         new_recipes = self._exclude_previously_shown_recipes(recipes, excluded_names)
         return self._get_verified_matches(self._verify_candidates(new_recipes, intent_data), intent_data)
 
+    def _validate_final_recipes(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        verified = self._verify_candidates(recipes, intent_data)
+        matches = self._get_verified_matches(verified, intent_data)
+        accepted_ids = {self._get_recipe_identity(recipe) for recipe in matches}
+        stripped_recipes = []
+        for recipe in verified:
+            if self._get_recipe_identity(recipe) in accepted_ids:
+                continue
+            if not recipe.get("guidance_generated"):
+                continue
+            if not (recipe.get("helpful_tips") or recipe.get("ingredient_adaptations")):
+                continue
+            stripped = dict(recipe)
+            stripped.pop("helpful_tips", None)
+            stripped.pop("ingredient_adaptations", None)
+            stripped["guidance_generated"] = False
+            stripped["instructions_adapted"] = False
+            stripped_recipes.append(stripped)
+        if stripped_recipes:
+            matches.extend(self._get_verified_matches(self._verify_candidates(stripped_recipes, intent_data), intent_data))
+        positions = {self._get_recipe_identity(recipe): position for position, recipe in enumerate(recipes)}
+        return sorted(matches, key=lambda recipe: positions[self._get_recipe_identity(recipe)])
+
     def _apply_deterministic_constraints(
         self,
         recipes: List[Dict[str, Any]],
@@ -578,11 +601,13 @@ class RecipeRAGService:
                     failed_recipes,
                     grounding_recipes=grounding_recipes
                 )
+                generation_candidates = generated_recipes
                 generated_recipes = self._verify_new_generated_recipes(
                     generated_recipes, intent_data, excluded_names
                 )
 
                 if not generated_recipes:
+                    failed_recipes = [*generation_candidates, *failed_recipes]
                     logger.warning("Initial AI recipe generation returned no usable recipes - retrying once")
                     generated_recipes = self.recipe_enhancer.generate_fallback_recipes(
                         f"Create complete recipes with ingredients and step-by-step instructions for: {generation_query}",
@@ -625,9 +650,12 @@ class RecipeRAGService:
             
             # Step 7: PARALLEL ENHANCEMENT with AICR guidelines
             source_docs = self.recipe_enhancer.batch_enhance_recipes(source_docs[:MAX_RECIPES_PER_RESPONSE], intent_data)
-            if any(recipe.get("dynamically_adapted") for recipe in source_docs):
-                source_docs = self._verify_candidates(source_docs, intent_data)
-                source_docs = self._get_verified_matches(source_docs, intent_data)
+            if any(
+                recipe.get("dynamically_adapted") or recipe.get("guidance_generated")
+                or recipe.get("helpful_tips") or recipe.get("ingredient_adaptations")
+                for recipe in source_docs
+            ):
+                source_docs = self._validate_final_recipes(source_docs, intent_data)
             source_docs = self._deduplicate_recipes(source_docs)
             source_docs = self._apply_deterministic_constraints(source_docs, intent_data)
             source_docs = self._annotate_recipe_source_tiers(source_docs)

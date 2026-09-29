@@ -138,6 +138,44 @@ class RecipeRoutingTests(unittest.TestCase):
         result = self.ask()
         self.assertEqual(result["source_documents"][0]["name"], "Valid Dinner")
         self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 2)
+        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_args.args[2][0]["name"], "Invalid Dinner")
+
+    def test_guidance_added_after_verification_is_rechecked_and_removed_if_conflicting(self):
+        recipe = recipe_record("Pantry Bean Bowl")
+        self.service.search_engine.multi_query_search.return_value = [recipe]
+
+        def enhance(recipes, intent):
+            for candidate in recipes:
+                candidate["helpful_tips"] = ["Add grilled chicken and fresh cilantro."]
+                candidate["ingredient_adaptations"] = ["Use frozen corn."]
+                candidate["guidance_generated"] = True
+            return recipes
+
+        def verify_guidance(recipes, intent, guidelines):
+            for candidate in recipes:
+                bad_guidance = bool(candidate.get("helpful_tips") or candidate.get("ingredient_adaptations"))
+                candidate["verification_details"] = {
+                    "passes_verification": not bad_guidance,
+                    "relevance": "adaptable" if bad_guidance else "match",
+                    "constraint_violations": ["Conflicting pantry guidance"] if bad_guidance else [],
+                }
+            return recipes
+
+        self.service.recipe_enhancer.batch_enhance_recipes.side_effect = enhance
+        self.service.recipe_verifier.batch_verify_recipes.side_effect = verify_guidance
+        result = self.ask("Meals using shelf-stable ingredients")
+        self.assertEqual(result["matches_found"], 1)
+        returned = result["source_documents"][0]
+        self.assertNotIn("helpful_tips", returned)
+        self.assertNotIn("ingredient_adaptations", returned)
+        self.assertEqual(returned["ingredients"], recipe["ingredients"])
+        self.assertEqual(returned["recipe_link"], recipe["recipe_link"])
+        self.assertEqual(self.service.recipe_verifier.batch_verify_recipes.call_count, 3)
+
+    def test_removing_guidance_does_not_allow_invalid_core_ingredients(self):
+        recipe = recipe_record("Fresh Pepper Bowl")
+        recipe.update({"guidance_generated": True, "helpful_tips": ["Add grilled chicken."], "test_constraint_failure": True})
+        self.assertEqual(self.service._validate_final_recipes([recipe], {}), [])
 
     def test_invalid_generated_results_are_not_shown(self):
         self.service.recipe_enhancer.generate_fallback_recipes.return_value = [recipe_record("Wrong Dish", "unrelated", True)]
@@ -314,6 +352,56 @@ class RecipeRoutingTests(unittest.TestCase):
 
 
 class GenerationAndVerificationTests(unittest.TestCase):
+    def test_pantry_checks_reject_each_conflict_even_with_model_pass(self):
+        fields = ["required_non_pantry_ingredients", "unspecified_ingredient_forms", "conflicting_guidance"]
+        for field in fields:
+            with self.subTest(field=field):
+                assessment = {key: [] for key in fields}
+                assessment[field] = ["Fresh pepper or conflicting advice"]
+                verifier = RecipeVerifier()
+                verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
+                    "id": 0, "relevance": "match", "passes_verification": True,
+                    "ingredient_storage_check": assessment,
+                }]))))
+                result = verifier.batch_verify_recipes([recipe_record("Quinoa Bowl")], {
+                    "constraints": {"ingredient_storage": "pantry_based"}
+                }, aicr_service)
+                self.assertFalse(result[0]["verification_details"]["passes_verification"])
+                self.assertEqual(result[0]["verification_details"]["ingredient_storage_check"], assessment)
+
+    def test_pantry_verification_requires_complete_assessment(self):
+        for assessment in [None, {}, {"required_non_pantry_ingredients": []}]:
+            with self.subTest(assessment=assessment):
+                verifier = RecipeVerifier()
+                verifier.initialize(Mock(predict=Mock(return_value=json.dumps({
+                    "relevance": "match", "passes_verification": True, "ingredient_storage_check": assessment
+                }))))
+                result = verifier.verify_recipe_against_constraints(recipe_record("Bowl"), {
+                    "constraints": {"ingredient_storage": "shelf_stable_only"}
+                })
+                self.assertFalse(result["passes_verification"])
+
+    def test_pantry_verification_accepts_complete_clean_assessment_and_sees_all_guidance(self):
+        assessment = {"required_non_pantry_ingredients": [], "unspecified_ingredient_forms": [], "conflicting_guidance": []}
+        verifier = RecipeVerifier()
+        verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
+            "id": 0, "relevance": "match", "passes_verification": True, "ingredient_storage_check": assessment
+        }]))))
+        recipe = recipe_record("Quinoa and Black Bean Bowl")
+        recipe.update({
+            "ingredients": ["1 cup dry quinoa", "1 can black beans", "1 can corn", "1 can diced tomatoes", "olive oil", "cumin"],
+            "instructions": ["Cook quinoa, drain the canned vegetables, and combine."],
+            "helpful_tips": ["Season with garlic powder."],
+            "ingredient_adaptations": ["Use canned chickpeas instead of black beans."],
+        })
+        result = verifier.batch_verify_recipes([recipe], {"constraints": {"ingredient_storage": "pantry_based"}}, aicr_service)
+        self.assertTrue(result[0]["verification_details"]["passes_verification"])
+        prompt = verifier.llm.predict.call_args.args[0]
+        self.assertIn("Season with garlic powder.", prompt)
+        self.assertIn("Use canned chickpeas instead of black beans.", prompt)
+        individual_prompt = verifier._build_individual_verification_prompt(recipe, {})
+        self.assertIn("Season with garlic powder.", individual_prompt)
+
     def test_pantry_paraphrases_retrieve_same_csv_candidates_with_semantic_intent(self):
         service = RecipeRAGService()
         service.data_loader.load_data(str(Path(__file__).parents[1] / "app/data/Recipe.csv"))

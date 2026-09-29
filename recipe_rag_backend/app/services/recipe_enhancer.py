@@ -236,6 +236,8 @@ YOUR TASK - Generate ALL of the following in ONE response:
 
 If recipe data is incomplete, first infer a sensible ingredient list and cooking process from the recipe name, type, and description.
 For both INGREDIENT_MODIFICATIONS and HELPFUL_TIPS:
+- Every suggestion must preserve the user's constraints and the recipe's dietary identity. Leave these sections empty
+  if no useful compliant advice is needed; do not add generic protein or vegetable suggestions just to fill them.
 - Do not describe quinoa, brown rice, or other grains as equivalent protein replacements for lentils, beans, tofu, eggs, fish, or poultry.
 - If replacing a stronger protein source with a lower-protein grain, describe the change as texture or flavor only. Do not claim added, increased, or equivalent protein from that replacement.
 - Example: "Use 1 cup of cooked quinoa or brown rice instead of lentils for a different texture." End the suggestion there; do not append "and added protein."
@@ -373,7 +375,8 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
             if failed_recipes:
                 failures = [{
                     "name": r.get("name"), 
-                    "violations": r.get("verification_details", {}).get("constraint_violations", [])
+                    "violations": r.get("verification_details", {}).get("constraint_violations", []),
+                    "ingredient_storage_check": r.get("verification_details", {}).get("ingredient_storage_check")
                 } for r in failed_recipes[:2]]
                 failure_context = f"\n\nPrevious Failed Recipes:\n{json.dumps(failures, indent=2)}"
 
