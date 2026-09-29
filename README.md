@@ -33,6 +33,8 @@ Intent processing preserves semantic search expansions (for example, “shelf-st
 
 Pantry-based recipes must be achievable without required fresh or refrigerated purchases; fresh garnishes must be explicitly optional. Pantry verification requires a structured assessment of required non-pantry ingredients, unspecified ingredient forms, and conflicting guidance. Missing or adverse assessments fail verification. Generated tips and adaptations trigger final verification; rejected generated guidance may be removed once, followed by another full check. Core ingredient failures remain rejected, and failed generation assessments are passed to the retry.
 
+Both batch and individual verification also audit ingredient lines independently of the model. This bounded check catches known fresh/refrigerated ingredients and ambiguous forms such as unspecified corn or broth, even when the model reports an empty error list. Explicit pantry forms (for example, canned carrots or garlic powder) remain eligible. Conflicts retain exact ingredient lines for the existing correction retry; otherwise relevant recipes remain available as adaptation references, not direct matches. This is a supplemental guard, not a complete food-storage classifier: unfamiliar ingredients and narrative guidance still require semantic verification.
+
 If final validation removes every selected recipe, unused verified database matches are tried first. If none remain, one additional generation attempt receives the final rejection feedback and relevant recipe references, then undergoes the same verification and follow-up exclusion checks. This bounded recovery does not add another round of optional tips. Initial-request failures and exhausted follow-ups have distinct messages.
 
 Run offline backend regression tests from the repository root:
@@ -253,6 +255,8 @@ Your Azure Web App should be:
 - configured to pull from your Azure Container Registry
 
 ### How deployment works
+
+The workflow embeds the Git commit SHA in the container. Check `/health` → `build_revision` against the successful workflow's commit to confirm which backend is running. Missing revision metadata means the image predates this diagnostic; `unknown` means the image was built without `APP_BUILD_REVISION`. The frontend normally calls the same origin, but a configured `REACT_APP_BACKEND_URL` can point it elsewhere, so confirm the browser's actual `/ask` URL when diagnosing stale responses.
 
 On every push to `main`, the workflow:
 

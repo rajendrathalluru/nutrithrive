@@ -76,6 +76,7 @@ class SearchResponse(BaseModel):
     total_found: int
 
 class HealthCheck(BaseModel):
+    build_revision: str = "unknown"
     status: str
     message: str
     model_loaded: bool

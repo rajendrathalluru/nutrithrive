@@ -8,6 +8,7 @@ load_dotenv(override=True)
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 class Settings:
+    APP_BUILD_REVISION: str = os.getenv("APP_BUILD_REVISION", "unknown")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     DATA_FILE_PATH: str = os.getenv("DATA_FILE_PATH", "app/data/Recipe.csv")
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")

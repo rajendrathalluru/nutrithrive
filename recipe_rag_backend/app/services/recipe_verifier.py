@@ -6,6 +6,7 @@ import re
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
+from app.services.pantry_validation import audit_pantry_ingredients
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +32,11 @@ Do not require canned forms for naturally dry pantry staples such as uncooked gr
 For other requests ingredient_storage_check may be null.
 """
 
-    def _enforce_storage_check(self, verification: Dict[str, Any], intent_data: Dict[str, Any]) -> Dict[str, Any]:
-        if intent_data.get("constraints", {}).get("ingredient_storage") not in {"pantry_based", "shelf_stable_only"}:
+    def _enforce_storage_check(
+        self, verification: Dict[str, Any], intent_data: Dict[str, Any], recipe: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        storage = intent_data.get("constraints", {}).get("ingredient_storage")
+        if storage not in {"pantry_based", "shelf_stable_only"}:
             return verification
         assessment = verification.get("ingredient_storage_check")
         if not isinstance(verification.get("constraint_violations"), list):
@@ -41,9 +45,21 @@ For other requests ingredient_storage_check may be null.
         if not isinstance(assessment, dict) or any(not isinstance(assessment.get(field), list) for field in fields):
             verification["passes_verification"] = False
             verification.setdefault("constraint_violations", []).append("Ingredient storage assessment is missing or incomplete")
-        elif any(assessment[field] for field in fields):
+            assessment = {
+                field: assessment[field] if isinstance(assessment, dict) and isinstance(assessment.get(field), list) else []
+                for field in fields
+            }
+            verification["ingredient_storage_check"] = assessment
+        for field, ingredients in audit_pantry_ingredients(recipe, storage).items():
+            assessment[field].extend(ingredient for ingredient in ingredients if ingredient not in assessment[field])
+        if any(assessment[field] for field in fields):
             verification["passes_verification"] = False
             verification.setdefault("constraint_violations", []).append("Ingredients or guidance do not satisfy the pantry requirement")
+            if verification.get("relevance") == "match":
+                verification["relevance"] = "adaptable"
+            verification["reasoning"] = "Ingredient storage checks found conflicts with the pantry requirement."
+        if verification.get("passes_verification") is not True:
+            verification["meets_preferences"] = False
         return verification
 
     def __init__(self):
@@ -93,7 +109,7 @@ For other requests ingredient_storage_check may be null.
             
             for i, recipe in enumerate(recipes):
                 if i in results_map:
-                    verification = self._enforce_storage_check(results_map[i], intent_data)
+                    verification = self._enforce_storage_check(results_map[i], intent_data, recipe)
                     recipe["verification_details"] = {
                         "passes_verification": (
                             verification.get("passes_verification") is True
@@ -255,7 +271,7 @@ Verify ALL {len(recipes_for_verification)} recipes.
             response = self.llm.predict(verification_prompt)
             
             verification_result = self._parse_individual_verification_response(response)
-            verification_result = self._enforce_storage_check(verification_result, intent_data)
+            verification_result = self._enforce_storage_check(verification_result, intent_data, recipe_data)
             verification_result["passes_verification"] = (
                 verification_result.get("passes_verification") is True
                 and verification_result.get("relevance") == "match"

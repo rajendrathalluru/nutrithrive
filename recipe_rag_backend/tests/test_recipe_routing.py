@@ -140,6 +140,43 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 2)
         self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_args.args[2][0]["name"], "Invalid Dinner")
 
+    def test_pantry_ingredient_failure_reaches_retry_without_losing_database_grounding(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value = {
+            "constraints": {"ingredient_storage": "pantry_based"},
+            "preferences": {}, "search_strategy": {},
+        }
+        verifier = RecipeVerifier()
+        verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
+            "id": 0, "relevance": "match", "passes_verification": True,
+            "constraint_violations": [],
+            "ingredient_storage_check": {
+                "required_non_pantry_ingredients": [], "unspecified_ingredient_forms": [], "conflicting_guidance": [],
+            },
+        }]))))
+        self.service.recipe_verifier = verifier
+        database_recipe = recipe_record("Lentil Soup")
+        database_recipe["ingredients"] = ["1 cup dried lentils", "1/2 cup chopped carrots"]
+        database_recipe["instructions"] = ["Cook the lentils and carrots in water."]
+        self.service.search_engine.multi_query_search.return_value = [database_recipe]
+        invalid = copy.deepcopy(database_recipe)
+        invalid.update({"generated_by_llm": True, "database_record_found": False})
+        corrected = recipe_record("Pantry Lentil Soup", generated=True)
+        corrected.update({
+            "ingredients": ["1 cup dried lentils", "1 can sliced carrots", "water"],
+            "instructions": ["Cook lentils in water, then add canned carrots and heat through."],
+        })
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [[invalid], [corrected]]
+
+        result = self.ask("Show meals that rely on shelf-stable foods.")
+
+        self.assertEqual(result["source_documents"][0]["name"], "Pantry Lentil Soup")
+        self.assertEqual(result["source_documents"][0]["source_label"], "AI Generated")
+        retry = self.service.recipe_enhancer.generate_fallback_recipes.call_args
+        assessment = retry.args[2][0]["verification_details"]["ingredient_storage_check"]
+        self.assertIn("1/2 cup chopped carrots", assessment["required_non_pantry_ingredients"])
+        self.assertEqual(retry.kwargs["grounding_recipes"][0]["name"], "Lentil Soup")
+        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 2)
+
     def test_guidance_added_after_verification_is_rechecked_and_removed_if_conflicting(self):
         recipe = recipe_record("Pantry Bean Bowl")
         self.service.search_engine.multi_query_search.return_value = [recipe]
@@ -430,7 +467,9 @@ class GenerationAndVerificationTests(unittest.TestCase):
                     "id": 0, "relevance": "match", "passes_verification": True,
                     "ingredient_storage_check": assessment,
                 }]))))
-                result = verifier.batch_verify_recipes([recipe_record("Quinoa Bowl")], {
+                recipe = recipe_record("Quinoa Bowl")
+                recipe["ingredients"] = ["1 cup dry quinoa", "1 can black beans"]
+                result = verifier.batch_verify_recipes([recipe], {
                     "constraints": {"ingredient_storage": "pantry_based"}
                 }, aicr_service)
                 self.assertFalse(result[0]["verification_details"]["passes_verification"])

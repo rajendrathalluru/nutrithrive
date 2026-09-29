@@ -31,6 +31,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY recipe_rag_backend/app ./app
 COPY --from=frontend-build /frontend/build ./frontend-build
 
+ARG APP_BUILD_REVISION=unknown
+ENV APP_BUILD_REVISION=${APP_BUILD_REVISION}
+LABEL org.opencontainers.image.revision=${APP_BUILD_REVISION}
+
 EXPOSE 8000
 
 CMD ["sh", "-c", "uvicorn app.main:app --host ${API_HOST} --port ${PORT}"]

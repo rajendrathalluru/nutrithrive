@@ -192,6 +192,7 @@ async def health_check():
         else "failed"
     )
     return HealthCheck(
+        build_revision=settings.APP_BUILD_REVISION,
         status=status,
         message=(
             "Service is running"

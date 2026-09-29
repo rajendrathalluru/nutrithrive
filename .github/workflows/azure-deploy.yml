@@ -40,7 +40,7 @@ jobs:
         env:
           GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/thrivewell
         run: |
-          docker build -t $GHCR_IMAGE:${{ github.sha }} .
+          docker build --build-arg APP_BUILD_REVISION=${{ github.sha }} -t $GHCR_IMAGE:${{ github.sha }} .
           docker tag $GHCR_IMAGE:${{ github.sha }} $GHCR_IMAGE:latest
           docker push $GHCR_IMAGE:${{ github.sha }}
           docker push $GHCR_IMAGE:latest
