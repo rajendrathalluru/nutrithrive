@@ -85,6 +85,8 @@ The decorative meal image is bundled locally rather than fetched from an externa
 
 ## Chat UI
 
+Browser tabs and home-screen shortcuts use the Thrivewell leaf from `public/thrivewell-icon.svg`, matching the homepage's leaf symbol. `favicon.ico`, `logo192.png`, and `logo512.png` are raster exports of this SVG; regenerate those together when changing the symbol. The manifest uses the Thrivewell name and sage/ivory colors. Versioned icon URLs replace previously cached React icons.
+
 The landing page lives at `/` and the chat at `/chat`. Navigation updates browser history, so opening or refreshing `/chat` stays on the chat page, and browser Back/Forward follows the current URL. FastAPI's existing frontend fallback serves the React app for this route. This preserves the page, not the conversation: messages remain in memory and are reset by a full reload; no browser or server-side conversation storage is added.
 
 The chat page uses [assistant-ui's external-store runtime](https://www.assistant-ui.com/docs/runtimes/custom/external-store) for message rendering and scroll behavior. `NutriThriveChatbot` still owns chat state, health polling, and request handling; `BackendService` and `buildConversationHistory` remain the only recipe-request path. `AssistantChatThread` is the presentation adapter and renders the original messages, including structured recipe data and safety responses, without changing their contents.
