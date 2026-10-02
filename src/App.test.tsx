@@ -2,10 +2,6 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import App from './App';
 
-jest.mock('./components/LandingPage', () => function MockLandingPage({ onGetStarted }: { onGetStarted: () => void }) {
-  return <button onClick={onGetStarted}>Get Started</button>;
-});
-
 jest.mock('./components/NutriThriveChatbot', () => function MockChatbot({ onBackToHome }: { onBackToHome: () => void }) {
   return <main aria-label="Recipe chat"><button onClick={onBackToHome}>Back to Home</button></main>;
 });
@@ -57,7 +53,7 @@ test('Back to Home updates the URL and a fresh app mount stays on the homepage',
 });
 
 test('browser Back and Forward synchronize the view and preserve landing anchors', async () => {
-  window.history.replaceState(null, '', '/#features');
+  window.history.replaceState(null, '', '/#recipes');
   render(<App />);
   fireEvent.click(screen.getByRole('button', { name: 'Get Started' }));
   await act(async () => {
@@ -67,7 +63,7 @@ test('browser Back and Forward synchronize the view and preserve landing anchors
     });
   });
   expect(window.location.pathname).toBe('/');
-  expect(window.location.hash).toBe('#features');
+  expect(window.location.hash).toBe('#recipes');
   expect(screen.getByRole('button', { name: 'Get Started' })).toBeInTheDocument();
   await act(async () => {
     await new Promise<void>(resolve => {

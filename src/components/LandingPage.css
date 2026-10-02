@@ -1,0 +1,234 @@
+.thrive-home {
+  --home-paper: #fbfaf6;
+  --home-ink: #263e31;
+  --home-muted: #5f6b5b;
+  --home-green: #365b42;
+  --home-line: #e2e5da;
+  color: var(--home-ink);
+  background: var(--home-paper);
+  min-height: 100svh;
+  text-align: left;
+}
+
+.App:has(> .thrive-home) { overflow-x: clip; }
+
+.thrive-home .home-container { width: min(1180px, calc(100% - 80px)); margin-inline: auto; }
+.thrive-home :is(h1, h2) { font-family: Georgia, 'Times New Roman', serif; font-weight: 400; letter-spacing: -.045em; text-wrap: balance; }
+.thrive-home h1 { font-size: clamp(44px, 4.6vw, 67px); line-height: 1.08; }
+.thrive-home h2 { font-size: clamp(32px, 3.4vw, 46px); line-height: 1.15; }
+.thrive-home :is(h1, h2) em { color: #6b805b; font-weight: 400; }
+.thrive-home h3 { font-size: 19px; line-height: 1.35; font-weight: 500; letter-spacing: -.35px; }
+.thrive-home p { text-wrap: pretty; }
+.thrive-home :is(button, a, summary):focus-visible { outline: 2px solid #648853; outline-offset: 5px; }
+.thrive-home button, .thrive-home a { -webkit-tap-highlight-color: transparent; }
+.thrive-home :is(section, main)[id] { scroll-margin-top: 105px; }
+.thrive-home .home-eyebrow { display: flex; align-items: center; gap: 9px; font-size: 10px; line-height: 1.6; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #5d7053; }
+.thrive-home .home-eyebrow > span { width: 6px; height: 6px; border-radius: 50%; background: #8a9d72; }
+.thrive-home .home-button { display: inline-flex; align-items: center; justify-content: center; gap: 18px; min-height: 52px; padding: 14px 23px; border: 1px solid var(--home-green); border-radius: 9px; background: var(--home-green); color: white; font-size: 13px; font-weight: 500; transition: background .18s, transform .18s; }
+.thrive-home .home-button:hover { background: #274733; transform: translateY(-1px); }
+.thrive-home .home-text-link { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 44px; font-size: 13px; font-weight: 500; color: var(--home-green); text-decoration: underline; text-decoration-color: #abbba1; text-underline-offset: 5px; }
+.thrive-home .home-text-link:hover { color: #172f20; text-decoration-color: currentColor; }
+.thrive-home .home-skip-link { position: fixed; left: 12px; top: 12px; transform: translateY(-160%); z-index: 60; padding: 12px 18px; border-radius: 8px; color: white; background: var(--home-green); }
+.thrive-home .home-skip-link:focus { transform: translateY(0); }
+
+.thrive-home .home-header { position: sticky; top: 0; z-index: 30; background: #fbfaf6f2; border-bottom: 1px solid #e6e8df; backdrop-filter: blur(12px); }
+.thrive-home .home-header-inner { min-height: 84px; display: flex; align-items: center; justify-content: space-between; gap: 25px; }
+.thrive-home .home-brand { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; color: #304d39; font-size: 25px; font-weight: 600; letter-spacing: -.9px; }
+.thrive-home .home-brand > svg { width: 25px; height: 25px; stroke-width: 1.6; }
+.thrive-home .home-brand-dot { color: #97a47b; }
+.thrive-home .home-desktop-nav { display: flex; gap: 31px; align-items: center; }
+.thrive-home .home-desktop-nav a { display: inline-flex; align-items: center; min-height: 44px; color: #596656; font-size: 12px; }
+.thrive-home .home-desktop-nav a:hover { color: #1f4028; }
+.thrive-home .home-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.thrive-home .home-header-cta { min-height: 44px; padding: 10px 17px; gap: 16px; font-size: 12px; white-space: nowrap; }
+.thrive-home .home-menu-toggle { display: none; width: 44px; height: 44px; border-radius: 8px; flex-shrink: 0; }
+.thrive-home .home-mobile-nav { display: none; }
+
+.thrive-home .home-hero { display: grid; grid-template-columns: 1.1fr 1fr; align-items: center; gap: 58px; padding-block: 66px 58px; }
+.thrive-home .home-hero-copy { padding-block: 20px; min-width: 0; }
+.thrive-home .home-hero-copy > .home-eyebrow { margin-bottom: 25px; }
+.thrive-home .home-hero-description { max-width: 425px; margin-top: 26px; font-size: 16px; line-height: 1.85; color: var(--home-muted); }
+.thrive-home .home-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; margin-top: 29px; }
+.thrive-home .home-hero-notes { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 25px; color: var(--home-muted); font-size: 12px; }
+.thrive-home .home-hero-notes span { display: inline-flex; align-items: center; gap: 7px; }
+.thrive-home .home-audience { max-width: 370px; margin-top: 32px; padding-top: 18px; border-top: 1px solid var(--home-line); font-size: 12px; line-height: 1.8; color: var(--home-muted); }
+.thrive-home .home-hero-art { position: relative; min-width: 0; padding: 0 0 18px 12px; }
+.thrive-home .home-meal-frame { overflow: hidden; border-radius: 155px 155px 24px 24px; background: #e6e6d5; }
+.thrive-home .home-meal-frame img { display: block; width: 100%; height: auto; aspect-ratio: 1 / 1.04; object-fit: cover; }
+.thrive-home .home-meal-note { position: absolute; bottom: 66px; left: -25px; display: flex; align-items: center; gap: 13px; padding: 17px 23px 17px 16px; border: 1px solid #ffffffba; border-radius: 12px; background: #fffffff2; box-shadow: 0 8px 40px #253e3115; color: var(--home-muted); font-size: 12px; line-height: 1.7; }
+.thrive-home .home-meal-note > span { display: grid; place-items: center; width: 43px; height: 43px; border-radius: 50%; color: #6a8356; background: #f0f3e8; }
+.thrive-home .home-meal-note strong { font-size: 14px; font-weight: 500; color: var(--home-ink); }
+.thrive-home .home-hero-art figcaption { position: absolute; bottom: 0; right: 0; font-size: 10px; color: var(--home-muted); }
+.thrive-home .home-sources { display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); align-items: center; gap: 25px; padding-block: 27px; border-block: 1px solid var(--home-line); }
+.thrive-home .home-sources > p { color: var(--home-muted); font-size: 12px; line-height: 1.8; }
+.thrive-home .home-sources strong { font-weight: 500; color: #56634e; }
+.thrive-home .home-sources > div { display: flex; align-items: center; gap: 13px; }
+.thrive-home .home-sources > div > span { font-family: Georgia, 'Times New Roman', serif; font-size: 30px; letter-spacing: -.6px; color: #67775d; }
+.thrive-home .home-sources small { font-size: 10px; color: var(--home-muted); line-height: 1.6; }
+
+.thrive-home .home-section { padding-block: 90px; }
+.thrive-home .home-section-heading { text-align: center; }
+.thrive-home .home-section-heading .home-eyebrow { justify-content: center; margin-bottom: 16px; }
+.thrive-home .home-section-heading > p:last-child { margin-top: 18px; font-size: 14px; color: var(--home-muted); }
+.thrive-home .home-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 50px; margin-top: 46px; }
+.thrive-home .home-step { border-top: 1px solid #d8dfcf; padding-top: 23px; }
+.thrive-home .home-step-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; color: #6d815f; }
+.thrive-home .home-step-top span { color: var(--home-muted); font-size: 12px; }
+.thrive-home .home-step p { font-size: 13px; line-height: 1.85; color: var(--home-muted); margin-top: 12px; }
+
+.thrive-home .home-inspiration { padding: 47px; border-radius: 24px; background: #edf0e6; }
+.thrive-home .home-inspiration-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 38px; }
+.thrive-home .home-inspiration-heading .home-eyebrow { margin-bottom: 13px; }
+.thrive-home .home-inspiration-heading h2 { font-size: 36px; }
+.thrive-home .home-inspiration-heading > p { max-width: 265px; font-size: 12px; line-height: 1.85; color: var(--home-muted); }
+.thrive-home .home-inspiration-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-top: 32px; }
+.thrive-home .home-inspiration-card { padding: 28px 23px 25px; border: 1px solid #e2e6d9; border-radius: 13px; background: #fffefa; }
+.thrive-home .home-inspiration-icon { display: grid; place-items: center; width: 57px; height: 57px; border-radius: 18px; margin-bottom: 30px; }
+.thrive-home .home-tone-sand .home-inspiration-icon { color: #92814c; background: #f5efdf; }
+.thrive-home .home-tone-sage .home-inspiration-icon { color: #6c835c; background: #edf2e4; }
+.thrive-home .home-tone-peach .home-inspiration-icon { color: #a57a61; background: #f5e9df; }
+.thrive-home .home-inspiration-card .home-eyebrow { font-size: 10px; letter-spacing: .1em; color: var(--home-muted); }
+.thrive-home .home-inspiration-card h3 { margin-top: 9px; font-size: 18px; }
+.thrive-home .home-example-prompt { margin-top: 16px; color: var(--home-muted); font-size: 13px; line-height: 1.8; }
+.thrive-home .home-inspiration-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 20px; }
+.thrive-home .home-inspiration-footer > span { font-size: 12px; color: var(--home-muted); }
+
+.thrive-home .home-approach { display: grid; grid-template-columns: 1fr 1fr; gap: 90px; align-items: center; }
+.thrive-home .home-source-preview { padding: 38px; border-radius: 22px; background: #f0eee4; }
+.thrive-home .home-source-preview > .home-eyebrow { margin-bottom: 24px; font-size: 10px; }
+.thrive-home .home-provenance-card { border: 1px solid #e3e6db; padding: 26px; border-radius: 12px; background: #fffffc; box-shadow: 0 5px 15px #3d442c04; }
+.thrive-home :is(.home-source-badge, .home-ai-badge) { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 5px; color: #536e43; background: #eef4e6; font-size: 10px; }
+.thrive-home .home-ai-badge { color: #816b92; background: #f1ecf5; }
+.thrive-home .home-provenance-card h3 { margin-top: 15px; font-size: 20px; font-family: Georgia, 'Times New Roman', serif; font-weight: 400; }
+.thrive-home .home-provenance-card p { margin-top: 10px; color: var(--home-muted); font-size: 12px; line-height: 1.8; }
+.thrive-home .home-source-names { display: flex; align-items: center; gap: 12px; border-top: 1px solid #e9ebdf; padding-top: 14px; margin-top: 20px; font-size: 12px; font-weight: 500; letter-spacing: .05em; }
+.thrive-home .home-source-names span { color: #b2bba7; }
+.thrive-home .home-ai-card { margin: 14px 0 0 22px; }
+.thrive-home .home-source-note { margin-top: 20px; font-size: 11px; line-height: 1.7; color: var(--home-muted); }
+.thrive-home .home-approach-copy > .home-eyebrow { margin-bottom: 16px; }
+.thrive-home .home-approach-copy > p:not(.home-eyebrow) { margin-top: 24px; font-size: 14px; line-height: 1.9; color: var(--home-muted); }
+.thrive-home .home-principles { list-style: none; margin: 28px 0 20px; padding: 0; display: flex; flex-direction: column; gap: 18px; }
+.thrive-home .home-principles li { display: flex; align-items: flex-start; gap: 12px; }
+.thrive-home .home-principles svg { color: #6b8655; flex-shrink: 0; margin-top: 2px; }
+.thrive-home .home-principles span { color: var(--home-muted); font-size: 12px; line-height: 1.8; }
+.thrive-home .home-principles strong { display: block; color: var(--home-ink); font-size: 13px; font-weight: 500; margin-bottom: 3px; }
+
+.thrive-home .home-faq { display: grid; grid-template-columns: 1fr 1.3fr; gap: 75px; padding-bottom: 90px; }
+.thrive-home .home-faq .home-eyebrow { margin-bottom: 16px; }
+.thrive-home .home-faq h2 { font-size: 36px; }
+.thrive-home .home-faq details { border-bottom: 1px solid var(--home-line); }
+.thrive-home .home-faq details:first-child { border-top: 1px solid var(--home-line); }
+.thrive-home .home-faq summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; list-style: none; padding: 21px 0; font-size: 14px; font-weight: 500; cursor: pointer; }
+.thrive-home .home-faq summary::-webkit-details-marker { display: none; }
+.thrive-home .home-faq summary svg { flex-shrink: 0; color: #809171; transition: transform .18s; }
+.thrive-home .home-faq details[open] summary svg { transform: rotate(180deg); }
+.thrive-home .home-faq details > p { font-size: 13px; line-height: 1.9; color: var(--home-muted); padding: 0 22px 22px 0; }
+.thrive-home .home-final-cta { position: relative; display: flex; align-items: center; justify-content: space-between; overflow: hidden; border-radius: 24px; padding: 57px 65px; color: #fafbf4; background: #34553e; }
+.thrive-home .home-final-cta > div { position: relative; z-index: 1; }
+.thrive-home .home-final-cta .home-eyebrow { color: #becdac; margin-bottom: 17px; }
+.thrive-home .home-final-cta h2 { font-size: 46px; }
+.thrive-home .home-final-cta em { color: #d3dfbe; }
+.thrive-home .home-button-light { margin-top: 29px; color: #34553e; border-color: #f8faef; background: #f8faef; }
+.thrive-home .home-button-light:hover { background: #e8efd8; }
+.thrive-home .home-cta-leaf { color: #a3b585; opacity: .4; transform: rotate(-20deg); margin-right: 50px; }
+.thrive-home .home-footer { padding-block: 52px 27px; }
+.thrive-home .home-footer-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.thrive-home .home-footer nav { display: flex; align-items: center; flex-wrap: wrap; gap: 28px; font-size: 12px; color: #6a7660; }
+.thrive-home .home-footer nav a { display: inline-flex; align-items: center; min-height: 44px; }
+.thrive-home .home-footer-bottom { display: flex; justify-content: space-between; align-items: flex-start; gap: 30px; border-top: 1px solid var(--home-line); margin-top: 27px; padding-top: 22px; color: var(--home-muted); font-size: 12px; line-height: 1.8; }
+.thrive-home .home-footer-bottom > span { flex-shrink: 0; }
+
+@media (max-width: 1000px) {
+  .thrive-home .home-container { width: calc(100% - 48px); }
+  .thrive-home .home-desktop-nav { gap: 20px; }
+  .thrive-home .home-hero { gap: 30px; padding-top: 42px; }
+  .thrive-home h1 { font-size: 47px; }
+  .thrive-home .home-hero-actions { gap: 13px; }
+  .thrive-home .home-sources { gap: 20px; }
+  .thrive-home .home-sources > div { flex-direction: column; align-items: flex-start; gap: 5px; }
+  .thrive-home .home-inspiration { padding: 32px; }
+  .thrive-home .home-inspiration-card { padding: 22px 18px; }
+  .thrive-home .home-steps { gap: 30px; }
+  .thrive-home .home-approach { gap: 38px; }
+  .thrive-home .home-source-preview { padding: 25px; }
+  .thrive-home .home-faq { gap: 35px; }
+  .thrive-home .home-final-cta { padding: 45px; }
+  .thrive-home .home-cta-leaf { margin-right: 0; }
+}
+
+@media (max-width: 767px) {
+  .thrive-home .home-container { width: calc(100% - 36px); }
+  .thrive-home .home-header-inner { min-height: 72px; gap: 10px; }
+  .thrive-home .home-brand { font-size: 21px; gap: 6px; }
+  .thrive-home .home-brand > svg { width: 21px; height: 21px; }
+  .thrive-home .home-header-cta { min-height: 44px; padding: 9px 11px; font-size: 11px; gap: 8px; }
+  .thrive-home .home-desktop-nav { display: none; }
+  .thrive-home .home-menu-toggle { display: inline-grid; place-items: center; }
+  .thrive-home .home-menu-toggle:hover { background: #eaf0e2; }
+  .thrive-home .home-mobile-nav { display: flex; flex-direction: column; padding: 6px 22px 18px; border-top: 1px solid var(--home-line); }
+  .thrive-home .home-mobile-nav a { display: flex; align-items: center; justify-content: space-between; min-height: 48px; color: #506348; font-size: 14px; }
+  .thrive-home .home-hero { grid-template-columns: minmax(0, 1fr); padding-block: 34px 28px; gap: 28px; }
+  .thrive-home .home-hero-copy { padding: 0; }
+  .thrive-home .home-hero-copy > .home-eyebrow { font-size: 10px; letter-spacing: .09em; margin-bottom: 20px; }
+  .thrive-home h1 { font-size: clamp(38px, 8.7vw, 57px); }
+  .thrive-home .home-hero-description { max-width: 100%; font-size: 15px; line-height: 1.8; margin-top: 21px; }
+  .thrive-home .home-hero-actions { gap: 12px 20px; margin-top: 24px; }
+  .thrive-home .home-hero-actions .home-button { padding: 13px 18px; }
+  .thrive-home .home-hero-actions .home-text-link { font-size: 12px; }
+  .thrive-home .home-hero-notes { margin-top: 20px; gap: 20px; }
+  .thrive-home .home-audience { margin-top: 23px; padding-top: 14px; max-width: none; }
+  .thrive-home .home-hero-art { padding: 0 0 22px; width: min(100%, 490px); margin-inline: auto; }
+  .thrive-home .home-meal-frame { border-radius: 110px 110px 20px 20px; }
+  .thrive-home .home-meal-frame img { aspect-ratio: 1.16; }
+  .thrive-home .home-meal-note { left: 12px; bottom: 43px; padding: 12px 16px 12px 12px; font-size: 11px; gap: 10px; }
+  .thrive-home .home-meal-note strong { font-size: 13px; }
+  .thrive-home .home-sources { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 12px; padding-block: 24px; }
+  .thrive-home .home-sources > p { grid-column: 1 / -1; text-align: center; }
+  .thrive-home .home-sources > p br { display: none; }
+  .thrive-home .home-sources strong { margin-left: 5px; }
+  .thrive-home .home-sources > div { align-items: center; text-align: center; }
+  .thrive-home .home-sources > div > span { font-size: 28px; }
+  .thrive-home .home-section { padding-block: 57px; }
+  .thrive-home h2 { font-size: 34px; }
+  .thrive-home .home-steps { grid-template-columns: 1fr; gap: 27px; margin-top: 33px; }
+  .thrive-home .home-step { padding-top: 18px; }
+  .thrive-home .home-step-top { margin-bottom: 13px; }
+  .thrive-home .home-step p { margin-top: 8px; }
+  .thrive-home .home-inspiration { padding: 30px 20px 21px; border-radius: 18px; }
+  .thrive-home .home-inspiration-heading { flex-direction: column; align-items: flex-start; gap: 17px; }
+  .thrive-home .home-inspiration-heading h2 { font-size: 33px; }
+  .thrive-home .home-inspiration-heading > p { max-width: none; font-size: 13px; }
+  .thrive-home .home-inspiration-grid { grid-template-columns: 1fr; gap: 13px; margin-top: 25px; }
+  .thrive-home .home-inspiration-card { padding: 22px; }
+  .thrive-home .home-inspiration-icon { width: 48px; height: 48px; margin-bottom: 19px; border-radius: 14px; }
+  .thrive-home .home-inspiration-footer { flex-direction: column; gap: 4px; align-items: flex-start; }
+  .thrive-home .home-approach { grid-template-columns: minmax(0, 1fr); gap: 33px; }
+  .thrive-home .home-approach-copy { order: -1; }
+  .thrive-home .home-source-preview { padding: 28px 20px; }
+  .thrive-home .home-provenance-card { padding: 22px; }
+  .thrive-home .home-ai-card { margin-left: 12px; }
+  .thrive-home .home-faq { grid-template-columns: 1fr; gap: 28px; padding-bottom: 57px; }
+  .thrive-home .home-faq h2 { font-size: 34px; }
+  .thrive-home .home-faq summary { font-size: 13px; line-height: 1.7; gap: 15px; }
+  .thrive-home .home-final-cta { padding: 38px 24px; border-radius: 18px; }
+  .thrive-home .home-final-cta .home-eyebrow { font-size: 10px; }
+  .thrive-home .home-final-cta h2 { font-size: 35px; }
+  .thrive-home .home-cta-leaf { position: absolute; right: -50px; bottom: -45px; opacity: .16; }
+  .thrive-home .home-footer { padding-top: 34px; }
+  .thrive-home .home-footer-top { align-items: flex-start; flex-direction: column; gap: 14px; }
+  .thrive-home .home-footer nav { gap: 24px; }
+  .thrive-home .home-footer-bottom { flex-direction: column; gap: 12px; margin-top: 18px; padding-top: 18px; }
+}
+
+@media (max-width: 380px) {
+  .thrive-home .home-header-inner { gap: 6px; }
+  .thrive-home .home-brand { font-size: 18px; gap: 5px; }
+  .thrive-home .home-brand > svg { width: 18px; height: 18px; }
+  .thrive-home .home-header-cta { padding-inline: 10px; gap: 6px; }
+  .thrive-home .home-header-cta svg { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:has(.thrive-home) { scroll-behavior: auto; }
+  .thrive-home *, .thrive-home *::before, .thrive-home *::after { animation: none !important; transition: none !important; }
+}

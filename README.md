@@ -77,6 +77,12 @@ nutrithrive-research/
 - Backend: FastAPI, Uvicorn, LangChain, OpenAI, FAISS, Pandas, Pydantic
 - Deployment: Docker, Docker Compose, Render
 
+## Homepage UI
+
+The homepage uses a scoped warm-neutral and sage design in `LandingPage.tsx` and `LandingPage.css`, with responsive navigation, keyboard-accessible controls, recipe prompt examples, source-label explanations, and native FAQ disclosures. Every start-chat button uses the existing `onGetStarted` callback; the examples do not send requests or change conversation state. This presentation-only redesign does not modify recipe retrieval, chat, voice input, health polling, or routing.
+
+The decorative meal image is bundled locally rather than fetched from an external image host, and is clearly labeled AI-created rather than represented as a database recipe. Its generation prompt and provenance are documented in `src/assets/images/home-meal.README.md`. The homepage no longer imports the old WebGL background or GSAP navigation. Unsubstantiated ratings, patient testimonials, verification claims, and placeholder links are not displayed.
+
 ## Chat UI
 
 The landing page lives at `/` and the chat at `/chat`. Navigation updates browser history, so opening or refreshing `/chat` stays on the chat page, and browser Back/Forward follows the current URL. FastAPI's existing frontend fallback serves the React app for this route. This preserves the page, not the conversation: messages remain in memory and are reset by a full reload; no browser or server-side conversation storage is added.
