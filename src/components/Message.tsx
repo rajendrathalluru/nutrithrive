@@ -1,5 +1,5 @@
 import React from 'react';
-import { ExternalLink, Loader2, MessageCircle, Phone, Sparkles, User2 } from 'lucide-react';
+import { ExternalLink, Loader2, MessageCircle, Phone, Leaf } from 'lucide-react';
 import { Message as MessageType } from '../types';
 import RecipeCard from './RecipeCard';
 import { cleanBackendText } from '../utils/textCleaner';
@@ -13,35 +13,25 @@ const Message: React.FC<MessageProps> = ({ message }) => {
   const isSafetyRedirect = Boolean(message.backendData?.safety_redirect);
 
   return (
-    <div className={`flex gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>
-      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-sm ${
-        message.role === 'user' ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-200'
-      }`}>
-        {message.role === 'user' ? <User2 className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-      </div>
+    <article className={`tw-message tw-message-${message.role}`} aria-label={`${message.role === 'user' ? 'Your' : 'Thrivewell'} message`}>
+      {message.role === 'assistant' && <div className="tw-assistant-avatar"><Leaf size={17} aria-hidden="true" /></div>}
       
-      <div className="flex-1">
-        <div className="mb-2 flex items-center gap-2 px-1">
-          <span className="text-sm font-medium text-slate-900">
+      <div className="tw-message-body">
+        <div className="tw-message-meta">
+          <span>
             {message.role === 'user' ? 'You' : 'Thrivewell'}
           </span>
-          <span className="text-xs text-slate-400">
+          <time dateTime={message.timestamp.toISOString()}>
             {message.timestamp.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-          </span>
+          </time>
         </div>
 
         <div
           role={isSafetyRedirect ? 'alert' : undefined}
-          className={`rounded-[24px] p-5 ${
-          message.role === 'user' 
-            ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/10' 
-            : isSafetyRedirect
-              ? 'border-2 border-rose-200 bg-rose-50 text-slate-900 shadow-lg shadow-rose-900/5'
-            : 'glass-panel text-slate-800'
-          }`}
+          className={`tw-message-content ${isSafetyRedirect ? 'tw-safety-message' : ''}`}
         >
           {message.isLoading ? (
-            <div className="flex items-center gap-2 text-sm">
+            <div className="tw-loading" role="status">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span>Searching for recipes...</span>
             </div>
@@ -80,19 +70,19 @@ const Message: React.FC<MessageProps> = ({ message }) => {
         
         {/* Display backend analysis if available */}
         {message.backendData?.intent_analysis && (
-          <div className="mt-3 rounded-2xl border border-slate-200 bg-white/70 p-4 text-sm">
-            <div className="font-medium text-slate-700 mb-1">Search Analysis</div>
-            <div className="text-slate-500">
+          <details className="tw-search-analysis">
+            <summary>Search Analysis</summary>
+            <div className="text-slate-600 mt-2">
               {cleanBackendText(message.backendData.intent_analysis.search_strategy.primary_focus)}
             </div>
             {message.backendData.intent_analysis.constraints.equipment_only?.includes('microwave') && (
               <div className="text-slate-700 mt-2">Microwave-only recipes prioritized</div>
             )}
-          </div>
+          </details>
         )}
         
         {message.recipes && message.recipes.length > 0 && (
-          <div className="mt-4">
+          <div className="tw-recipes mt-5">
             <div className="mb-3 px-1">
               <h3 className="font-semibold text-slate-900">
                 Recipes ({message.recipes.length})
@@ -107,7 +97,7 @@ const Message: React.FC<MessageProps> = ({ message }) => {
         )}
         
       </div>
-    </div>
+    </article>
   );
 };
 

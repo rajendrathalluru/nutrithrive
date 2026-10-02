@@ -35,7 +35,7 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
   ].filter(Boolean) as Array<{ label: string; value: string }>;
 
   return (
-    <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_22px_60px_rgba(15,23,42,0.12)]">
+    <div className="tw-recipe-card overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_22px_60px_rgba(15,23,42,0.12)]">
       <div className="p-5">
         {/* Header */}
         <div className="flex items-start justify-between mb-3">
@@ -112,7 +112,8 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
         {/* Expand/Collapse Button */}
         <button
           onClick={() => setExpanded(!expanded)}
-          className="w-full bg-slate-900 text-white py-3 rounded-2xl hover:bg-slate-800 transition-colors font-medium"
+          className="tw-recipe-toggle w-full bg-slate-900 text-white py-3 rounded-2xl hover:bg-slate-800 transition-colors font-medium"
+          aria-expanded={expanded}
         >
           {expanded ? 'Show Less' : 'View Full Recipe'}
         </button>

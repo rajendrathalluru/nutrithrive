@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Send, Loader2, CornerDownLeft, Mic, Square } from 'lucide-react';
+import { ArrowUp, Loader2, CornerDownLeft, Mic, Square } from 'lucide-react';
 import { BackendService } from '../services/backendService';
 
 interface ChatInputProps {
@@ -365,9 +365,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
           : 'Grounded recipe search with backend context');
 
   return (
-    <div className="px-4 pb-4 pt-3 sm:px-6 sm:pb-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="glass-panel rounded-[32px] border border-slate-200/70 bg-white/92 px-4 py-3 shadow-[0_18px_45px_rgba(15,23,42,0.08)] sm:px-5">
+    <div className="tw-composer-wrap">
+      <div className="tw-composer-inner">
+        <div className="tw-composer">
           <div className="flex items-end gap-3">
             {voiceSupported && (
               isListening ? (
@@ -411,13 +411,16 @@ const ChatInput: React.FC<ChatInputProps> = ({
               )
             )}
             <textarea
+              id="recipe-message-input"
+              aria-label="Message"
+              aria-describedby="recipe-input-status"
               ref={textareaRef}
               value={input}
               onChange={(e) => onInputChange(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder={placeholderText}
               disabled={isConnectingVoice}
-              className="min-w-0 w-full flex-1 resize-none overflow-hidden bg-transparent px-1 py-2 text-base leading-7 text-slate-800 placeholder:text-slate-400 focus:outline-none disabled:cursor-wait sm:text-lg sm:leading-8"
+              className="tw-message-input"
               rows={1}
               style={{
                 minHeight: '56px',
@@ -428,23 +431,23 @@ const ChatInput: React.FC<ChatInputProps> = ({
               <button
                 onClick={onSend}
                 disabled={!backendReady || !input.trim() || isLoading || isConnectingVoice || isTranscribing}
-                className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 shadow-lg shadow-slate-900/15"
+                className="tw-send-button"
                 aria-label="Send message"
               >
                 {isLoading ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
-                  <Send className="h-5 w-5 fill-current" />
+                  <ArrowUp className="h-5 w-5" aria-hidden="true" />
                 )}
               </button>
             )}
           </div>
         </div>
-        <div className="mt-2 flex items-center justify-between px-2 text-xs text-slate-400">
-          <span className="truncate">
+        <div className="tw-input-hints">
+          <span id="recipe-input-status" role="status">
             {statusText}
           </span>
-          <span className="ml-3 inline-flex shrink-0 items-center gap-1">
+          <span className="tw-enter-hint">
             <CornerDownLeft className="w-3.5 h-3.5" />
             Enter to send
           </span>

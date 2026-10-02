@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
+    "@assistant-ui/react": "0.10.30",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
@@ -24,6 +25,15 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
+  },
+  "jest": {
+    "moduleNameMapper": {
+      "^@radix-ui/primitive/is-development$": "<rootDir>/node_modules/@radix-ui/primitive/dist/internal/is-development.true.js"
+    },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(?:@assistant-ui/react|assistant-stream|assistant-cloud|nanoid)/)",
+      "^.+\\.module\\.(css|sass|scss)$"
+    ]
   },
   "eslintConfig": {
     "extends": [

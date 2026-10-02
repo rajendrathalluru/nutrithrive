@@ -1,11 +1,12 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Menu } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { PanelLeft, Leaf } from 'lucide-react';
 import { BackendHealth, Chat, Message, NutriThriveChatbotProps } from '../types';
 import {BackendService} from '../services/backendService';
 import Sidebar from './Sidebar';
 import ChatInput from './ChatInput';
-import MessageComponent from './Message';
+import AssistantChatThread from './AssistantChatThread';
 import { buildConversationHistory } from '../utils/conversationHistory';
+import './ChatWorkspace.css';
 
 const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome }) => {
   const [chats, setChats] = useState<Chat[]>([
@@ -27,7 +28,7 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
   const [currentChatId, setCurrentChatId] = useState('1');
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia('(min-width: 768px)').matches);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [backendHealth, setBackendHealth] = useState<BackendHealth>({
     status: 'starting',
@@ -38,7 +39,6 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
     initialization_error: null
   });
   
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const backendService = BackendService.getInstance();
 
   const currentChat = chats.find(chat => chat.id === currentChatId);
@@ -46,23 +46,14 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
   // Use useMemo to prevent unnecessary recalculations
   const messages = useMemo(() => currentChat?.messages || [], [currentChat]);
 
-  // Build conversation history for context
-  const conversationHistory = useMemo(() => {
-    return messages
-      .filter(message => !message.isLoading)
-      .map(message => ({
-        role: message.role,
-        content: message.content
-      }));
-  }, [messages]);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (!sidebarOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSidebarOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [sidebarOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,13 +102,13 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
   };
 
   // Use useCallback to memoize the send function
-  const handleSend = useCallback(async () => {
-    if (!input.trim() || isLoading || !currentChat || !backendReady) return;
+  const handleSend = useCallback(async (messageText: string = input) => {
+    if (!messageText.trim() || isLoading || !currentChat || !backendReady) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: messageText,
       timestamp: new Date()
     };
 
@@ -125,7 +116,7 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
     const updatedChat = {
       ...currentChat,
       messages: [...currentChat.messages, userMessage],
-      title: currentChat.messages.length === 1 ? input.slice(0, 30) + '...' : currentChat.title
+      title: currentChat.messages.length === 1 ? messageText.slice(0, 30) + '...' : currentChat.title
     };
 
     setChats(prev => prev.map(chat => 
@@ -156,7 +147,7 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
 
       // Pass conversation history to backend
       const { recipes, backendData } = await backendService.searchRecipes(
-        input, 
+        messageText,
         historyForBackend
       );
       setBackendHealth((previous) => ({
@@ -231,87 +222,62 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
     }
   }, [handleSend]);
 
+  const closeMobileSidebar = () => {
+    if (window.matchMedia('(max-width: 767px)').matches) setSidebarOpen(false);
+  };
+
   return (
-    <div className="chat-shell flex">
-      <div className="pointer-events-none absolute inset-0 soft-grid opacity-40" />
-      {/* Sidebar */}
+    <div className="chat-shell thrive-chat">
+      {sidebarOpen && <button className="tw-sidebar-backdrop" aria-label="Close conversation sidebar" onClick={() => setSidebarOpen(false)} />}
       <Sidebar
         chats={chats}
         currentChatId={currentChatId}
         sidebarOpen={sidebarOpen}
         showUserMenu={showUserMenu}
-        onNewChat={createNewChat}
-        onSelectChat={setCurrentChatId}
+        onNewChat={() => { createNewChat(); closeMobileSidebar(); }}
+        onSelectChat={chatId => { setCurrentChatId(chatId); closeMobileSidebar(); }}
+        onClose={() => setSidebarOpen(false)}
         onToggleUserMenu={() => setShowUserMenu(!showUserMenu)}
         onBackToHome={onBackToHome}
       />
 
-      {/* Main Chat Area */}
-      <div className="relative z-10 flex-1 min-w-0 h-full overflow-hidden">
-        <div className="flex h-full flex-col overflow-hidden">
-        {/* Header */}
-        <div className="shrink-0 px-6 pt-4 pb-3">
-          <div className="glass-panel rounded-[28px] px-6 py-5 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className="text-slate-600 hover:text-slate-900 p-2.5 hover:bg-white rounded-2xl transition-colors border border-transparent hover:border-slate-200"
-              >
-                <Menu className="w-6 h-6" />
-              </button>
-              <div>
-                <h1 className="font-semibold text-xl text-slate-900">Thrivewell Recipe Assistant</h1>
-                <p className="text-sm text-slate-500">Focused, conversational nutrition guidance with backend grounding</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:block text-xs text-slate-400">
-                {conversationHistory.length > 1 && `${conversationHistory.length} messages`}
-              </div>
-              <div className={`flex items-center gap-2 text-sm rounded-full px-3 py-2 border ${
-                backendHealth.status === 'healthy' ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : 
-                backendHealth.status === 'starting' ? 'text-amber-700 bg-amber-50 border-amber-100' :
-                'text-rose-700 bg-rose-50 border-rose-100'
-              }`}>
-                <div className={`w-2 h-2 rounded-full ${
-                  backendHealth.status === 'healthy' ? 'bg-emerald-500' : 
-                  backendHealth.status === 'starting' ? 'bg-amber-500' : 'bg-rose-500'
-                }`} />
-                {backendHealth.status === 'healthy'
-                  ? 'Connected'
-                  : backendHealth.status === 'starting'
-                    ? 'Warming up'
-                    : 'Offline'}
-              </div>
+      <main className="tw-main">
+        <header className="tw-header">
+          <div className="tw-header-title">
+            <button type="button" onClick={() => setSidebarOpen(!sidebarOpen)} className="tw-icon-button" aria-label="Toggle conversations" aria-expanded={sidebarOpen} aria-controls="conversation-sidebar">
+              <PanelLeft size={20} aria-hidden="true" />
+            </button>
+            <div>
+              <h1>Recipe assistant</h1>
+              <p>Good food, with you in mind</p>
             </div>
           </div>
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 custom-scrollbar">
-          <div className="max-w-4xl mx-auto pb-6 space-y-8">
-            {messages.map(message => (
-              <MessageComponent key={message.id} message={message} />
-            ))}
-            <div ref={messagesEndRef} />
+          <div className={`tw-health tw-health-${backendHealth.status}`} role="status" title={backendStatusMessage}>
+            <span className="tw-health-dot" />
+            {backendReady ? 'Connected' : backendHealth.status === 'starting' ? 'Warming up' : 'Offline'}
           </div>
-        </div>
-
-        {/* Input */}
-        <div className="shrink-0">
-          <ChatInput
+        </header>
+        <AssistantChatThread
+          key={currentChatId}
+          messages={messages}
+          disabled={!backendReady || isLoading}
+          onSend={handleSend}
+          onSuggestion={text => {
+            setInput(text);
+            document.getElementById('recipe-message-input')?.focus();
+          }}
+        />
+        <ChatInput
             input={input}
             isLoading={isLoading}
             backendReady={backendReady}
             backendStatusMessage={backendStatusMessage}
             onInputChange={setInput}
-            onSend={handleSend}
+            onSend={() => { void handleSend(); }}
             onKeyPress={handleKeyPress}
-          />
-        </div>
-        </div>
-      </div>
+        />
+        <div className="tw-disclaimer"><Leaf size={12} aria-hidden="true" /> Recipe ideas, not a substitute for medical advice.</div>
+      </main>
     </div>
   );
 };

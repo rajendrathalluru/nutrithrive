@@ -1,0 +1,139 @@
+.chat-shell.thrive-chat {
+  --tw-ink: #25362f;
+  --tw-muted: #67736c;
+  --tw-green: #315b45;
+  --tw-line: #e2e7e1;
+  display: flex;
+  height: 100dvh;
+  background: #fdfefc;
+  color: var(--tw-ink);
+}
+
+.thrive-chat button, .thrive-chat a, .thrive-chat summary { -webkit-tap-highlight-color: transparent; }
+.thrive-chat :is(button, a, summary, textarea):focus-visible { outline: 2px solid #487b5d; outline-offset: 4px; }
+.thrive-chat .tw-icon-button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; border-radius: 9px; color: var(--tw-muted); }
+.thrive-chat .tw-icon-button:hover { background: #e9eee7; color: var(--tw-ink); }
+.thrive-chat .tw-eyebrow { color: var(--tw-muted); font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; }
+
+.thrive-chat .tw-sidebar { display: flex; flex-direction: column; flex-shrink: 0; width: 272px; height: 100%; background: #f3f5ef; border-right: 1px solid var(--tw-line); z-index: 30; }
+.thrive-chat .tw-sidebar-top { padding: 28px 18px 20px; }
+.thrive-chat .tw-brand-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 34px; }
+.thrive-chat .tw-brand { display: flex; align-items: center; gap: 10px; color: var(--tw-green); }
+.thrive-chat .tw-brand h2 { font-size: 22px; font-weight: 600; letter-spacing: -.7px; line-height: 1.3; }
+.thrive-chat .tw-brand h2 span { display: block; margin-top: 3px; color: var(--tw-muted); font-size: 10px; font-weight: 400; letter-spacing: 0; }
+.thrive-chat .tw-new-chat { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 13px; border: 1px solid #d4ddd2; border-radius: 10px; background: #fdfefb; font-size: 13px; font-weight: 600; box-shadow: 0 2px 3px #25362f04; }
+.thrive-chat .tw-new-chat:hover { background: #e8eee4; }
+.thrive-chat .tw-new-chat span { margin-left: auto; color: var(--tw-muted); }
+.thrive-chat .tw-chat-nav { flex: 1; min-height: 0; overflow-y: auto; padding: 7px 12px 20px; }
+.thrive-chat .tw-chat-nav h3 { padding: 0 11px 14px; }
+.thrive-chat .tw-chat-items { display: flex; flex-direction: column; gap: 5px; }
+.thrive-chat .tw-chat-item { display: flex; width: 100%; align-items: flex-start; gap: 10px; border-radius: 9px; padding: 12px 11px; text-align: left; color: #526157; }
+.thrive-chat .tw-chat-item > svg { flex-shrink: 0; margin-top: 2px; }
+.thrive-chat .tw-chat-item:hover { background: #e9ede5; }
+.thrive-chat .tw-chat-item[aria-current] { background: #e4ebdf; color: #2d4936; }
+.thrive-chat .tw-chat-item-text { display: block; min-width: 0; }
+.thrive-chat .tw-chat-item strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
+.thrive-chat .tw-chat-item small { display: block; margin-top: 5px; font-size: 10px; color: var(--tw-muted); }
+.thrive-chat .tw-sidebar-footer { padding: 16px 14px; }
+.thrive-chat .tw-sidebar-note { display: flex; align-items: center; gap: 13px; padding: 18px 12px 26px; color: var(--tw-muted); font-size: 12px; line-height: 1.7; }
+.thrive-chat .tw-sidebar-note strong { font-weight: 500; color: #465b4d; }
+.thrive-chat .tw-user-button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 13px 6px 0; border-top: 1px solid var(--tw-line); }
+.thrive-chat .tw-user-avatar { display: grid; place-items: center; height: 33px; width: 33px; background: #e0e7db; border-radius: 50%; color: #52634d; font-size: 12px; }
+.thrive-chat .tw-user-label { flex: 1; font-size: 12px; font-weight: 500; }
+.thrive-chat .tw-user-label small { display: block; color: var(--tw-muted); font-size: 10px; font-weight: 400; margin-top: 2px; }
+.thrive-chat .tw-workspace-options { position: absolute; bottom: 100%; width: 100%; background: white; border: 1px solid var(--tw-line); border-radius: 12px; padding: 5px; margin-bottom: 8px; box-shadow: 0 8px 25px #25362f12; }
+.thrive-chat .tw-sidebar-backdrop { display: none; }
+
+.thrive-chat .tw-main { display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; overflow: hidden; }
+.thrive-chat .tw-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 19px 30px; border-bottom: 1px solid #edf0e9; }
+.thrive-chat .tw-header-title { display: flex; align-items: center; gap: 14px; }
+.thrive-chat .tw-header h1 { font-weight: 600; font-size: 15px; letter-spacing: -.2px; }
+.thrive-chat .tw-header p { margin-top: 2px; color: var(--tw-muted); font-size: 11px; }
+.thrive-chat .tw-health { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #6b6236; border: 1px solid #ede6c8; background: #faf8ed; border-radius: 20px; padding: 5px 10px; white-space: nowrap; }
+.thrive-chat .tw-health-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.thrive-chat .tw-health-healthy { color: #4e6e50; border-color: #e0e9da; background: #f1f6ed; }
+.thrive-chat .tw-health-offline, .thrive-chat .tw-health-failed { color: #a14747; border-color: #eddcdc; background: #fff4f4; }
+.thrive-chat .tw-thread { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.thrive-chat .tw-viewport { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.thrive-chat .tw-conversation { width: 100%; max-width: 830px; margin: 0 auto; padding: 36px 28px 24px; }
+.thrive-chat .tw-message-list { display: flex; flex-direction: column; gap: 30px; }
+.thrive-chat .tw-welcome { padding: clamp(14px, 7vh, 78px) 0 28px; text-align: center; }
+.thrive-chat .tw-welcome-icon { display: inline-grid; place-items: center; width: 58px; height: 58px; color: #56774e; background: #ecf1e5; border: 1px solid #e2e9d9; border-radius: 19px; margin-bottom: 23px; transform: rotate(-6deg); }
+.thrive-chat .tw-welcome-icon svg { transform: rotate(6deg); }
+.thrive-chat .tw-welcome h2 { font-size: clamp(26px, 3vw, 36px); line-height: 1.25; font-weight: 500; letter-spacing: -1.3px; margin-top: 12px; }
+.thrive-chat .tw-thread-welcome .tw-message { max-width: 590px; margin: 0 auto; }
+.thrive-chat .tw-thread-welcome .tw-message-meta, .thrive-chat .tw-thread-welcome .tw-assistant-avatar { display: none; }
+.thrive-chat .tw-thread-welcome .tw-message-content { text-align: center; color: var(--tw-muted); }
+.thrive-chat .tw-suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 32px auto 20px; }
+.thrive-chat .tw-suggestions button { padding: 17px; background: white; border: 1px solid var(--tw-line); border-radius: 12px; text-align: left; transition: background .15s, border-color .15s; }
+.thrive-chat .tw-suggestions button:hover { background: #f3f6ed; border-color: #c6d2bf; }
+.thrive-chat .tw-suggestions span { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 500; }
+.thrive-chat .tw-suggestions svg { color: #85917e; }
+.thrive-chat .tw-suggestions small { display: block; color: var(--tw-muted); font-size: 11px; margin-top: 7px; }
+.thrive-chat .tw-scroll-anchor { position: sticky; bottom: 12px; height: 0; display: flex; justify-content: center; pointer-events: none; z-index: 2; }
+.thrive-chat .tw-scroll-button { display: grid; place-items: center; width: 34px; height: 34px; transform: translateY(-34px); border-radius: 50%; border: 1px solid var(--tw-line); background: white; box-shadow: 0 3px 12px #25362f14; pointer-events: auto; }
+.thrive-chat .tw-scroll-button:disabled { visibility: hidden; pointer-events: none; }
+
+.thrive-chat .tw-message { display: flex; align-items: flex-start; gap: 13px; min-width: 0; }
+.thrive-chat .tw-assistant-avatar { display: grid; place-items: center; flex-shrink: 0; width: 31px; height: 31px; margin-top: 1px; border-radius: 10px; background: #ecf1e5; color: #56774e; }
+.thrive-chat .tw-message-body { flex: 1; min-width: 0; }
+.thrive-chat .tw-message-meta { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 600; margin: 5px 0 9px; }
+.thrive-chat .tw-message-meta time { color: var(--tw-muted); font-size: 10px; font-weight: 400; }
+.thrive-chat .tw-message-content { overflow-wrap: anywhere; color: #35453b; }
+.thrive-chat .tw-message-user { justify-content: flex-end; padding-left: 38px; }
+.thrive-chat .tw-message-user .tw-message-body { flex: initial; max-width: 88%; }
+.thrive-chat .tw-message-user .tw-message-meta { justify-content: flex-end; }
+.thrive-chat .tw-message-user .tw-message-content { padding: 12px 18px; border: 1px solid #e5eadd; background: #f0f3e9; border-radius: 18px 18px 4px 18px; }
+.thrive-chat .tw-loading { display: flex; align-items: center; gap: 8px; padding: 6px 0; color: var(--tw-muted); font-size: 13px; }
+.thrive-chat .tw-message-content.tw-safety-message { border: 2px solid #fecdd3; background: #fff1f2; padding: 18px; border-radius: 14px; }
+.thrive-chat .tw-search-analysis { margin-top: 14px; border-left: 2px solid #dce5d7; padding: 5px 12px; font-size: 12px; }
+.thrive-chat .tw-search-analysis summary { cursor: pointer; color: #5e715d; font-weight: 500; }
+.thrive-chat .tw-recipes h3 { font-size: 16px; }
+.thrive-chat .tw-recipe-card { border-radius: 16px; box-shadow: 0 3px 12px #25362f04; transform: none; }
+.thrive-chat .tw-recipe-card:hover { box-shadow: 0 4px 16px #25362f09; transform: none; }
+.thrive-chat .tw-recipe-card > div > :first-child { gap: 12px; flex-wrap: wrap; }
+.thrive-chat .tw-recipe-card h3 { font-size: 18px; line-height: 1.4; overflow-wrap: anywhere; }
+.thrive-chat .tw-recipe-toggle { background: #f4f6f0; border: 1px solid #e0e6da; border-radius: 9px; color: #315b45; font-size: 13px; padding: 10px; }
+.thrive-chat .tw-recipe-toggle:hover { background: #e8eee1; }
+
+.thrive-chat .tw-composer-wrap { flex-shrink: 0; padding: 16px 28px 0; background: #fdfefc; }
+.thrive-chat .tw-composer-inner { max-width: 774px; margin: 0 auto; }
+.thrive-chat .tw-composer { border: 1px solid #d7dfd1; border-radius: 20px; background: white; padding: 12px 14px; box-shadow: 0 4px 22px #25362f06; transition: border-color .15s; }
+.thrive-chat .tw-composer:focus-within { border-color: #809875; box-shadow: 0 0 0 3px #8098750b; }
+.thrive-chat .tw-message-input { width: 100%; min-width: 0; flex: 1; resize: none; overflow-y: auto; background: transparent; padding: 10px 2px; font-size: 15px; line-height: 24px; color: var(--tw-ink); border-radius: 5px; }
+.thrive-chat .tw-message-input::placeholder { color: #7b857c; }
+.thrive-chat .tw-message-input:focus { outline: none; }
+.thrive-chat .tw-message-input:disabled { cursor: wait; }
+.thrive-chat .tw-send-button { display: grid; place-items: center; width: 39px; height: 39px; flex-shrink: 0; margin-bottom: 6px; border-radius: 12px; color: white; background: var(--tw-green); }
+.thrive-chat .tw-send-button:hover { background: #254b37; }
+.thrive-chat .tw-send-button:disabled { cursor: not-allowed; color: #84947e; background: #e9eee3; }
+.thrive-chat .tw-input-hints { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 9px 4px 0; color: var(--tw-muted); font-size: 10px; }
+.thrive-chat .tw-enter-hint { display: inline-flex; align-items: center; flex-shrink: 0; gap: 4px; }
+.thrive-chat .tw-disclaimer { display: flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 5px; padding: 13px 16px 18px; color: var(--tw-muted); font-size: 10px; text-align: center; }
+
+@media (max-width: 767px) {
+  .thrive-chat .tw-sidebar { position: absolute; inset: 0 auto 0 0; width: min(290px, 86vw); box-shadow: 8px 0 30px #25362f15; }
+  .thrive-chat .tw-sidebar-backdrop { display: block; position: absolute; inset: 0; z-index: 20; background: #25362f45; }
+  .thrive-chat .tw-header { padding: 14px 16px; }
+  .thrive-chat .tw-header-title { gap: 7px; }
+  .thrive-chat .tw-conversation { padding: 24px 18px; }
+  .thrive-chat .tw-welcome { padding-top: 20px; }
+  .thrive-chat .tw-welcome .tw-eyebrow { font-size: 9px; letter-spacing: .05em; }
+  .thrive-chat .tw-welcome h2 { letter-spacing: -.8px; }
+  .thrive-chat .tw-suggestions { gap: 8px; grid-template-columns: 1fr; margin-top: 24px; }
+  .thrive-chat .tw-suggestions button { padding: 12px 14px; }
+  .thrive-chat .tw-suggestions small { margin-top: 3px; }
+  .thrive-chat .tw-message { gap: 9px; }
+  .thrive-chat .tw-assistant-avatar { width: 26px; height: 26px; }
+  .thrive-chat .tw-message-user { padding-left: 20px; }
+  .thrive-chat .tw-message-user .tw-message-body { max-width: 94%; }
+  .thrive-chat .tw-composer-wrap { padding: 10px 14px 0; }
+  .thrive-chat .tw-composer { padding: 9px 10px; border-radius: 16px; }
+  .thrive-chat .tw-message-input { font-size: 16px; }
+  .thrive-chat .tw-enter-hint { display: none; }
+  .thrive-chat .tw-disclaimer { padding-bottom: max(12px, env(safe-area-inset-bottom)); font-size: 9px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thrive-chat *, .thrive-chat *::before, .thrive-chat *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

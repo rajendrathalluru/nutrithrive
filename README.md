@@ -73,9 +73,23 @@ nutrithrive-research/
 
 ## Tech stack
 
-- Frontend: React, TypeScript, Tailwind CSS
+- Frontend: React, TypeScript, Tailwind CSS, assistant-ui chat primitives
 - Backend: FastAPI, Uvicorn, LangChain, OpenAI, FAISS, Pandas, Pydantic
 - Deployment: Docker, Docker Compose, Render
+
+## Chat UI
+
+The chat page uses [assistant-ui's external-store runtime](https://www.assistant-ui.com/docs/runtimes/custom/external-store) for message rendering and scroll behavior. `NutriThriveChatbot` still owns chat state, health polling, and request handling; `BackendService` and `buildConversationHistory` remain the only recipe-request path. `AssistantChatThread` is the presentation adapter and renders the original messages, including structured recipe data and safety responses, without changing their contents.
+
+The existing voice-enabled `ChatInput` is retained. Conversation starters only fill the draft; they do not submit requests. Source links, AI labels, ingredient groups, tips, and recipe expansion remain in `RecipeCard`. Search Analysis is available in an expandable disclosure. Styles are scoped to `.thrive-chat` and do not change the landing page.
+
+`@assistant-ui/react` is pinned to `0.10.30` to retain compatibility with this project's TypeScript 4.9 / Create React App toolchain. No assistant-ui cloud service, additional model provider, or persistent conversation storage is configured. Jest transforms the library's ESM dependencies so regression tests exercise the real runtime rather than mocking it.
+
+Run the chat and recipe UI regression tests:
+
+```bash
+CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/NutriThriveChatbot.test.tsx src/components/RecipeCard.test.tsx src/utils/conversationHistory.test.ts src/utils/ingredientGroups.test.ts
+```
 
 ## Environment variables
 
