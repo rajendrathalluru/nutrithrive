@@ -83,12 +83,14 @@ The chat page uses [assistant-ui's external-store runtime](https://www.assistant
 
 The existing voice-enabled `ChatInput` is retained. Conversation starters only fill the draft; they do not submit requests. Source links, AI labels, ingredient groups, tips, and recipe expansion remain in `RecipeCard`. Search Analysis is available in an expandable disclosure. Styles are scoped to `.thrive-chat` and do not change the landing page.
 
+On narrow screens, `useChatViewport` sizes the chat to the [visual viewport](https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport), including changes from browser controls and the on-screen keyboard. The page-level scroll lock applies only while the mobile chat is mounted; messages keep their own scrolling area. Leaving the chat removes the lock and viewport listeners. Pinch zoom is not disabled. The mobile composer starts at 44px, grows for longer drafts, and keeps health, voice, and error messages visible while hiding the idle hint.
+
 `@assistant-ui/react` is pinned to `0.10.30` to retain compatibility with this project's TypeScript 4.9 / Create React App toolchain. No assistant-ui cloud service, additional model provider, or persistent conversation storage is configured. Jest transforms the library's ESM dependencies so regression tests exercise the real runtime rather than mocking it.
 
 Run the chat and recipe UI regression tests:
 
 ```bash
-CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/NutriThriveChatbot.test.tsx src/components/RecipeCard.test.tsx src/utils/conversationHistory.test.ts src/utils/ingredientGroups.test.ts
+CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/hooks/useChatViewport.test.tsx src/components/NutriThriveChatbot.test.tsx src/components/RecipeCard.test.tsx src/utils/conversationHistory.test.ts src/utils/ingredientGroups.test.ts
 ```
 
 ## Environment variables

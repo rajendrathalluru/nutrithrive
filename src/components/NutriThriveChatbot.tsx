@@ -6,9 +6,11 @@ import Sidebar from './Sidebar';
 import ChatInput from './ChatInput';
 import AssistantChatThread from './AssistantChatThread';
 import { buildConversationHistory } from '../utils/conversationHistory';
+import { useChatViewport } from '../hooks/useChatViewport';
 import './ChatWorkspace.css';
 
 const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome }) => {
+  const shellRef = useChatViewport();
   const [chats, setChats] = useState<Chat[]>([
     {
       id: '1',
@@ -227,7 +229,7 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
   };
 
   return (
-    <div className="chat-shell thrive-chat">
+    <div ref={shellRef} className="chat-shell thrive-chat">
       {sidebarOpen && <button className="tw-sidebar-backdrop" aria-label="Close conversation sidebar" onClick={() => setSidebarOpen(false)} />}
       <Sidebar
         chats={chats}

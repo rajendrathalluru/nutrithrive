@@ -224,6 +224,37 @@ test('mobile navigation closes after selecting a chat and with Escape', async ()
   expect(screen.queryByRole('navigation', { name: 'Recent conversations' })).not.toBeInTheDocument();
 });
 
+test('mobile composer starts compact, grows for a draft, and shrinks again after sending', async () => {
+  isDesktop = false;
+  await readyChat();
+  const input = screen.getByRole('textbox', { name: 'Message' });
+  expect(input).toHaveAttribute('placeholder', 'Ask for a recipe...');
+  expect(input).toHaveStyle({ height: '44px', minHeight: '44px', maxHeight: '112px' });
+  expect(screen.getByText('Grounded recipe search with backend context').parentElement).toHaveClass('tw-input-hints-idle');
+  Object.defineProperty(input, 'scrollHeight', { configurable: true, value: 240 });
+  fireEvent.change(input, { target: { value: 'A long multiline recipe request\nwith some details' } });
+  expect(input).toHaveStyle({ height: '112px' });
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+  await screen.findByText('Here is a bean soup.');
+  expect(input).toHaveValue('');
+  expect(input).toHaveStyle({ height: '44px' });
+});
+
+test('mobile warm-up status stays visible rather than using the hidden idle hint', async () => {
+  isDesktop = false;
+  getHealth.mockResolvedValue({ ...healthy, status: 'starting', model_loaded: false });
+  render(<NutriThriveChatbot />);
+  const status = await screen.findByText('Recipe engine is warming up');
+  expect(status.parentElement).not.toHaveClass('tw-input-hints-idle');
+  expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
+});
+
+test('desktop keeps the original composer height and placeholder', async () => {
+  await readyChat();
+  expect(screen.getByRole('textbox', { name: 'Message' })).toHaveStyle({ minHeight: '56px', maxHeight: '140px' });
+  expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute('placeholder', 'Describe your dietary needs, ingredients available, or ask for recipe ideas...');
+});
+
 test('the existing back-to-home callback remains available', async () => {
   const onBackToHome = jest.fn();
   render(<NutriThriveChatbot onBackToHome={onBackToHome} />);
@@ -234,12 +265,14 @@ test('the existing back-to-home callback remains available', async () => {
 });
 
 test('voice input still uses microphone permissions and surfaces permission errors', async () => {
+  isDesktop = false;
   const getUserMedia = jest.fn().mockRejectedValue(new Error('Microphone permission denied'));
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } });
   Object.defineProperty(window, 'RTCPeerConnection', { configurable: true, value: jest.fn() });
   await readyChat();
   fireEvent.click(screen.getByRole('button', { name: 'Start voice input' }));
   expect(await screen.findByText('Microphone permission denied')).toBeInTheDocument();
+  expect(screen.getByText('Microphone permission denied').parentElement).not.toHaveClass('tw-input-hints-idle');
   expect(getUserMedia).toHaveBeenCalledTimes(1);
   expect(screen.getByRole('button', { name: 'Start voice input' })).toBeEnabled();
   expect(searchRecipes).not.toHaveBeenCalled();

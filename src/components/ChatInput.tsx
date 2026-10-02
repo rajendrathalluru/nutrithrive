@@ -39,15 +39,29 @@ const ChatInput: React.FC<ChatInputProps> = ({
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [voiceError, setVoiceError] = useState('');
   const [isCompactPlaceholder, setIsCompactPlaceholder] = useState(false);
+  const minInputHeight = isCompactPlaceholder ? 44 : 56;
+  const maxInputHeight = isCompactPlaceholder ? 112 : 140;
 
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
 
-    textarea.style.height = '56px';
-    const nextHeight = Math.min(textarea.scrollHeight, 140);
-    textarea.style.height = `${Math.max(nextHeight, 56)}px`;
-  }, [input]);
+    let previousWidth = textarea.clientWidth;
+    const resizeInput = () => {
+      textarea.style.height = `${minInputHeight}px`;
+      const nextHeight = input ? Math.min(textarea.scrollHeight, maxInputHeight) : minInputHeight;
+      textarea.style.height = `${Math.max(nextHeight, minInputHeight)}px`;
+    };
+
+    resizeInput();
+    const observer = new ResizeObserver(() => {
+      if (textarea.clientWidth === previousWidth) return;
+      previousWidth = textarea.clientWidth;
+      resizeInput();
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [input, minInputHeight, maxInputHeight]);
 
   useEffect(() => {
     const isSupported =
@@ -60,7 +74,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   }, []);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia('(max-width: 640px)');
+    const mediaQuery = window.matchMedia('(max-width: 767px)');
     const updatePlaceholderMode = () => setIsCompactPlaceholder(mediaQuery.matches);
 
     updatePlaceholderMode();
@@ -349,7 +363,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const placeholderText = isCompactPlaceholder
-    ? 'Ask for recipes or ingredients...'
+    ? 'Ask for a recipe...'
     : 'Describe your dietary needs, ingredients available, or ask for recipe ideas...';
 
   const statusText = voiceError
@@ -363,22 +377,23 @@ const ChatInput: React.FC<ChatInputProps> = ({
         : isTranscribing
           ? 'Finalizing your voice transcript...'
           : 'Grounded recipe search with backend context');
+  const isIdleStatus = backendReady && !voiceError && !isConnectingVoice && !isListening && !isTranscribing;
 
   return (
     <div className="tw-composer-wrap">
       <div className="tw-composer-inner">
         <div className="tw-composer">
-          <div className="flex items-end gap-3">
+          <div className="tw-composer-controls flex items-end gap-3">
             {voiceSupported && (
               isListening ? (
                 <button
                   type="button"
                   onClick={handleToggleVoice}
-                  className="mb-1 flex h-12 shrink-0 items-center gap-3 rounded-2xl bg-slate-900 px-3 text-white transition-colors hover:bg-slate-800"
+                  className="tw-voice-button mb-1 flex h-12 shrink-0 items-center gap-3 rounded-2xl bg-slate-900 px-3 text-white transition-colors hover:bg-slate-800"
                   aria-label="Stop voice input"
                   title="Stop voice input"
                 >
-                  <div className="flex items-end gap-1">
+                  <div className="tw-voice-wave flex items-end gap-1">
                     {[14, 22, 18, 26, 16, 24].map((height, index) => (
                       <span
                         key={height}
@@ -398,7 +413,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   type="button"
                   onClick={handleToggleVoice}
                   disabled={!backendReady || isConnectingVoice || isTranscribing}
-                  className="mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-300"
+                  className="tw-voice-button mb-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 transition-colors hover:bg-slate-200 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-300"
                   aria-label="Start voice input"
                   title="Start voice input"
                 >
@@ -423,8 +438,8 @@ const ChatInput: React.FC<ChatInputProps> = ({
               className="tw-message-input"
               rows={1}
               style={{
-                minHeight: '56px',
-                maxHeight: '140px',
+                minHeight: `${minInputHeight}px`,
+                maxHeight: `${maxInputHeight}px`,
               }}
             />
             {!isListening && (
@@ -443,7 +458,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
             )}
           </div>
         </div>
-        <div className="tw-input-hints">
+        <div className={`tw-input-hints${isIdleStatus ? ' tw-input-hints-idle' : ''}`}>
           <span id="recipe-input-status" role="status">
             {statusText}
           </span>
