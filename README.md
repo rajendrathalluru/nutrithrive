@@ -79,6 +79,8 @@ nutrithrive-research/
 
 ## Chat UI
 
+The landing page lives at `/` and the chat at `/chat`. Navigation updates browser history, so opening or refreshing `/chat` stays on the chat page, and browser Back/Forward follows the current URL. FastAPI's existing frontend fallback serves the React app for this route. This preserves the page, not the conversation: messages remain in memory and are reset by a full reload; no browser or server-side conversation storage is added.
+
 The chat page uses [assistant-ui's external-store runtime](https://www.assistant-ui.com/docs/runtimes/custom/external-store) for message rendering and scroll behavior. `NutriThriveChatbot` still owns chat state, health polling, and request handling; `BackendService` and `buildConversationHistory` remain the only recipe-request path. `AssistantChatThread` is the presentation adapter and renders the original messages, including structured recipe data and safety responses, without changing their contents.
 
 The existing voice-enabled `ChatInput` is retained. Conversation starters only fill the draft; they do not submit requests. Source links, AI labels, ingredient groups, tips, and recipe expansion remain in `RecipeCard`. Search Analysis is available in an expandable disclosure. Styles are scoped to `.thrive-chat` and do not change the landing page.
@@ -87,10 +89,10 @@ On narrow screens, `useChatViewport` sizes the chat to the [visual viewport](htt
 
 `@assistant-ui/react` is pinned to `0.10.30` to retain compatibility with this project's TypeScript 4.9 / Create React App toolchain. No assistant-ui cloud service, additional model provider, or persistent conversation storage is configured. Jest transforms the library's ESM dependencies so regression tests exercise the real runtime rather than mocking it.
 
-Run the chat and recipe UI regression tests:
+Run the navigation, chat, and recipe UI regression tests:
 
 ```bash
-CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/hooks/useChatViewport.test.tsx src/components/NutriThriveChatbot.test.tsx src/components/RecipeCard.test.tsx src/utils/conversationHistory.test.ts src/utils/ingredientGroups.test.ts
+CI=true npm test -- --watchAll=false --runInBand
 ```
 
 ## Environment variables
