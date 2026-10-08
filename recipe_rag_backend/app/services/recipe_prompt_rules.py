@@ -1,4 +1,14 @@
 INGREDIENT_STORAGE_RULES = """Ingredient storage requirements refer to ingredients before opening or cooking, not to cooked leftovers.
+For ONLY canned ingredients/foods, set ingredient_storage='canned_only', not pantry_based or shelf_stable_only.
+Every food ingredient, garnish, optional addition, side suggestion, and substitution must explicitly be canned.
+Dry quinoa, pasta, rice, dried spices, salt, oils, tortillas, fresh herbs, grilled chicken, and ordinary tofu do not
+qualify merely because they are convenient or pantry staples. Do not introduce these in instructions or tips.
+Use the liquids and seasoning already in canned foods where appropriate. Do not add cooking water or seasoning
+exceptions the user did not request; water used only to rinse food or wash equipment is not an added ingredient.
+Heating canned food is allowed unless separately prohibited; canned-only does not itself imply no cooking.
+Requests for canned VEGETABLES only restrict vegetable forms, not every ingredient. Merely including canned
+beans/vegetables does not establish canned-only. Never assume low hand effort from canned packaging.
+If the source needs substitutions, use it as context for a labeled AI Generated adaptation, not a direct match.
 For requests to rely mainly on shelf-stable or pantry foods, use ingredient_storage='pantry_based':
 the meal must be possible from pantry staples without requiring fresh or refrigerated purchases.
 Fresh garnishes are acceptable only when explicitly optional in both ingredients and instructions; prefer pantry alternatives.
@@ -22,13 +32,16 @@ ingredients: do not recommend adding grilled chicken, refrigerated tofu, raw veg
 FOOD_GUIDANCE_RULES = """Choose query_type='food_guidance' for culinary explanations, food categories, or examples
 without a request for recipes or cooking instructions. 'Show foods that taste good warm but not hot' asks for
 food ideas, not automatically recipe cards. Answer the category question first and offer recipes as a follow-up.
-Use recipe_search for explicit recipe requests or requests to make/cook meals, recipe_adaptation for changing
+Use recipe_search for explicit recipe requests or requests to make/cook/prepare meals, recipe_adaptation for changing
 a shown recipe, and recipe_question for questions about a specific shown recipe. Do not classify every mention
 of 'foods' as guidance. A follow-up 'give me recipes for those' or 'more recipes' switches to recipe_search
 while preserving the user's active constraints. A follow-up asking for more food examples remains food_guidance.
 Only user messages establish restrictions; do not convert examples in an assistant's guidance into requirements
 unless the user explicitly selects or refers to them. 'A recipe for the first one' after a list of food types is
 a recipe_search for that food type, not an adaptation of an existing recipe; do not invent referenced_recipe_ids.
+'Show meals I can prepare sitting down' asks for actual recipes, not general advice about food categories.
+'What meals can I prepare ...', 'Suggest dinners ...', and 'Show meals ...' are recipe discovery requests.
+Questions explicitly asking for preparation tips or an explanation can still be food_guidance.
 """
 
 SERVING_TEMPERATURE_RULES = """Serving temperature is separate from preparation method and spice intensity.
@@ -53,6 +66,35 @@ or medically safe serving range. Do not infer a swallowing disorder or make trea
 """
 
 PREPARATION_RULES = """Preparation restrictions are HARD constraints, not flavor preferences or serving temperature.
+Set constraints.preparation_position='seated' when the user asks to prepare meals sitting down or without standing.
+This is independent of low attention, short cooking time, eating in small sittings, and medical conditions.
+Do not infer a disability, diagnosis, difficulty chewing, ingredient limit, or no-heat user preference.
+For seated requests, evaluate the ENTIRE preparation, including ingredient preparation and dependent recipes.
+Prefer tabletop mixing, spreading, or assembling with ready-to-eat components. Light cutting may be suitable;
+do not assume the user cannot use their hands or a knife. Do not label oven/stove recipes seated-friendly
+just because one chopping or mixing step can be done seated or the cooking is mostly passive.
+Without verified kitchen-accessibility details, heating, oven racks, hot/heavy transfers, and draining hot pots
+are unsupported dependencies, not matches. Do not assume an accessible appliance or another person can help.
+An assembly recipe need not literally say 'seated' to qualify; use evidence from all its actual instructions.
+State the setup assumption: ingredients and tools within comfortable reach on a stable seated work surface.
+Do not instruct someone to stand, reach over heat, move a chair beside a burner, or carry hot pots to satisfy this.
+Never omit necessary cooking of raw animal foods, dried grains/beans, or frozen ingredients requiring cooking.
+Specify purchased ready-to-eat forms if adapting such ingredients; do not invent pre-cooked leftovers the user has.
+Generated recipes, helpful tips, and substitutions must preserve seated preparation and any separate restrictions.
+If changes are required, use a clearly AI Generated adaptation; never rewrite the source recipe silently.
+Set constraints.hand_effort='low' for minimal hand strength, weak grip, or low hand-effort requests.
+This is separate from seated preparation, cooking attention, and total time. Do not infer arthritis, carpal tunnel,
+or any other diagnosis. Do not infer limited hand strength from a request to sit or from a diagnosis alone.
+Check the whole ingredient preparation, packaging, cookware, every instruction, and all optional advice.
+Avoid manual kneading, grating, pounding, squeezing, mashing, cutting dense produce, forceful jar/can opening,
+and heavy-pan lifting or draining. A hands-off stew may still require forceful preparation and heavy cookware.
+'Carrots, chopped' or 'cooked grains' does not establish that chopping or cooking is already done.
+Prefer explicitly purchased pre-cut/pre-shredded/ready-to-eat components, light bowls, gentle mixing/spreading,
+and packaging the user can manage; do not claim pull-tab cans or vacuum-sealed jars are effortless to open.
+Do not assume an electric opener, adaptive tool, food processor, or helper is available. Without supporting
+information, a recipe that depends on such assistance is unknown/adaptable, not an unchanged match.
+Preserve dietary, allergy, pantry, timing, and seated-preparation constraints in substitutions and tips.
+State setup/packaging assumptions rather than claiming universal accessibility or prescribing medical care.
 Set constraints.preparation_mode='no_heat' for no-cook/no-heat/cooked-cold requests; use 'assembly_only'
 for only assembling, not cooking. Cold SERVING alone does not imply no-heat preparation.
 No heat means no stove, oven, microwave, kettle, boiling water, toasting, or earlier cooking by the user.

@@ -105,6 +105,27 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
             if constraints.get("leftover_friendly"):
                 return self._generate_leftover_friendly_response(source_docs, constraints)
 
+            if constraints.get("preparation_position") == "seated" or constraints.get("hand_effort") == "low":
+                seated = constraints.get("preparation_position") == "seated"
+                low_force = constraints.get("hand_effort") == "low"
+                description = "seated, low-force preparation" if seated and low_force else "seated preparation" if seated else "low-force preparation"
+                lines = [
+                    f"These recipes were checked for {description}. Have ingredients and tools within comfortable reach on a stable work surface:"
+                ]
+                for recipe in source_docs[:3]:
+                    check_key = "seated_preparation_check" if seated else "hand_effort_check"
+                    assessment = recipe.get("verification_details", {}).get(check_key) or {}
+                    quotes = [check.get("quote", "") for check in assessment.get("step_checks", []) if isinstance(check, dict)]
+                    evidence = "; ".join(quote for quote in quotes[:2] if quote)
+                    line = f"• {recipe['name']}" + (f" — {evidence}" if evidence else "")
+                    timing = recipe.get("verification_details", {}).get("time_check") or {}
+                    minutes = timing.get("total_minutes")
+                    if constraints.get("time_max_minutes") is not None and isinstance(minutes, (int, float)):
+                        line += f" (approximately {minutes:g} minutes total)"
+                    lines.append(line)
+                lines.append("Open a recipe card for the full ingredients and steps. Suitability also depends on your workspace and manageable packaging.")
+                return "\n".join(lines)
+
             if constraints.get("time_max_minutes") is not None:
                 lines = ["Here are the recipes that passed the total preparation-time check:"]
                 for recipe in source_docs[:3]:
@@ -115,6 +136,13 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                     else:
                         lines.append(f"• {recipe['name']}: see the recipe for timing details.")
                 lines.append("Timing includes preparation, not just cooking, and may vary with your pace. Open a card for the steps.")
+                return "\n".join(lines)
+
+            if constraints.get("ingredient_storage") == "canned_only":
+                noun = "recipe" if recipe_count == 1 else "recipes"
+                lines = [f"I found {recipe_count} {noun} using only explicitly canned food ingredients:"]
+                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.append("Open a recipe card for the ingredients and preparation steps. Canned-only does not necessarily mean no cooking.")
                 return "\n".join(lines)
             
             constraint_text = ", ".join(constraint_mentions) if constraint_mentions else ""
@@ -219,6 +247,21 @@ Avoid medical terminology or health condition references.
     def generate_helpful_no_results_message(self, query: str, intent_data: Dict[str, Any]) -> str:
         """Generate a helpful message when no recipes can be found or generated"""
         constraints = intent_data.get("constraints", {})
+        if constraints.get("preparation_position") == "seated":
+            return (
+                "I couldn't verify a meal whose complete preparation works at a seated workspace right now. "
+                "I haven't substituted recipes that require unsupported heating or hot/heavy transfers. Please try again."
+            )
+        if constraints.get("hand_effort") == "low":
+            return (
+                "I couldn't verify a recipe that meets your requirements with low-force preparation throughout right now. "
+                "I haven't substituted recipes with forceful prep or assumed you have adaptive tools or help. Please try again."
+            )
+        if constraints.get("ingredient_storage") == "canned_only":
+            return (
+                "I couldn't verify a recipe meeting all your requirements using only canned food ingredients right now. "
+                "I haven't substituted dry pantry staples or fresh ingredients. Please try again."
+            )
         if constraints.get("time_max_minutes") is not None:
             comparison = "less than" if constraints.get("time_limit_exclusive") else "at most"
             limit = constraints["time_max_minutes"]

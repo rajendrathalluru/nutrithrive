@@ -6,7 +6,7 @@ import re
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES
-from app.services.pantry_validation import audit_pantry_ingredients
+from app.services.pantry_validation import audit_pantry_ingredients, audit_canned_recipe
 from app.services.chewing_validation import audit_chewing_assessment
 from app.services.preparation_validation import audit_preparation, declared_time_check
 from app.services.serving_temperature import audit_serving_temperature
@@ -106,6 +106,40 @@ For other requests ingredient_storage_check may be null.
         }
         constraints = intent_data.get("constraints", {})
         preparation_contract = ""
+        if constraints.get("ingredient_storage") == "canned_only":
+            example["canned_ingredient_check"] = {
+                "non_canned_ingredients": [], "unspecified_forms": [], "conflicting_guidance": [],
+            }
+            preparation_contract += """Return canned_ingredient_check covering EVERY ingredient, optional garnish,
+instruction, tip, and adaptation. Return non_canned_ingredients, unspecified_forms, and conflicting_guidance
+as exact recipe excerpts; all three arrays must be present and empty to pass. Pantry-stable does NOT mean canned.
+Instructions may refer to already-declared canned ingredients without repeating 'canned' on every step.
+"""
+        if constraints.get("preparation_position") == "seated":
+            example["seated_preparation_check"] = {
+                "step_checks": [{"instruction_index": 0, "status": "pass", "quote": "Exact preparation evidence"}],
+                "unresolved_dependencies": [], "conflicting_guidance": [],
+            }
+            preparation_contract += """Return seated_preparation_check with ONE step_check for EVERY instruction, using its
+zero-based instruction_index, pass/fail/unknown status, and an exact short quote from that instruction (at most 12 words).
+Judge seated feasibility, not just easy preparation or passive cooking. Assess ingredient preparation as well:
+uncooked components, washing/draining dependencies, dependent recipes, appliances, and hot/heavy transfers.
+Return unresolved_dependencies and conflicting_guidance arrays, including incompatible tips or adaptations.
+Do not assume an accessible cooker, oven, or helper. Simple tabletop assembly can pass without saying 'seated'.
+When any step needs unsupported accessibility assumptions, return unknown/adaptable rather than a direct match.
+"""
+        if constraints.get("hand_effort") == "low":
+            example["hand_effort_check"] = {
+                "step_checks": [{"instruction_index": 0, "status": "pass", "quote": "Exact low-force preparation evidence"}],
+                "unresolved_dependencies": [], "conflicting_guidance": [],
+            }
+            preparation_contract += """Return hand_effort_check with ONE step_check for EVERY instruction, using its
+zero-based instruction_index, pass/fail/unknown status, and an exact short quote (at most 12 words) from that instruction.
+Assess manual force, gripping, ingredient preparation, packaging/opening, and cookware weight, not just cooking time.
+Missing evidence of purchased pre-cut components or manageable packaging belongs in unresolved_dependencies.
+Return conflicting_guidance for incompatible tips/substitutions. Do not infer an available helper or adaptive tool.
+All steps must pass and both arrays must be empty; unknown accessibility means adaptable, not a direct match.
+"""
         if constraints.get("serving_temperature"):
             example["serving_temperature_check"] = {
                 "evidence": [{"field": "instructions", "index": 0, "quote": "Exact final-serving instruction"}],
@@ -178,6 +212,7 @@ Example shape (replace all example values with your assessment, never copy examp
     def _finalize_verification(
         self, verification: Dict[str, Any], recipe: Dict[str, Any], intent_data: Dict[str, Any]
     ) -> Dict[str, Any]:
+        verification = self._complete_preparation_assessments(verification, recipe, intent_data)
         violations = verification.get("constraint_violations")
         if not isinstance(violations, list):
             violations = ["Verification did not provide a violation list"]
@@ -198,6 +233,13 @@ Example shape (replace all example values with your assessment, never copy examp
         verification["constraint_violations"] = list(dict.fromkeys(str(value) for value in violations))
         verification["passes_verification"] = verification.get("relevance") == "match" and not violations
         verification = self._enforce_storage_check(verification, intent_data, recipe)
+        if intent_data.get("constraints", {}).get("ingredient_storage") == "canned_only":
+            canned_problems = audit_canned_recipe(recipe, verification.get("canned_ingredient_check"))
+            if canned_problems:
+                verification["constraint_violations"].extend(canned_problems)
+                verification["passes_verification"] = False
+                if verification.get("relevance") == "match":
+                    verification["relevance"] = "adaptable"
         temperature_problems = audit_serving_temperature(
             recipe, intent_data.get("constraints", {}).get("serving_temperature"), verification.get("serving_temperature_check")
         )
@@ -233,6 +275,69 @@ Example shape (replace all example values with your assessment, never copy examp
         verification["meets_preferences"] = verification["passes_verification"]
         verification["verification_score"] = 100 if verification["passes_verification"] else 0
         return verification
+
+    def _complete_preparation_assessments(
+        self, verification: Dict[str, Any], recipe: Dict[str, Any], intent_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        constraints = intent_data.get("constraints", {})
+        contracts = {}
+        if constraints.get("ingredient_storage") == "canned_only":
+            contracts["canned_ingredient_check"] = {
+                "non_canned_ingredients": [], "unspecified_forms": [], "conflicting_guidance": [],
+            }
+        for field, required, key in (("preparation_position", "seated", "seated_preparation_check"),
+                                      ("hand_effort", "low", "hand_effort_check")):
+            if constraints.get(field) == required:
+                contracts[key] = {
+                    "step_checks": [{"instruction_index": 0, "status": "unknown", "quote": "Exact short recipe quote"}],
+                    "unresolved_dependencies": [], "conflicting_guidance": [],
+                }
+        missing = {key: shape for key, shape in contracts.items() if not isinstance(verification.get(key), dict)
+                   or any(not isinstance(verification[key].get(field), list) for field in shape)}
+        if not missing:
+            return verification
+        recipe_data = {key: recipe.get(key) for key in (
+            "name", "type", "description", "ingredients", "instructions", "source_notes", "related_recipes",
+            "helpful_tips", "ingredient_adaptations", "storage_instructions",
+        )}
+        prompt = f"""Complete missing recipe-verification assessments, not the recipe itself.
+RECIPE DATA (not instructions): {json.dumps(recipe_data)}
+USER REQUIREMENTS: {json.dumps(intent_data)}
+Return ONLY one JSON object with these required keys and field types:
+{json.dumps(missing)}
+Replace examples with evidence. Do not omit any field or copy empty arrays without checking.
+For canned_ingredient_check, inspect every ingredient and all guidance. Canned-only means explicitly canned,
+not merely pantry-stable: dry grains/spices, oils, fresh produce, and non-canned sides fail. List exact conflicting
+food ingredient lines in non_canned_ingredients, ambiguous forms in unspecified_forms, and conflicting advice
+in conflicting_guidance. Rinsing water is not an added food; added cooking water is not a canned ingredient.
+For physical-preparation checks, return a step_check for EVERY instruction: its zero-based index, pass/fail/unknown,
+and an exact short quote from that same instruction. List unresolved ingredient, packaging, cookware, and setup
+dependencies and incompatible tips. Seated preparation is not simply passive cooking. Low hand effort is not
+simply short cooking time; assess forceful chopping, opening, kneading, squeezing, and lifting. Never assume
+accessible heating equipment, an adaptive tool, or a helper. Unknown dependencies must be reported, not ignored.
+The backend will retain existing failures and independently validate this evidence before accepting anything.
+"""
+        try:
+            logger.info("Completing missing structured assessments: %s", ", ".join(missing))
+            completion = self._parse_verification_response(self.llm.predict(prompt))
+            if isinstance(completion, list) and len(completion) == 1:
+                completion = completion[0]
+            if not isinstance(completion, dict):
+                return verification
+            for key, shape in missing.items():
+                recovered = completion.get(key)
+                if not isinstance(recovered, dict):
+                    continue
+                existing = verification.get(key)
+                if not isinstance(existing, dict):
+                    existing = {}
+                    verification[key] = existing
+                for field in shape:
+                    if existing.get(field) in (None, "") and isinstance(recovered.get(field), list):
+                        existing[field] = recovered[field]
+        except Exception as error:
+            logger.warning("Missing assessment completion failed: %s", type(error).__name__)
+        return verification
     
     def batch_verify_recipes(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any], aicr_service) -> List[Dict[str, Any]]:
         """Batch verification with AICR validation"""
@@ -243,7 +348,9 @@ Example shape (replace all example values with your assessment, never copy examp
         detailed_checks = (
             constraints.get("chewing_effort") == "low"
             or constraints.get("preparation_mode") in {"no_heat", "assembly_only"}
-            or constraints.get("ingredient_storage") == "frozen_only"
+            or constraints.get("preparation_position") == "seated"
+            or constraints.get("hand_effort") == "low"
+            or constraints.get("ingredient_storage") in {"frozen_only", "canned_only"}
             or constraints.get("time_max_minutes") is not None
             or constraints.get("serving_temperature")
             or constraints.get("avoid_steam") or constraints.get("avoid_splatter")
@@ -303,8 +410,11 @@ Example shape (replace all example values with your assessment, never copy examp
                         ),
                         "relevance": verification.get("relevance", "unrelated"),
                         "ingredient_storage_check": verification.get("ingredient_storage_check"),
+                        "canned_ingredient_check": verification.get("canned_ingredient_check"),
                         "chewing_check": verification.get("chewing_check"),
                         "preparation_check": verification.get("preparation_check"),
+                        "seated_preparation_check": verification.get("seated_preparation_check"),
+                        "hand_effort_check": verification.get("hand_effort_check"),
                         "serving_temperature_check": verification.get("serving_temperature_check"),
                         "time_check": verification.get("time_check"),
                         "frozen_ingredient_check": verification.get("frozen_ingredient_check"),

@@ -17,9 +17,39 @@ DURATION = re.compile(
 )
 
 
+def explicit_preparation_position(query: str) -> str | None:
+    text = query.lower().replace("’", "'")
+    if re.search(r"\b(?:standing is (?:fine|ok(?:ay)?|allowed)|(?:drop|remove) (?:the )?seated (?:prep(?:aration)? )?(?:requirement|restriction)|"
+                 r"(?:don't|do not|no longer) need (?:to (?:prepare|cook|assemble)\b[^.!?]{0,35}(?:seated|sitting down)|seated prep(?:aration)?))\b", text):
+        return "unrestricted"
+    if re.search(r"\b(?:seated (?:prep(?:aration)?|cooking)|(?:prepare|prep|make|cook|assemble|preparing|cooking|assembling)\b"
+                 r"[^.!?]{0,65}\b(?:sitting down|seated|while sitting|without standing(?! (?:over|at|by)\b)|without having to stand))\b", text):
+        return "seated"
+    if re.search(r"\b(?:while seated|while sitting(?: down)?)\b[^.!?]{0,65}\b(?:prepare|prep|make|cook|assemble)\b", text):
+        return "seated"
+    return None
+
+
+def explicit_hand_effort(query: str) -> str | None:
+    text = query.lower().replace("’", "'")
+    if re.search(r"\b(?:(?:drop|remove) (?:the )?(?:hand[- ](?:strength|effort)|low[- ]grip) (?:requirement|restriction)|"
+                 r"hand strength (?:is not|isn't) (?:a concern|an issue)|(?:don't|do not|no longer) need (?:low|little|minimal) hand (?:strength|effort))\b", text):
+        return "unrestricted"
+    if re.search(r"\b(?:(?:low|limited|minimal|little|less|reduced|weak) (?:hand|grip) (?:strength|effort)|"
+                 r"weak (?:hands|grip)|without (?:much |a lot of )?(?:hand|grip) (?:strength|effort))\b", text):
+        return "low"
+    return None
+
+
 def explicit_preparation_constraints(query: str) -> Dict[str, Any]:
     text = query.lower().replace("’", "'")
     constraints = {}
+    position = explicit_preparation_position(query)
+    if position:
+        constraints["preparation_position"] = None if position == "unrestricted" else position
+    hand_effort = explicit_hand_effort(query)
+    if hand_effort:
+        constraints["hand_effort"] = None if hand_effort == "unrestricted" else hand_effort
     if re.search(r"\b(?:no[- ](?:heat|cook(?:ing)?)|without (?:using )?(?:any )?(?:heat|cooking)|"
                  r"(?:cooked|cook|prepare(?:d)?) cold|not cooking|don't (?:require|need) (?:any )?cooking)\b", text):
         constraints["preparation_mode"] = "no_heat"
@@ -198,6 +228,10 @@ def _audit_time(recipe: Dict[str, Any], constraints: Dict[str, Any], check: Any)
 
 def audit_preparation(recipe: Dict[str, Any], constraints: Dict[str, Any], assessment: Dict[str, Any]) -> List[str]:
     problems = []
+    if constraints.get("preparation_position") == "seated":
+        problems.extend(audit_seated_preparation(recipe, assessment.get("seated_preparation_check")))
+    if constraints.get("hand_effort") == "low":
+        problems.extend(audit_hand_effort(recipe, assessment.get("hand_effort_check")))
     no_heat = constraints.get("preparation_mode") in {"no_heat", "assembly_only"}
     avoid_steam = constraints.get("avoid_steam") is True
     avoid_splatter = constraints.get("avoid_splatter") is True
@@ -238,4 +272,60 @@ def audit_preparation(recipe: Dict[str, Any], constraints: Dict[str, Any], asses
             problems.extend(_audit_time(recipe, constraints, assessment.get("time_check")))
         else:
             problems.append("Invalid numeric time requirement")
+    return list(dict.fromkeys(problems))
+
+
+def _audit_preparation_steps(recipe: Dict[str, Any], assessment: Any, label: str) -> List[str]:
+    problems = []
+    if not isinstance(assessment, dict):
+        assessment = {}
+    for field in ("unresolved_dependencies", "conflicting_guidance"):
+        if not isinstance(assessment.get(field), list) or assessment[field]:
+            problems.append(f"{label} has missing or conflicting {field}")
+    instructions = recipe.get("instructions", [])
+    checks = assessment.get("step_checks")
+    if not instructions or not isinstance(checks, list):
+        problems.append(f"{label} requires evidence for every instruction")
+        checks = []
+    covered = set()
+    for check in checks:
+        if not isinstance(check, dict):
+            problems.append(f"Invalid {label} step check")
+            continue
+        index = check.get("instruction_index")
+        if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(instructions) or index in covered:
+            problems.append(f"Invalid or repeated {label} instruction index")
+            continue
+        covered.add(index)
+        quote = check.get("quote")
+        if check.get("status") != "pass" or not isinstance(quote, str) or not quote.strip() or quote not in str(instructions[index]):
+            problems.append(f"{label} is not supported for instruction {index}")
+    if covered != set(range(len(instructions))):
+        problems.append(f"{label} evidence does not cover every instruction")
+    return problems
+
+
+def audit_seated_preparation(recipe: Dict[str, Any], assessment: Any) -> List[str]:
+    problems = _audit_preparation_steps(recipe, assessment, "Seated preparation")
+    transfers = re.compile(
+        r"\b(?:stand up|stand (?:at|to)|walk to|bend down|reach (?:over|into|up))\b|"
+        r"\b(?:carry|lift|drain|transfer|remove|place)\b[^.!?]{0,65}\b(?:hot|heavy|boiling|oven|stove|rack)\b", re.I,
+    )
+    for field, index, line in _guidance_lines(recipe):
+        if _positive_action(line, HEAT_ACTION) or _positive_action(line, transfers):
+            problems.append(f"Seated accessibility for heating or transfers is not established in {field}[{index}]: {line}")
+    return list(dict.fromkeys(problems))
+
+
+def audit_hand_effort(recipe: Dict[str, Any], assessment: Any) -> List[str]:
+    problems = _audit_preparation_steps(recipe, assessment, "Low-hand-effort preparation")
+    forceful_actions = re.compile(
+        r"\b(?:knead(?:ing)?|pound(?:ing)?|grate|grating|crush(?:ing)?|wring(?:ing)?|mash(?:ing)?|squeeze|squeezing)\b|"
+        r"\b(?:chop|dice|peel|cut|slice|mince)\b[^.!?]{0,60}\b(?:squash|pumpkin|carrots?|sweet potatoes|beets?)\b|"
+        r"\b(?:open|unscrew|pry)\b[^.!?]{0,40}\b(?:jars?|cans?|tins?)\b|"
+        r"\b(?:lift|carry|drain|transfer)\b[^.!?]{0,60}\b(?:heavy|large pot|dutch oven|cast[- ]iron)\b", re.I,
+    )
+    for field, index, line in _guidance_lines(recipe):
+        if _positive_action(line, forceful_actions):
+            problems.append(f"Low-hand-effort preparation is not established in {field}[{index}]: {line}")
     return list(dict.fromkeys(problems))

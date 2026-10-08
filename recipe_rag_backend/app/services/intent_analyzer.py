@@ -4,8 +4,9 @@ import re
 from typing import Dict, Any, List, Optional
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, FOOD_GUIDANCE_RULES
 from app.services.chewing_validation import explicit_chewing_requirement
-from app.services.preparation_validation import explicit_preparation_constraints
+from app.services.preparation_validation import explicit_preparation_constraints, explicit_preparation_position, explicit_hand_effort
 from app.services.serving_temperature import explicit_serving_temperature, is_temperature_food_guidance
+from app.services.pantry_validation import explicit_canned_requirement, explicit_ingredient_storage
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ Pay special attention to:
             elif active_temperature and not constraints.get("serving_temperature"):
                 constraints["serving_temperature"] = active_temperature
             resolved_query = str(intent_data.get("resolved_query") or query).strip()
-            intent_data = self._post_process_intent(resolved_query, intent_data, current_query=query)
+            intent_data = self._post_process_intent(resolved_query, intent_data, sanitized_history, current_query=query)
             logger.info(f"Context-aware intent analysis: {intent_data['query_type']}")
             
             # Cache with context consideration
@@ -203,6 +204,17 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         normalized = re.sub(r'\s+', ' ', normalized)
         normalized = normalized.replace('?', '').replace('!', '').strip()
         return normalized
+
+    def _is_recipe_discovery_query(self, query: str) -> bool:
+        text = query.lower()
+        if re.search(r"\b(?:tips|advice|explain|explanation|why)\b", text):
+            return False
+        foods = r"(?:recipes?|meals?|dishes?|dinners?|lunch(?:es)?|breakfasts?)"
+        return bool(re.search(
+            r"\b(?:show|give|find|suggest|recommend|provide|generate|list|more)\b[^.!?]{0,60}\b" + foods + r"\b|"
+            r"\bhelp me (?:to )?(?:prepare|make|cook|assemble)\b[^.!?]{0,60}\b" + foods + r"\b|"
+            r"^\s*(?:what|which)\s+" + foods + r"\b", text,
+        ))
     
     def _get_fallback_intent_data(self, query: str) -> Dict[str, Any]:
         """Fallback intent data"""
@@ -215,6 +227,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
                 "time_max_minutes": None,
                 "time_limit_exclusive": False,
                 "preparation_mode": None,
+                "preparation_position": None,
+                "hand_effort": None,
                 "serving_temperature": None,
                 "avoid_steam": False,
                 "avoid_splatter": False,
@@ -280,6 +294,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         constraints.setdefault("attention_level", None)
         constraints.setdefault("chewing_effort", None)
         constraints.setdefault("preparation_mode", None)
+        constraints.setdefault("preparation_position", None)
+        constraints.setdefault("hand_effort", None)
         constraints.setdefault("serving_temperature", None)
         for request in (query, current_query):
             if re.search(r"\b(?:start over|new search|forget (?:the )?previous)\b", request or "", re.I):
@@ -290,9 +306,7 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         route_query = current_query or query
         if is_temperature_food_guidance(route_query):
             intent_data["query_type"] = "food_guidance"
-        elif intent_data.get("query_type") == "food_guidance" and re.search(
-            r"\b(?:show|give|find|suggest|recommend|provide|generate|more)\b.*\brecipes?\b", route_query, re.I
-        ):
+        elif intent_data.get("query_type") in {"food_guidance", "general"} and self._is_recipe_discovery_query(route_query):
             intent_data["query_type"] = "recipe_search"
         constraints.setdefault("time_limit_exclusive", False)
         constraints.setdefault("avoid_steam", False)
@@ -300,6 +314,24 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         constraints.update(explicit_preparation_constraints(query))
         if current_query:
             constraints.update(explicit_preparation_constraints(current_query))
+        requirement_requests = [query]
+        requirement_requests.extend(
+            message.get("content", "") for message in (conversation_history or [])
+            if isinstance(message, dict) and message.get("role") == "user"
+        )
+        requirement_requests.append(current_query or query)
+        for request in requirement_requests:
+            for field, extract in (("preparation_position", explicit_preparation_position), ("hand_effort", explicit_hand_effort),
+                                   ("ingredient_storage", explicit_canned_requirement)):
+                if re.search(r"\b(?:start over|new search|forget (?:the )?previous)\b", request, re.I):
+                    constraints[field] = None
+                requirement = extract(request)
+                if field == "ingredient_storage" and not requirement:
+                    requirement = explicit_preparation_constraints(request).get("ingredient_storage")
+                    if not requirement and constraints.get(field) == "canned_only":
+                        requirement = explicit_ingredient_storage(request)
+                if requirement:
+                    constraints[field] = None if requirement == "unrestricted" else requirement
         self._apply_chewing_requirement(query, intent_data)
         if current_query:
             self._apply_chewing_requirement(current_query, intent_data)
@@ -531,6 +563,12 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             keywords.extend(["leftover friendly", "meal prep", "stores well"])
         if constraints.get("ingredient_storage") in {"pantry_based", "shelf_stable_only"}:
             keywords.extend(["canned beans", "canned vegetables", "dried lentils", "rice", "pasta"])
+        if constraints.get("ingredient_storage") == "canned_only":
+            keywords.extend(["canned beans", "canned vegetables", "canned lentils", "canned broth"])
+        if constraints.get("preparation_position") == "seated":
+            keywords.extend(["tabletop assembly", "ready-to-eat", "no-cook bean salad", "wraps", "sandwiches"])
+        if constraints.get("hand_effort") == "low":
+            keywords.extend(["pre-cut", "ready-to-eat", "gentle mixing", "assembly", "no chopping"])
         if constraints.get("attention_level") == "low":
             if constraints.get("preparation_mode") not in {"no_heat", "assembly_only"}:
                 keywords.extend(["baked", "roasted", "slow cooker", "assembly", "occasional stirring"])
@@ -554,6 +592,10 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         cancer_specific: Dict[str, Any]
     ) -> str:
         parts = [query.strip()]
+        if constraints.get("preparation_position") == "seated":
+            parts.append("tabletop assembly ready-to-eat no-cook meals")
+        if constraints.get("hand_effort") == "low":
+            parts.append("pre-cut ready-to-eat gentle mixing assembly")
         if preferences.get("cuisine_types"):
             parts.append(f"{preferences['cuisine_types'][0]} cuisine")
         if preferences.get("meal_types"):
@@ -568,6 +610,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             parts.append("leftover friendly make ahead stores well refrigerate or freeze")
         if constraints.get("ingredient_storage") in {"pantry_based", "shelf_stable_only"}:
             parts.append("pantry canned beans canned vegetables dried lentils dry grains")
+        if constraints.get("ingredient_storage") == "canned_only":
+            parts.append("canned beans canned vegetables canned lentils canned broth")
         if constraints.get("attention_level") == "low":
             if constraints.get("preparation_mode") not in {"no_heat", "assembly_only"}:
                 parts.append("hands-off baking roasting slow cooker assembly minimal active attention")

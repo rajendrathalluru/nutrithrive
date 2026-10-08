@@ -363,6 +363,18 @@ Time-limited generation requests one complete candidate per call (existing refer
 
 These checks supplement semantic verification; they are not a complete parser of every cooking instruction or a guarantee that cooking cannot splatter. Ambiguous preparation dependencies and unknown timing fail verification. Tests use mocked model assessments, including deliberately incorrect positive verdicts, and real CSV records; they do not establish live-model accuracy or deploy changes to Azure. Existing database-first retrieval, bounded generation retries, provenance labels, per-chat context, and the three-recipe limit remain in place.
 
+## Preparation accessibility and strict ingredient forms
+
+Meal-discovery requests (including “Show meals I can prepare sitting down,” “What recipes require minimal hand strength to prepare?”, “Help me to prepare … recipes,” and “What meals use frozen ingredients from start to finish?”) route to recipe results rather than general food-category advice. Explicit requests for tips/explanations and questions about existing recipes retain their separate routes.
+
+`preparation_position="seated"` and `hand_effort="low"` are independent constraints, not diagnoses, low-attention cooking, or short preparation times. Verification requires cited evidence for every instruction and checks unresolved ingredient/setup dependencies and conflicting guidance. Bounded deterministic checks reject common heating/hot-transfer assumptions for seated requests and common forceful actions for low-hand-effort requests. Tabletop assembly does not need the literal word “seated” to qualify. These checks cannot certify an individual's kitchen accessibility or ability to open a package; uncertain preparation remains an adaptation candidate. User-stated restrictions persist within the chat, explicit withdrawals/reset override them, and assistant suggestions do not establish restrictions.
+
+`ingredient_storage="canned_only"` is distinct from pantry-based, shelf-stable-only, and frozen-only requests. All food ingredients and optional suggestions must have canned forms; dry grains, fresh garnishes, oils, seasonings, or cooking-water exceptions are not silently introduced. Rinsing/washing water is not treated as an added food ingredient. Semantic checks cover all fields, with bounded independent checks for ingredient forms and common hidden additions. Canned-only does not itself prohibit heating. Requests restricting only vegetable forms are not promoted to an all-ingredients restriction.
+
+Generated text fallback must provide an actual dish name and category, not a title-cased user prompt or `CUSTOM` card. The same ingredient/preparation verification still runs afterward. Offline regressions in `test_preparation_accessibility.py` and `test_canned_only_recipes.py` cover the reported database dishes and generated quinoa example, positive assembly/canned alternatives, routing, follow-ups, provenance, and final tips. These tests do not establish universal accessibility or live-model reliability; deployment is separate.
+
+Missing canned-only/accessibility assessment fields receive at most one focused completion call per verification. This fills absent fields only, does not overwrite existing failures, and does not accept a recipe without the same semantic and independent checks afterward. Invalid or still-incomplete assessments fail closed. Canned-only generation requests one complete candidate at a time; its existing bounded repair uses the rejected candidate's canned components without silently removing ingredients from a source recipe.
+
 ## Local development notes
 
 - If the backend is not fully initialized yet, `/health` may show startup in progress while the server is already reachable.

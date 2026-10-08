@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES
 from app.services.preparation_validation import declared_time_check, time_limit_generation_guidance
+from app.services.pantry_validation import audit_canned_recipe
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,8 @@ class RecipeEnhancer:
         hard_constraint_keys = [
             "budget_max",
             "time_max_minutes",
+            "preparation_position",
+            "hand_effort",
             "max_ingredients",
             "min_ingredients",
             "ingredients_available",
@@ -231,6 +234,12 @@ USER REQUIREMENTS:
 
 YOUR TASK - Generate ALL of the following in ONE response:
 
+RECIPE_NAME:
+[A short, concrete dish name, not the user's request, a question, or "Custom Recipe".]
+
+RECIPE_TYPE:
+[The actual category, such as Main Dish, Salad, Soup, Breakfast, or Snack; not CUSTOM.]
+
 1. INGREDIENTS:
 [One ingredient per line starting with "-". If the recipe already has ingredients, preserve them unless a nutrition or safety improvement is needed.]
 
@@ -253,7 +262,7 @@ For both INGREDIENT_MODIFICATIONS and HELPFUL_TIPS:
 - Example: "Use 1 cup of cooked quinoa or brown rice instead of lentils for a different texture." End the suggestion there; do not append "and added protein."
 - Clearly distinguish replacing an ingredient from adding one alongside it. If suggesting an addition for protein, retain the original protein source and respect the user's dietary restrictions and ingredient limits.
 - Before returning these sections, check every substitution and remove unsupported protein-benefit claims. Do not infer protein quantity or equivalence from whether an ingredient is a complete protein.
-Generate all four sections. Be specific, nutrition-appropriate, and AICR-compliant.
+Generate the recipe name, type, and all four sections. Be specific, nutrition-appropriate, and AICR-compliant.
 {time_limit_generation_guidance(constraints)}
 For this section-based format, put any estimated total time in COOKING_INSTRUCTIONS.
 """
@@ -262,6 +271,11 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
             
             generated_core_fields = False
             generated_guidance = False
+            if enhanced_recipe.get("generated_by_llm") and needs_ingredients and needs_instructions:
+                for header, field in (("RECIPE_NAME", "name"), ("RECIPE_TYPE", "type")):
+                    match = re.search(r"(?:^|\n)\s*" + header + r":\s*([^\n]+)", response)
+                    if match:
+                        enhanced_recipe[field] = match[1].strip()[:120]
 
             # Parse all sections from one response
             if "INGREDIENTS:" in response:
@@ -396,14 +410,18 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
                     "violations": r.get("verification_details", {}).get("constraint_violations", []),
                     "ingredient_storage_check": r.get("verification_details", {}).get("ingredient_storage_check"),
                     "chewing_check": r.get("verification_details", {}).get("chewing_check"),
-                    "time_check": r.get("verification_details", {}).get("time_check")
+                    "time_check": r.get("verification_details", {}).get("time_check"),
+                    "seated_preparation_check": r.get("verification_details", {}).get("seated_preparation_check"),
+                    "hand_effort_check": r.get("verification_details", {}).get("hand_effort_check"),
+                    "canned_ingredient_check": r.get("verification_details", {}).get("canned_ingredient_check")
                 } for r in failed_recipes[:2]]
                 failure_context = f"\n\nPrevious Failed Recipes:\n{json.dumps(failures, indent=2)}"
 
             preferences = intent_data.get("preferences", {})
             constraints = intent_data.get("constraints", {})
             timed_request = constraints.get("time_max_minutes") is not None and intent_data.get("query_type") != "recipe_adaptation"
-            recipe_count = "exactly ONE complete recipe" if timed_request else "2-3 recipes"
+            focused_generation = timed_request or constraints.get("ingredient_storage") == "canned_only"
+            recipe_count = "exactly ONE complete recipe" if focused_generation else "2-3 recipes"
             cuisine_preferences = preferences.get("cuisine_types", [])
             nutritional_goals = preferences.get("nutritional_goals", [])
 
@@ -424,6 +442,24 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
             if constraints.get("leftover_friendly"):
                 explicit_rules.append(
                     "- Recipes MUST be safe and practical to divide across multiple sittings. Include specific refrigeration or freezing duration and reheating guidance."
+                )
+            if constraints.get("preparation_position") == "seated":
+                explicit_rules.append(
+                    "- Create actual meals with complete tabletop preparation using ready-to-eat ingredients. "
+                    "State the within-reach workspace setup assumption. Do not require standing, heating, or hot/heavy transfers. "
+                    "This also applies to every suggestion and garnish; do not invent an accessible appliance or helper."
+                )
+            if constraints.get("hand_effort") == "low":
+                explicit_rules.append(
+                    "- Minimize hand force throughout: use purchased ready-to-eat/pre-cut components and gentle mixing. "
+                    "Avoid tough chopping, kneading, squeezing, forceful opening, and heavy cookware. "
+                    "Include packaging/setup assumptions; do not assume adaptive tools or a helper."
+                )
+            if constraints.get("ingredient_storage") == "canned_only":
+                explicit_rules.append(
+                    "- Use ONLY explicitly canned food ingredients, including any garnish, side, and seasoning. "
+                    "Do not add dry quinoa, rice, pasta, dry spices, fresh herbs, or non-canned tips. "
+                    "Canned-only is not the same as pantry-based; use canned liquids instead of adding cooking water."
                 )
             if nutritional_goals:
                 explicit_rules.append(
@@ -506,6 +542,7 @@ Return only the JSON array. Use JSON numbers for calories and protein_grams, wit
 Generate practical, safe, nutrition-optimized recipes that meet ALL constraints and AICR guidelines.
 {time_limit_generation_guidance(constraints)}
 {"Return exactly ONE complete recipe to keep its timing and instructions complete within the output budget." if timed_request else ""}
+{chr(10).join(explicit_rules) if constraints.get('ingredient_storage') == 'canned_only' else ''}
 """
 
             repair_target = next((
@@ -528,7 +565,7 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             
             # STEP 5: Validate with AICR Service
             formatted_recipes = []
-            for i, recipe in enumerate(generated_recipes[:1 if repair_target or timed_request else 3]):
+            for i, recipe in enumerate(generated_recipes[:1 if repair_target or focused_generation else 3]):
                 storage_instructions = str(recipe.get("storage_instructions", "")).strip()
                 
                 # Validate against AICR guidelines
@@ -585,6 +622,19 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             "name", "type", "ingredients", "instructions", "description", "helpful_tips",
             "ingredient_adaptations", "storage_instructions", "total_time", "verification_details"
         )}
+        canned_repair = ""
+        if intent_data.get("constraints", {}).get("ingredient_storage") == "canned_only":
+            form_check = {"non_canned_ingredients": [], "unspecified_forms": [], "conflicting_guidance": []}
+            retained = [ingredient for ingredient in recipe.get("ingredients", []) if not audit_canned_recipe(
+                {"ingredients": [ingredient]}, form_check
+            )]
+            canned_repair = (
+                "CANNED-ONLY REPAIR: Build a coherent dish from these already-canned components when sufficient: "
+                + json.dumps(retained) + ". Remove non-canned components and ALL corresponding steps, garnishes, and tips. "
+                "Do not replace them with dry spices, oil, soy sauce, rice, or other non-canned pantry foods. "
+                "Any necessary new food ingredient must itself be explicitly canned and satisfy all other requirements. "
+                "Recalculate nutrition for the changed ingredients; do not preserve the old nutrition claims."
+            )
         return f"""Repair ONE rejected recipe, not a new batch of recipe ideas.
 USER REQUEST: {query}
 USER REQUIREMENTS: {json.dumps(intent_data)}
@@ -617,6 +667,7 @@ Update the instructions to use the corrected ingredients; include all ingredient
 Do not add helpful tips or further adaptations. No markdown, comments, trailing commas, or placeholders.
 The output will undergo the same independent verification as every other recipe.
 {time_limit_generation_guidance(intent_data.get('constraints', {}))}
+{canned_repair}
 """
     def generate_structured_fallback_recipe(
         self,
@@ -624,7 +675,7 @@ The output will undergo the same independent verification as every other recipe.
         intent_data: Dict[str, Any],
         grounding_recipes: List[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
-        recipe_name = re.sub(r"\s+", " ", query).strip().title() or "Custom Recipe"
+        recipe_name = "Custom Recipe"
         recipe = {
             "name": recipe_name,
             "type": "CUSTOM",
@@ -636,6 +687,16 @@ The output will undergo the same independent verification as every other recipe.
         }
 
         enhanced_recipe = self.enhance_single_recipe(recipe, intent_data, True, grounding_recipes)
+        generated_name = str(enhanced_recipe.get("name", "")).strip()
+        if not generated_name or self._normalize_text(generated_name) in {"custom recipe", self._normalize_text(query)} or re.match(
+            r"^(?:show|give|help|what|which|generate|provide|recipe_name|recipe_type)\b", generated_name, re.I
+        ):
+            logger.warning("Structured recipe fallback did not provide a concrete dish name")
+            return []
+        if str(enhanced_recipe.get("type", "")).strip().upper() == "CUSTOM":
+            logger.warning("Structured recipe fallback did not provide a recipe category")
+            return []
+        enhanced_recipe["description"] = ""
         ingredients = [item for item in enhanced_recipe.get("ingredients", []) if str(item).strip()]
         instructions = [item for item in enhanced_recipe.get("instructions", []) if str(item).strip()]
         if not ingredients or not instructions:

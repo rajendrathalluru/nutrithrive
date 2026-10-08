@@ -667,7 +667,9 @@ class GenerationAndVerificationTests(unittest.TestCase):
         self.assertEqual(recipe["reference_sources"], [])
 
     def test_structured_fallback_uses_same_database_context(self):
-        llm = Mock(predict=Mock(return_value="""INGREDIENTS:
+        llm = Mock(predict=Mock(return_value="""RECIPE_NAME: Warm Tofu Bowl
+RECIPE_TYPE: Main Dish
+INGREDIENTS:
 - 1 cup tofu
 COOKING_INSTRUCTIONS:
 1. Cook the tofu thoroughly and serve warm.

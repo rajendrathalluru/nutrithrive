@@ -180,7 +180,9 @@ class TimeLimitedRecipeTests(unittest.TestCase):
         self.assertEqual(len(enhancer.generate_fallback_recipes("Breakfast recipes", {}, [])), 3)
 
     def test_structured_fallback_preserves_timing_as_metadata_not_a_cooking_step(self):
-        response = """INGREDIENTS:
+        response = """RECIPE_NAME: Yogurt and Banana Bowl
+RECIPE_TYPE: Breakfast
+INGREDIENTS:
 - 1 cup pasteurized Greek yogurt
 - 1 banana
 COOKING_INSTRUCTIONS:
