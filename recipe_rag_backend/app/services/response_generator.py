@@ -1,7 +1,7 @@
 import logging
 import json
 from typing import List, Dict, Any
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, FOOD_GUIDANCE_RULES
 from app.services.chewing_validation import audit_chewing_assessment
 from app.services.storage_guidance import storage_summary
 
@@ -13,6 +13,40 @@ class ResponseGenerator:
         
     def initialize(self, llm):
         self.llm = llm
+
+    def answer_food_guidance(self, query: str, intent_data: Dict[str, Any], nutrition_context: str) -> str:
+        prompt = f"""Answer this culinary food-category or explanation question directly, without recipe cards.
+USER QUESTION: {query}
+ACTIVE USER REQUIREMENTS: {json.dumps(intent_data)}
+GENERAL NUTRITION GUIDELINES: {nutrition_context}
+
+{FOOD_GUIDANCE_RULES}
+{SERVING_TEMPERATURE_RULES}
+{INGREDIENT_STORAGE_RULES}
+{PREPARATION_RULES}
+{CHEWING_RULES}
+
+Give a concise explanation and up to three suitable FOOD TYPES when examples are useful, not fabricated named
+recipes, ingredient quantities, or nutritional totals. Honor every active dietary, allergy, texture, equipment,
+and preparation constraint in these examples. For warm-but-not-hot requests, suggest foods actually eaten warm,
+not chilled salads. Briefly explain the fit without claiming a universally best eating temperature.
+Do not say 'I found recipes' or imply these examples were retrieved, verified, or authored by AICR/AHA/ACS.
+Offer to find matching recipes if the user wants them. Do not diagnose or infer symptoms.
+If the constraints conflict, explain and ask which can change rather than ignoring one.
+Scientific background: flavor involves taste, aroma, texture, and temperature, not a universal 'heat numbs taste buds' rule.
+Source: https://www.nidcd.nih.gov/health/taste-disorders
+Food-safety background: preferred eating temperature is not safe hot holding. Let the portion being eaten cool
+briefly and eat promptly; do not recommend keeping perishable foods lukewarm. For food-holding advice cite:
+https://www.fda.gov/food/buy-store-serve-safe-food/serving-safe-buffets
+Keep the response under 150 words. Link only to supplied sources when using their scientific or safety claims.
+"""
+        try:
+            response = self.llm.predict(prompt).strip()
+            if response:
+                return response
+        except Exception:
+            logger.exception("Unable to answer food guidance question")
+        return "I couldn't answer that food question reliably right now. Please try again."
 
     def answer_recipe_question(self, query: str, recipes: List[Dict], intent_data: Dict[str, Any]) -> str:
         prompt = f"""Answer this follow-up about the supplied recipes from the current chat.
@@ -34,6 +68,7 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
 {PREPARATION_RULES}
+{SERVING_TEMPERATURE_RULES}
 """
         try:
             return self.llm.predict(prompt).strip()
@@ -61,12 +96,26 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                 constraint_mentions.append(f"{', '.join(constraints['dietary_restrictions'])} diet")
             if constraints.get("leftover_friendly"):
                 constraint_mentions.append("suitable for leftovers and multiple sittings")
+            if constraints.get("serving_temperature"):
+                constraint_mentions.append(f"served {constraints['serving_temperature'].replace('_', ' ')}")
 
             if constraints.get("chewing_effort") == "low":
                 return self._generate_low_chewing_response(source_docs, constraints)
 
             if constraints.get("leftover_friendly"):
                 return self._generate_leftover_friendly_response(source_docs, constraints)
+
+            if constraints.get("time_max_minutes") is not None:
+                lines = ["Here are the recipes that passed the total preparation-time check:"]
+                for recipe in source_docs[:3]:
+                    timing = recipe.get("verification_details", {}).get("time_check") or {}
+                    minutes = timing.get("total_minutes")
+                    if isinstance(minutes, (int, float)) and not isinstance(minutes, bool):
+                        lines.append(f"• {recipe['name']}: approximately {minutes:g} minutes total.")
+                    else:
+                        lines.append(f"• {recipe['name']}: see the recipe for timing details.")
+                lines.append("Timing includes preparation, not just cooking, and may vary with your pace. Open a card for the steps.")
+                return "\n".join(lines)
             
             constraint_text = ", ".join(constraint_mentions) if constraint_mentions else ""
             
@@ -86,6 +135,10 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                     info += f", {doc['protein_grams']}g protein"
                 if doc.get("storage_evidence"):
                     info += f". Storage evidence: {doc['storage_evidence']}"
+                temperature_check = doc.get("verification_details", {}).get("serving_temperature_check") or {}
+                serving_quotes = [citation.get("quote", "") for citation in temperature_check.get("evidence", []) if isinstance(citation, dict)]
+                if serving_quotes:
+                    info += f". Serving evidence: {'; '.join(serving_quotes)}"
                 
                 recipe_info.append(info)
             
@@ -109,6 +162,7 @@ Brief response (under 150 words):
 5. Mention these follow evidence-based nutrition guidelines
 6. Brief encouragement about enjoying wholesome, satisfying meals
 7. Do not mention any recipe count other than {recipe_count}
+8. Explain temperature suitability only from supplied serving evidence; do not invent a warming/cooling step or confuse serving with cooking temperature.
 
 Focus on:
 - Nutritional benefits and flavor
@@ -165,6 +219,15 @@ Avoid medical terminology or health condition references.
     def generate_helpful_no_results_message(self, query: str, intent_data: Dict[str, Any]) -> str:
         """Generate a helpful message when no recipes can be found or generated"""
         constraints = intent_data.get("constraints", {})
+        if constraints.get("time_max_minutes") is not None:
+            comparison = "less than" if constraints.get("time_limit_exclusive") else "at most"
+            limit = constraints["time_max_minutes"]
+            limit_text = f"{limit:g}" if isinstance(limit, (int, float)) else str(limit)
+            return (
+                f"I couldn't verify a recipe with a total preparation time of {comparison} {limit_text} minutes "
+                "that meets all your requirements right now. Your request is clear; "
+                "I haven't relaxed the time limit or your other requirements. Please try again."
+            )
         
         constraint_summary = []
         if constraints.get("max_ingredients"):

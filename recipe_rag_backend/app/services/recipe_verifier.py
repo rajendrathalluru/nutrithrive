@@ -5,10 +5,11 @@ import hashlib
 import re
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES
 from app.services.pantry_validation import audit_pantry_ingredients
 from app.services.chewing_validation import audit_chewing_assessment
-from app.services.preparation_validation import audit_preparation
+from app.services.preparation_validation import audit_preparation, declared_time_check
+from app.services.serving_temperature import audit_serving_temperature
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,16 @@ For other requests ingredient_storage_check may be null.
         }
         constraints = intent_data.get("constraints", {})
         preparation_contract = ""
+        if constraints.get("serving_temperature"):
+            example["serving_temperature_check"] = {
+                "evidence": [{"field": "instructions", "index": 0, "quote": "Exact final-serving instruction"}],
+                "conflicting_guidance": [], "food_safety_concerns": [],
+            }
+            preparation_contract += """Return serving_temperature_check with exact short citations to instructions or
+source_notes establishing the FINISHED dish's requested eating temperature. Titles and warm ingredients are not
+serving evidence. Return conflicting_guidance and food_safety_concerns arrays; both must be empty to pass.
+Missing serving evidence means unknown/adaptable, not a direct match. Do not invent warming or cooling steps.
+"""
         if constraints.get("preparation_mode") in {"no_heat", "assembly_only"} or constraints.get("avoid_steam") or constraints.get("avoid_splatter"):
             example["preparation_check"] = {
                 "conflicting_steps": [], "unresolved_dependencies": [], "conflicting_guidance": []
@@ -124,6 +135,9 @@ Review every ingredient and direction, not just the last assembly/serving step. 
 Supply evidence citations with field (instructions/source_notes/description/total_time), index for instruction arrays,
 and an exact quote containing the relevant duration. A partial cooking time is not total time.
 Do not invent timing for untimed preparation. Check all mandatory steps against the stated total and requested limit.
+Explicit total_time/source total-time declarations provide timing evidence, including estimated AI timings.
+Reject unrealistic totals or uncounted preparation dependencies even when a declared number fits the limit.
+time_limit_exclusive=true means strictly less: a declared 5 minutes FAILS an under-5-minute request.
 """
         texture_contract = ""
         if intent_data.get("constraints", {}).get("chewing_effort") == "low":
@@ -184,6 +198,25 @@ Example shape (replace all example values with your assessment, never copy examp
         verification["constraint_violations"] = list(dict.fromkeys(str(value) for value in violations))
         verification["passes_verification"] = verification.get("relevance") == "match" and not violations
         verification = self._enforce_storage_check(verification, intent_data, recipe)
+        temperature_problems = audit_serving_temperature(
+            recipe, intent_data.get("constraints", {}).get("serving_temperature"), verification.get("serving_temperature_check")
+        )
+        if temperature_problems:
+            verification["constraint_violations"].extend(temperature_problems)
+            verification["passes_verification"] = False
+            if verification.get("relevance") == "match":
+                verification["relevance"] = "adaptable"
+        if intent_data.get("constraints", {}).get("time_max_minutes") is not None:
+            declared = declared_time_check(recipe)
+            assessment = verification.get("time_check")
+            assessed_total = assessment.get("total_minutes") if isinstance(assessment, dict) else None
+            if declared and (
+                assessment is None or (
+                    isinstance(assessed_total, (int, float)) and not isinstance(assessed_total, bool)
+                    and assessed_total == declared["total_minutes"]
+                )
+            ):
+                verification["time_check"] = declared
         preparation_problems = audit_preparation(recipe, intent_data.get("constraints", {}), verification)
         if preparation_problems:
             verification["constraint_violations"].extend(preparation_problems)
@@ -212,6 +245,7 @@ Example shape (replace all example values with your assessment, never copy examp
             or constraints.get("preparation_mode") in {"no_heat", "assembly_only"}
             or constraints.get("ingredient_storage") == "frozen_only"
             or constraints.get("time_max_minutes") is not None
+            or constraints.get("serving_temperature")
             or constraints.get("avoid_steam") or constraints.get("avoid_splatter")
         )
         batch_size = 1 if detailed_checks else 3
@@ -271,6 +305,7 @@ Example shape (replace all example values with your assessment, never copy examp
                         "ingredient_storage_check": verification.get("ingredient_storage_check"),
                         "chewing_check": verification.get("chewing_check"),
                         "preparation_check": verification.get("preparation_check"),
+                        "serving_temperature_check": verification.get("serving_temperature_check"),
                         "time_check": verification.get("time_check"),
                         "frozen_ingredient_check": verification.get("frozen_ingredient_check"),
                         "verification_score": verification.get("verification_score", 0),
@@ -333,6 +368,7 @@ Verify EACH recipe (by id) against ALL constraints in "constraints" section.
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
 {PREPARATION_RULES}
+{SERVING_TEMPERATURE_RULES}
 {self.STORAGE_VERIFICATION_RULES}
 
 {self._verification_contract(intent_data)}
@@ -509,6 +545,7 @@ Evaluate this recipe against ALL constraints intelligently:
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
 {PREPARATION_RULES}
+{SERVING_TEMPERATURE_RULES}
 {self.STORAGE_VERIFICATION_RULES}
 
 {self._verification_contract(intent_data)}

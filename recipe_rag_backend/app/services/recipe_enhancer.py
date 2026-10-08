@@ -4,7 +4,8 @@ import re
 import hashlib
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES
+from app.services.preparation_validation import declared_time_check, time_limit_generation_guidance
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,7 @@ USER REQUIREMENTS:
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
 {PREPARATION_RULES}
+{SERVING_TEMPERATURE_RULES}
 
 YOUR TASK - Generate ALL of the following in ONE response:
 
@@ -252,6 +254,8 @@ For both INGREDIENT_MODIFICATIONS and HELPFUL_TIPS:
 - Clearly distinguish replacing an ingredient from adding one alongside it. If suggesting an addition for protein, retain the original protein source and respect the user's dietary restrictions and ingredient limits.
 - Before returning these sections, check every substitution and remove unsupported protein-benefit claims. Do not infer protein quantity or equivalence from whether an ingredient is a complete protein.
 Generate all four sections. Be specific, nutrition-appropriate, and AICR-compliant.
+{time_limit_generation_guidance(constraints)}
+For this section-based format, put any estimated total time in COOKING_INSTRUCTIONS.
 """
 
             response = self.llm.predict(combined_prompt)
@@ -282,10 +286,14 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
                     section = section.split("INGREDIENT_MODIFICATIONS:")[0]
                 
                 instructions = []
+                generated_total_time = ""
                 for line in section.split('\n'):
                     cleaned = line.strip()
                     if cleaned and len(cleaned) > 15:
                         cleaned = re.sub(r'^\d+[\.\)]\s*', '', cleaned)
+                        if re.match(r"^(?:estimated\s+)?total(?:\s+elapsed)?\s+time\b", cleaned, re.I) and declared_time_check({"total_time": cleaned}):
+                            generated_total_time = cleaned
+                            continue
                         if cleaned:
                             instructions.append(cleaned)
                 
@@ -293,6 +301,8 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
                     enhanced_recipe["instructions"] = [f"{i+1}. {inst}" for i, inst in enumerate(instructions[:8])]
                     enhanced_recipe["instructions_generated"] = True
                     generated_core_fields = True
+                    if generated_total_time:
+                        enhanced_recipe["total_time"] = generated_total_time
             
             if "INGREDIENT_MODIFICATIONS:" in response:
                 section = response.split("INGREDIENT_MODIFICATIONS:")[1]
@@ -385,12 +395,15 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
                     "name": r.get("name"), 
                     "violations": r.get("verification_details", {}).get("constraint_violations", []),
                     "ingredient_storage_check": r.get("verification_details", {}).get("ingredient_storage_check"),
-                    "chewing_check": r.get("verification_details", {}).get("chewing_check")
+                    "chewing_check": r.get("verification_details", {}).get("chewing_check"),
+                    "time_check": r.get("verification_details", {}).get("time_check")
                 } for r in failed_recipes[:2]]
                 failure_context = f"\n\nPrevious Failed Recipes:\n{json.dumps(failures, indent=2)}"
 
             preferences = intent_data.get("preferences", {})
             constraints = intent_data.get("constraints", {})
+            timed_request = constraints.get("time_max_minutes") is not None and intent_data.get("query_type") != "recipe_adaptation"
+            recipe_count = "exactly ONE complete recipe" if timed_request else "2-3 recipes"
             cuisine_preferences = preferences.get("cuisine_types", [])
             nutritional_goals = preferences.get("nutritional_goals", [])
 
@@ -435,13 +448,14 @@ USER REQUIREMENTS:
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
 {PREPARATION_RULES}
+{SERVING_TEMPERATURE_RULES}
 
 {self._build_grounding_context(grounding_recipes)}
 
 YOUR TASK:
 1. Read ALL user requirements from intent_data
 2. Apply AICR guidelines above (especially protein, food safety, easy digestion)
-3. Generate 2-3 recipes that satisfy BOTH user constraints AND AICR guidelines, unless adapting specific references;
+3. Generate {recipe_count} that satisfy BOTH user constraints AND AICR guidelines, unless adapting specific references;
    for recipe_adaptation, return only one adapted recipe per selected reference (at most three).
 
 RECIPE REQUIREMENTS:
@@ -490,6 +504,8 @@ OUTPUT FORMAT (valid JSON only):
 
 Return only the JSON array. Use JSON numbers for calories and protein_grams, with no comments, placeholders, or markdown fences.
 Generate practical, safe, nutrition-optimized recipes that meet ALL constraints and AICR guidelines.
+{time_limit_generation_guidance(constraints)}
+{"Return exactly ONE complete recipe to keep its timing and instructions complete within the output budget." if timed_request else ""}
 """
 
             repair_target = next((
@@ -512,7 +528,7 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             
             # STEP 5: Validate with AICR Service
             formatted_recipes = []
-            for i, recipe in enumerate(generated_recipes[:1 if repair_target else 3]):
+            for i, recipe in enumerate(generated_recipes[:1 if repair_target or timed_request else 3]):
                 storage_instructions = str(recipe.get("storage_instructions", "")).strip()
                 
                 # Validate against AICR guidelines
@@ -590,6 +606,7 @@ Recheck the entire resulting ingredient list; fixing one issue while keeping ano
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
 {PREPARATION_RULES}
+{SERVING_TEMPERATURE_RULES}
 NUTRITION AND FOOD SAFETY GUIDELINES:
 {guidelines}
 
@@ -599,6 +616,7 @@ instructions (array of complete steps), total_time (elapsed time with units), de
 Update the instructions to use the corrected ingredients; include all ingredients required by the steps.
 Do not add helpful tips or further adaptations. No markdown, comments, trailing commas, or placeholders.
 The output will undergo the same independent verification as every other recipe.
+{time_limit_generation_guidance(intent_data.get('constraints', {}))}
 """
     def generate_structured_fallback_recipe(
         self,

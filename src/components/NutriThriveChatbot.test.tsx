@@ -211,6 +211,25 @@ test('keeps search analysis available in a disclosure', async () => {
   expect(screen.getByText('Microwave-only recipes prioritized')).toBeVisible();
 });
 
+test('food guidance shows conversational examples without recipe cards or search analysis', async () => {
+  const guidance = 'Porridge and soups can be enjoyed comfortably warm. Would you like recipes?';
+  searchRecipes.mockResolvedValue({ recipes: [], backendData: {
+    source: 'food_guidance', response: guidance,
+    intent_analysis: { query_type: 'food_guidance', constraints: { serving_temperature: 'warm_not_hot' } },
+  } });
+  await readyChat();
+  send('Show foods that taste good warm but not hot');
+  expect(await screen.findByText(guidance)).toBeInTheDocument();
+  expect(screen.queryByText('Search Analysis')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'View Full Recipe' })).not.toBeInTheDocument();
+  send('Give me recipes for those');
+  await waitFor(() => expect(searchRecipes).toHaveBeenCalledTimes(2));
+  expect(searchRecipes.mock.calls[1][1]).toEqual(expect.arrayContaining([
+    expect.objectContaining({ role: 'user', content: 'Show foods that taste good warm but not hot' }),
+    expect.objectContaining({ role: 'assistant', content: guidance }),
+  ]));
+});
+
 test('mobile navigation closes after selecting a chat and with Escape', async () => {
   isDesktop = false;
   await readyChat();

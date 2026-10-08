@@ -528,6 +528,16 @@ class RecipeRAGService:
                     query, mode, intent_data,
                     self.response_generator.answer_recipe_question(recipe_request_query, referenced_recipes, intent_data)
                 )
+            if query_type == "food_guidance":
+                response = self.response_generator.answer_food_guidance(
+                    recipe_request_query, intent_data,
+                    aicr_service.get_prompt_context(focus_areas=aicr_service.extract_focus_areas_from_intent(intent_data)),
+                )
+                return {
+                    **self._build_context_reply(query, mode, intent_data, response),
+                    "source": "food_guidance",
+                    "conversation_context_used": bool(conversation_history),
+                }
             is_recipe_adaptation = query_type == "recipe_adaptation"
             logger.info(f"Intent analysis: {time.time() - start_time:.2f}s")
             effective_query = intent_data.get("search_strategy", {}).get("enhanced_query") or recipe_request_query

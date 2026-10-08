@@ -69,7 +69,7 @@ const Message: React.FC<MessageProps> = ({ message }) => {
         </div>
         
         {/* Display backend analysis if available */}
-        {message.backendData?.intent_analysis && (
+        {message.backendData?.intent_analysis && message.backendData?.source !== 'food_guidance' && (
           <details className="tw-search-analysis">
             <summary>Search Analysis</summary>
             <div className="text-slate-600 mt-2">

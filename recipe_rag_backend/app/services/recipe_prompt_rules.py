@@ -19,6 +19,39 @@ fresh peppers, and dried herbs rather than required fresh cilantro. Tips and ada
 ingredients: do not recommend adding grilled chicken, refrigerated tofu, raw vegetables, or frozen corn.
 """
 
+FOOD_GUIDANCE_RULES = """Choose query_type='food_guidance' for culinary explanations, food categories, or examples
+without a request for recipes or cooking instructions. 'Show foods that taste good warm but not hot' asks for
+food ideas, not automatically recipe cards. Answer the category question first and offer recipes as a follow-up.
+Use recipe_search for explicit recipe requests or requests to make/cook meals, recipe_adaptation for changing
+a shown recipe, and recipe_question for questions about a specific shown recipe. Do not classify every mention
+of 'foods' as guidance. A follow-up 'give me recipes for those' or 'more recipes' switches to recipe_search
+while preserving the user's active constraints. A follow-up asking for more food examples remains food_guidance.
+Only user messages establish restrictions; do not convert examples in an assistant's guidance into requirements
+unless the user explicitly selects or refers to them. 'A recipe for the first one' after a list of food types is
+a recipe_search for that food type, not an adaptation of an existing recipe; do not invent referenced_recipe_ids.
+"""
+
+SERVING_TEMPERATURE_RULES = """Serving temperature is separate from preparation method and spice intensity.
+Set constraints.serving_temperature to warm_not_hot, warm, hot, cold, or room_temperature only when requested;
+otherwise leave it null. 'Warm but not hot', 'comfortably warm', and 'lukewarm' mean warm_not_hot, NOT cold,
+room-temperature, no-cook, mild spices, or a diagnosis of mouth sores. Cooking normally remains allowed.
+Do not infer a preferred numerical temperature interval. Later user changes replace the earlier temperature.
+For recipes, inspect the FINISHED dish's serving instructions, not its title, cuisine, hot sauce, cooking temperature,
+or one warmed component. 'Serve chilled' and room-temperature salad assembly do not establish warm serving.
+A plain 'serve immediately' after cooking does not establish warm-but-not-hot serving. Require actual source
+instructions such as 'serve warm' or letting the portion cool until comfortably warm before eating.
+An explicit warm-serving option can qualify even if the source also permits other serving temperatures.
+If warming/cooling or component changes are needed but absent from a database recipe, classify it as adaptable,
+not a direct match. Put complete new serving steps in an AI Generated adaptation; never silently rewrite the source.
+Check helpful tips and adaptations as well. Generated warm-but-not-hot recipes must cook ingredients safely,
+then let only the portion being eaten cool briefly until comfortably warm and eat promptly.
+Do not lower required cooking/reheating temperatures to a preferred eating temperature. Do not hold perishable
+food lukewarm for hours. Eating temperature is not a safe storage or hot-holding temperature.
+Temperature can affect flavor perception differently across foods and people. Do not claim that heat universally
+numbs taste buds, that all delicate aromas disappear when hot, or that 105-125 F / 40-52 C is a universal optimal
+or medically safe serving range. Do not infer a swallowing disorder or make treatment claims from this preference.
+"""
+
 PREPARATION_RULES = """Preparation restrictions are HARD constraints, not flavor preferences or serving temperature.
 Set constraints.preparation_mode='no_heat' for no-cook/no-heat/cooked-cold requests; use 'assembly_only'
 for only assembling, not cooking. Cold SERVING alone does not imply no-heat preparation.

@@ -83,6 +83,54 @@ def _exceeds_limit(minutes: float, constraints: Dict[str, Any]) -> bool:
     return minutes >= limit if constraints.get("time_limit_exclusive") else minutes > limit
 
 
+def declared_time_check(recipe: Dict[str, Any]) -> Dict[str, Any] | None:
+    declarations = []
+    total_time = recipe.get("total_time")
+    if isinstance(total_time, str) and total_time.strip():
+        declarations.append(("total_time", total_time.strip()))
+    notes = str(recipe.get("source_notes") or "")
+    for match in re.finditer(r"\btotal(?:\s+elapsed)?\s+time\s*[:=]?\s*([^|\n]+)", notes, re.I):
+        declarations.append(("source_notes", match[0]))
+    totals = []
+    evidence = []
+    for field, declaration in declarations:
+        value = re.sub(r"^(?:estimated\s+)?(?:total(?:\s+elapsed)?\s+time\s*[:=]?\s*)?", "", declaration, flags=re.I).strip()
+        duration_end = 0
+        total = 0
+        for duration in DURATION.finditer(value):
+            if value[duration_end:duration.start()].strip().lower() not in {"", "and"}:
+                break
+            total += _duration_minutes(duration[0])[0]
+            duration_end = duration.end()
+        if not duration_end or value[duration_end:].strip(" .;"):
+            return None
+        totals.append(total)
+        evidence.append({"field": field, "quote": declaration})
+    if not totals:
+        return None
+    return {"total_minutes": max(totals), "evidence": evidence}
+
+
+def time_limit_generation_guidance(constraints: Dict[str, Any]) -> str:
+    limit = constraints.get("time_max_minutes")
+    if not isinstance(limit, (int, float)) or isinstance(limit, bool) or not math.isfinite(limit) or limit < 0:
+        return ""
+    comparison = "strictly less than" if constraints.get("time_limit_exclusive") else "at most"
+    boundary = (
+        f"Exactly {limit:g} minutes does NOT qualify."
+        if constraints.get("time_limit_exclusive") else f"Exactly {limit:g} minutes is allowed."
+    )
+    return f"""ELAPSED-TIME BUDGET: {comparison} {limit:g} minutes ({limit * 60:g} seconds). {boundary}
+Design the preparation to fit this budget; do not merely relabel a slower recipe with a shorter time.
+For a very short budget prefer simple assembly or blending with explicitly ready-to-eat ingredients.
+Specify purchased prewashed/precut/ready-cooked forms when needed; do not hide preparation in the ingredient list.
+Count opening, measuring, washing, cutting, equipment setup, cooking, waiting, and serving in total_time.
+State an estimated total_time with numeric units and realistic timings for ALL preparation steps.
+Use seconds for brief steps. Sequential timings must fit the total; state any actual overlap explicitly.
+Do not round a time up to the excluded boundary. Do not shorten necessary cooking for food safety.
+Keep all other requirements. If no realistic recipe fits, return an empty array rather than a false match."""
+
+
 def _audit_time(recipe: Dict[str, Any], constraints: Dict[str, Any], check: Any) -> List[str]:
     problems = []
     total = check.get("total_minutes") if isinstance(check, dict) else None
@@ -90,6 +138,9 @@ def _audit_time(recipe: Dict[str, Any], constraints: Dict[str, Any], check: Any)
         return ["Total elapsed preparation time is unknown"]
     if _exceeds_limit(total, constraints):
         problems.append(f"Total elapsed time {total} minutes exceeds the requested limit")
+    declared = declared_time_check(recipe)
+    if declared and (declared["total_minutes"] > total or _exceeds_limit(declared["total_minutes"], constraints)):
+        problems.append("Declared total elapsed time contradicts the assessment or requested limit")
     evidence = check.get("evidence")
     if not isinstance(evidence, list) or not evidence:
         problems.append("Total elapsed time lacks recipe citations")
