@@ -9,10 +9,46 @@ from app.services.recipe_enhancer import RecipeEnhancer
 from app.services.recipe_verifier import RecipeVerifier
 from app.services.response_generator import ResponseGenerator
 from app.services.search_engine import SearchEngine
-from app.services.storage_guidance import extract_storage_guidance, storage_summary
+from app.services.storage_guidance import extract_storage_guidance, requests_reheating, storage_summary
 
 
 class StorageGuidanceTests(unittest.TestCase):
+    def test_reheating_requests_use_leftover_evidence_without_assuming_other_constraints(self):
+        for query in (
+            "What foods don’t change texture when reheated?", "Which foods reheat well?",
+            "What meals can be reheated?", "Recipes suitable for reheating",
+        ):
+            with self.subTest(query=query):
+                analyzer = IntentAnalyzer()
+                intent = analyzer._post_process_intent(query, analyzer._get_fallback_intent_data(query))
+                self.assertTrue(requests_reheating(query))
+                self.assertTrue(intent["constraints"]["leftover_friendly"])
+                self.assertIsNone(intent["constraints"]["chewing_effort"])
+                self.assertIsNone(intent["constraints"]["preparation_mode"])
+        for query in ("Meals without reheating", "Foods that don't reheat well", "Breakfast recipes"):
+            self.assertFalse(requests_reheating(query), query)
+
+    def test_reheating_uses_real_source_guidance_not_speculative_model_approval(self):
+        query = "What foods don’t change texture when reheated?"
+        service = RecipeRAGService()
+        service.data_loader.load_data(Path(__file__).parents[1] / "app/data/Recipe.csv")
+        analyzer = IntentAnalyzer()
+        intent = analyzer._post_process_intent(query, analyzer._get_fallback_intent_data(query))
+        recipes = [service._build_recipe_data_from_record(service.data_loader.get_recipe_record(name)) for name in (
+            "Air Fryer Plantains with Cilantro Crema", "Vegetable Stone Soup",
+        )]
+        for recipe in recipes:
+            recipe["verification_details"] = {"passes_verification": True, "relevance": "match"}
+        matches = service._get_verified_matches(recipes, intent)
+        self.assertEqual([recipe["name"] for recipe in matches], ["Vegetable Stone Soup"])
+        generator = ResponseGenerator()
+        generator.initialize(Mock())
+        response = generator.generate_personalized_response(query, matches, intent)
+        self.assertIn("no recipe guarantees an identical result", response)
+        self.assertIn("add croutons just before serving", response)
+        self.assertNotIn("Plantains", response)
+        generator.llm.predict.assert_not_called()
+
     @classmethod
     def setUpClass(cls):
         filename = Path(__file__).resolve().parents[1] / "app/data/Recipe.csv"

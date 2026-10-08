@@ -76,11 +76,23 @@ class VerificationContractTests(unittest.TestCase):
 
     def test_expected_checks_cover_preferences_additional_criteria_and_zero_limits(self):
         checks = RecipeVerifier()._required_checks({
+            "recipe_request": "Chinese recipes without chopping",
             "constraints": {"time_max_minutes": 0, "leftover_friendly": False, "skill_level": None},
             "preferences": {"cuisine_types": ["Chinese"], "flavor_profiles": []},
             "search_strategy": {"must_match_criteria": ["no chopping"]},
         })
-        self.assertEqual(set(checks), {"constraints.time_max_minutes", "preferences.cuisine_types", "search_strategy.must_match_criteria"})
+        self.assertEqual(set(checks), {"recipe_request", "constraints.time_max_minutes", "preferences.cuisine_types", "search_strategy.must_match_criteria"})
+
+    def test_original_request_is_checked_even_without_named_constraints(self):
+        query = "What foods don’t change texture when reheated?"
+        intent = {"recipe_request": query, "constraints": {}, "search_strategy": {"must_match_criteria": []}}
+        self.assertEqual(RecipeVerifier()._required_checks(intent), {"recipe_request": query})
+        for status, passes in ((None, False), ("unknown", False), ("fail", False), ("pass", True)):
+            with self.subTest(status=status):
+                assessment = {"relevance": "match", "constraint_violations": [], "constraint_checks": {}}
+                if status:
+                    assessment["constraint_checks"]["recipe_request"] = {"status": status, "evidence": "Recipe preparation assessment."}
+                self.assertEqual(self.verify(assessment, intent)["passes_verification"], passes)
 
     def test_batching_bounds_output_and_checks_every_candidate(self):
         verifier = RecipeVerifier()
@@ -97,6 +109,24 @@ class VerificationContractTests(unittest.TestCase):
         self.assertEqual(len(results), 7)
         self.assertTrue(all(recipe["verification_details"]["passes_verification"] for recipe in results))
         self.assertEqual(verifier.llm.predict.call_count, 3)
+
+    def test_followup_cannot_skip_original_user_goal_when_rewrite_omits_it(self):
+        intent = {
+            "recipe_request": "Make a recipe with lentils and carrots",
+            "user_request_context": [
+                "What foods will still turn out okay even if I don't cook them exactly right?",
+                "Make a recipe with those ingredients",
+            ],
+        }
+        assessment = {
+            "relevance": "match", "constraint_violations": [],
+            "constraint_checks": {"recipe_request": {"status": "pass", "evidence": "Uses lentils and carrots."}},
+        }
+        self.assertFalse(self.verify(assessment, intent)["passes_verification"])
+        assessment["constraint_checks"]["user_request_context"] = {
+            "status": "pass", "evidence": "Simmer until tender rather than relying on an exact endpoint time.",
+        }
+        self.assertTrue(self.verify(assessment, intent)["passes_verification"])
 
     def test_attention_is_verified_against_instructions_not_total_time(self):
         intent = {"constraints": {"attention_level": "low"}}

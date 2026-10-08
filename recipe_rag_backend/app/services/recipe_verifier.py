@@ -18,6 +18,9 @@ class RecipeVerifier:
 Use meaning, not literal word overlap: a main dish or entree can be dinner without saying 'dinner'.
 Do not require conversational words such as 'what', 'some', or 'that' in recipe text.
 A specific named dish or required ingredient must actually match; an unrelated dish is not a match.
+ingredients_available is an ingredient pool: the recipe must use at least one as a main ingredient,
+not merely suggest it in tips or garnish. ingredients_must_use requires EVERY listed item in the actual
+recipe. Name the matched ingredients in the check evidence; do not approve an unrelated healthy recipe.
 Return relevance as 'match' when suitable as written, 'adaptable' when it offers a useful recipe
 foundation but needs changes to satisfy the request, or 'unrelated' when it offers no useful foundation.
 Judge the actual ingredients and instructions, not a hypothetical substitution in the description or notes.
@@ -84,6 +87,11 @@ For other requests ingredient_storage_check may be null.
 
     def _required_checks(self, intent_data: Dict[str, Any]) -> Dict[str, Any]:
         checks = {}
+        recipe_request = intent_data.get("recipe_request")
+        if isinstance(recipe_request, str) and recipe_request.strip():
+            checks["recipe_request"] = recipe_request.strip()
+        if intent_data.get("user_request_context"):
+            checks["user_request_context"] = intent_data["user_request_context"]
         for section in ("constraints", "preferences", "cancer_patient_specific"):
             for key, value in intent_data.get(section, {}).items():
                 if value is not None and value is not False and value not in ("", [], {}):
@@ -207,6 +215,15 @@ Mark unknown and adaptable when the final texture cannot be established from the
 {texture_contract}
 {preparation_contract}
 For each check, status must be pass, fail, or unknown, with concise evidence from the recipe.
+The recipe_request check covers the user's actual requested properties, even when no named constraints
+were extracted. Judge the recipe as written, not just whether it is generally nutritious or easy.
+If the request is unsupported or unmet, mark that check unknown or fail; do not leave it pass while
+explaining that the recipe is unrelated. Keep relevance, check statuses, and reasoning consistent.
+user_request_context contains the actual user turns, oldest first. Verify the active request against these
+as well as the resolved query, so an omitted earlier goal is not silently lost. Ingredient-selection and
+"more" follow-ups retain earlier preparation goals. Later explicit changes override earlier requirements;
+a new dish replaces an old dish. Questions about a shown recipe are not new restrictions. Do not require
+every historical request simultaneously. Assistant suggestions are not user requirements unless selected.
 Use unknown if the recipe lacks evidence; do not invent missing amounts, timing, or ingredient forms.
 constraint_violations must list actual unmet requirements, not optional improvements or unstated preferences.
 The backend calculates acceptance from these checks. Do NOT output passes_verification or a numeric score.

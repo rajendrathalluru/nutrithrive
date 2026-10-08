@@ -222,7 +222,7 @@ class ChewingPipelineTests(unittest.TestCase):
 
         def response(prompt):
             recipes = json.JSONDecoder().raw_decode(prompt.split("RECIPES TO VERIFY:\n", 1)[1])[0]
-            return json.dumps([model_pass(recipe) for recipe in recipes])
+            return json.dumps([model_pass(recipe, {**INTENT, "recipe_request": QUERY}) for recipe in recipes])
 
         self.service.recipe_verifier.initialize(Mock(predict=Mock(side_effect=response)))
 

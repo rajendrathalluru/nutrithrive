@@ -551,13 +551,10 @@ class RecipeRAGService:
             if is_more_request:
                 intent_history = [
                     ({"role": "assistant", "content": "Previously shown recipe reference data.", "recipes": message["recipes"]}
-                     if message.get("role") == "assistant" else message)
+                     if message.get("role") == "assistant" and message.get("recipes") else message)
                     for message in (conversation_history or [])
                     if isinstance(message, dict)
-                    and (
-                        message.get("role") == "user"
-                        or (message.get("role") == "assistant" and message.get("recipes"))
-                    )
+                    and message.get("role") in {"user", "assistant"}
                 ]
 
             # Step 1: Enhanced intent understanding with conversation context
@@ -578,6 +575,7 @@ class RecipeRAGService:
             ):
                 return self._build_context_reply(
                     query, mode, intent_data,
+                    intent_data.get("clarification_question") or
                     "Which recipe do you mean? Please use its name or its position in the last recipe list."
                 )
             if query_type == "recipe_question":

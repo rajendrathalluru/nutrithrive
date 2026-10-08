@@ -264,6 +264,7 @@ class PreparationAccessibilityTests(unittest.TestCase):
         service.is_initialized = True
         service._contains_phi_like_content = Mock(return_value=False)
         intent = self.intent(query)
+        intent["recipe_request"] = query
         service.intent_analyzer.understand_query_intent_with_context = Mock(return_value=intent)
         service.response_generator.answer_food_guidance = Mock(side_effect=AssertionError("Must return recipe cards"))
         service.search_engine.multi_query_search = Mock(return_value=database_recipes)

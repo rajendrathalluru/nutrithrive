@@ -1,4 +1,8 @@
 REQUEST_MEANING_RULES = """Interpret the request without silently strengthening it.
+If user_request_context is supplied, it contains user turns in chronological order. Retain the active
+user goals when selecting ingredients or asking for more, even if the resolved query omits a goal.
+Later explicit changes supersede earlier requirements; do not combine conflicting old and new requests.
+Questions about a previously shown recipe do not add new restrictions to recipe discovery.
 'Using' an ingredient or ingredient form does not mean 'only' that form unless the user says so.
 Pre-cooked ingredients are already cooked BEFORE this recipe starts: use purchased cooked components
 or cooked leftovers the user has specified. Cooking raw meat, dry pasta, or dry grains in this recipe
@@ -11,6 +15,14 @@ Timing flexibility means a forgiving preparation process, not weak hands, seated
 short total time, or low monitoring. Preserve this request in must_match_criteria rather than converting it
 to those different restrictions. No-cook assembly can fit, but cooking remains allowed when timing is forgiving.
 Use the actual preparation to judge the fit; do not waive food-safety or required doneness checks.
+Forgiving recipes tolerate reasonable variation in seasoning or preparation, not omitted cooking or
+unsafe undercooking. Do not promise that food is safe or successful regardless of how it is cooked.
+Preserve forgiving-preparation requests in must_match_criteria. Prefer preparations with adjustable
+seasoning/liquid and observable endpoints (e.g. simmer until tender), or simple ready-to-eat assembly.
+Do not call a recipe forgiving solely because it is easy or nutritious. Timed frying, baking to set,
+crisping, and delicate sauces need supporting tolerance evidence rather than a generic reassurance.
+Reheating-texture requests seek recipes that retain their intended texture well; do not promise zero change.
+Explain that limitation. Do not turn texture retention into a low-chewing, pureed-food, or no-heat requirement.
 """
 
 INGREDIENT_STORAGE_RULES = """Ingredient storage requirements refer to ingredients before opening or cooking, not to cooked leftovers.
@@ -65,12 +77,16 @@ Refrigerating prepared leftovers is not a frozen-ingredient violation. A title c
 establish ingredient forms. Fail or mark adaptable when any required component is non-frozen or unspecified.
 """
 
-FOOD_GUIDANCE_RULES = """Choose query_type='food_guidance' for culinary explanations, food categories, or examples
-without a request for recipes or cooking instructions. 'Show foods that taste good warm but not hot' asks for
-food ideas, not automatically recipe cards. Answer the category question first and offer recipes as a follow-up.
-Use recipe_search for explicit recipe requests or requests to make/cook/prepare meals, recipe_adaptation for changing
-a shown recipe, and recipe_question for questions about a specific shown recipe. Do not classify every mention
-of 'foods' as guidance. A follow-up 'give me recipes for those' or 'more recipes' switches to recipe_search
+FOOD_GUIDANCE_RULES = """In this recipe application, requests for suitable foods, dishes, or meals default to
+query_type='recipe_search', even without the words 'recipe', 'prepare', or 'cook'. 'What foods ...?',
+'Which foods ...?', 'What are some foods ...?', and 'Suggest foods ...' request matching recipes when
+asking for options that meet a need or preference. Starting with 'what' is not a reason to return general advice.
+'What foods don't change texture when reheated?' asks for recipes suitable for reheating, not a generic list of food types.
+Choose food_guidance for explicit explanations, advice, definitions, or requests for food categories/examples ONLY.
+The culinary-category request 'Show foods that taste good warm but not hot' retains its food-guidance behavior;
+answer that category question first and offer recipes as a follow-up.
+Use recipe_adaptation for changing a shown recipe and recipe_question for questions about a specific shown recipe.
+A follow-up 'give me recipes for those' or 'more recipes' switches to recipe_search
 while preserving the user's active constraints. A follow-up asking for more food examples remains food_guidance.
 Only user messages establish restrictions; do not convert examples in an assistant's guidance into requirements
 unless the user explicitly selects or refers to them. 'A recipe for the first one' after a list of food types is
@@ -78,8 +94,8 @@ a recipe_search for that food type, not an adaptation of an existing recipe; do 
 'Show meals I can prepare sitting down' asks for actual recipes, not general advice about food categories.
 'What meals can I prepare ...', 'Suggest dinners ...', and 'Show meals ...' are recipe discovery requests.
 Questions explicitly asking for preparation tips or an explanation can still be food_guidance.
-'What foods can I prepare/make/cook ...?' is also recipe discovery, not automatically food_guidance.
-The word 'foods' alone does not change a preparation request into a category explanation.
+'What foods ... and why?' can receive recipes with a brief explanation of their fit; it is not the same
+as 'Why does reheating change food texture?', which asks for an explanation rather than recipe discovery.
 """
 
 SERVING_TEMPERATURE_RULES = """Serving temperature is separate from preparation method and spice intensity.

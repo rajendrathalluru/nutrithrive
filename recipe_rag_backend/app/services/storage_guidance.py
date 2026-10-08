@@ -14,6 +14,19 @@ GUIDANCE_LABEL = re.compile(
 )
 
 
+def requests_reheating(query: str) -> bool:
+    text = str(query or "").lower().replace("’", "'")
+    pattern = (
+        r"\b(?:when|after) (?:being )?reheat(?:ed|ing)\b|"
+        r"\breheat(?:s)? well\b|\b(?:reheat[- ]friendly|reheatable)\b|"
+        r"\bcan (?:(?:i|we|be) )?reheat(?:ed)?\b|\b(?:suitable|good) for reheating\b"
+    )
+    for match in re.finditer(pattern, text):
+        if not re.search(r"\b(?:not|never|without|don't|doesn't|do not|does not)\s*$", text[:match.start()]):
+            return True
+    return False
+
+
 def extract_storage_guidance(text: str) -> str:
     """Keep storage sentences without flattening neighboring recipe fields or bullet points."""
     without_ingredients = re.sub(

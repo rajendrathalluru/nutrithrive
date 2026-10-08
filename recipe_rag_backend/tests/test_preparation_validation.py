@@ -212,7 +212,9 @@ class PreparationValidationTests(unittest.TestCase):
         service.recipe_enhancer.prepare_recipes_for_verification = Mock(side_effect=lambda recipes, intent: recipes)
         service.recipe_enhancer.batch_enhance_recipes = Mock(side_effect=lambda recipes, intent: recipes)
         service.recipe_enhancer.generate_fallback_recipes = Mock(return_value=[])
-        service.recipe_verifier.initialize(Mock(predict=Mock(return_value=json.dumps([self.assessment(constraints)]))))
+        assessment = self.assessment(constraints)
+        assessment["constraint_checks"]["recipe_request"] = {"status": "pass", "evidence": "Model claims the no-heat preparation matches."}
+        service.recipe_verifier.initialize(Mock(predict=Mock(return_value=json.dumps([assessment]))))
         service.response_generator.generate_personalized_response = Mock(return_value="Recipes ready.")
         return service
 

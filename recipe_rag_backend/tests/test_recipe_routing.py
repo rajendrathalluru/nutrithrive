@@ -197,6 +197,75 @@ class RecipeRoutingTests(unittest.TestCase):
         for call in self.service.recipe_enhancer.generate_fallback_recipes.call_args_list:
             self.assertEqual(call.args[1]["constraints"]["ingredient_storage"], "frozen_only")
 
+    def test_food_suggestion_uses_database_or_generation_instead_of_category_reply(self):
+        query = "What foods don’t change texture when reheated?"
+        for database_match in (True, False):
+            with self.subTest(database_match=database_match):
+                self.setUp()
+                analyzer = IntentAnalyzer()
+                predicted = analyzer._get_fallback_intent_data(query)
+                predicted["query_type"] = "food_guidance"
+                analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(predicted))))
+                self.service.intent_analyzer = analyzer
+                self.service.response_generator.answer_food_guidance = Mock(return_value="Soups and stews")
+                candidate = recipe_record("Bean Soup", generated=not database_match)
+                candidate["storage_instructions"] = "Refrigerate leftover soup and reheat before serving."
+                if database_match:
+                    self.service.search_engine.multi_query_search.return_value = [candidate]
+                else:
+                    self.service.recipe_enhancer.generate_fallback_recipes.return_value = [candidate]
+                result = self.ask(query)
+                self.assertEqual(result["matches_found"], 1)
+                self.assertEqual(result["intent_analysis"]["query_type"], "recipe_search")
+                self.assertEqual(result["intent_analysis"]["recipe_request"], query)
+                self.assertEqual(result["source"], "database_exact" if database_match else "llm_generated")
+                self.service.response_generator.answer_food_guidance.assert_not_called()
+
+    def test_food_suggestion_phrasings_have_same_fresh_and_followup_route(self):
+        queries = (
+            "What foods don’t change texture when reheated?",
+            "What foods will still turn out okay even if I don't cook them exactly right?",
+            "Which foods reheat well?",
+            "What are some foods that keep their texture after reheating?",
+            "What kinds of foods reheat well?",
+            "Suggest foods that reheat well.",
+            "Can you recommend foods that reheat well?",
+            "What foods reheat well and why?",
+            "What recipes use asparagus tips?",
+        )
+        for query in queries:
+            for history in ([], [{"role": "user", "content": query},
+                                {"role": "assistant", "content": "Soups, stews, and casseroles."}]):
+                with self.subTest(query=query, followup=bool(history)):
+                    analyzer = IntentAnalyzer()
+                    parsed = analyzer._get_fallback_intent_data(query)
+                    parsed["query_type"] = "food_guidance"
+                    analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))))
+                    result = analyzer.understand_query_intent_with_context(query, history)
+                    self.assertEqual(result["query_type"], "recipe_search")
+                    for field in ("chewing_effort", "hand_effort", "preparation_mode", "time_max_minutes"):
+                        self.assertIsNone(result["constraints"][field])
+
+    def test_explanations_and_explicit_category_only_requests_keep_guidance(self):
+        for query in (
+            "Why does reheating change food texture?",
+            "Explain which foods change texture when reheated.",
+            "Could you explain why foods change texture?",
+            "Give me tips for reheating meals.",
+            "What foods reheat well? Food categories only, no recipes.",
+            "Which foods reheat well? I don't want recipes.",
+            "Show foods that taste good warm but not hot",
+        ):
+            with self.subTest(query=query):
+                analyzer = IntentAnalyzer()
+                parsed = analyzer._get_fallback_intent_data(query)
+                parsed["query_type"] = "recipe_search"
+                self.assertEqual(analyzer._post_process_intent(query, parsed)["query_type"], "food_guidance")
+        query = "Which foods reheat well? Not recipes with peanuts."
+        analyzer = IntentAnalyzer()
+        self.assertTrue(analyzer._is_recipe_discovery_query(query))
+        self.assertFalse(analyzer._is_food_guidance_query("Show me how to make lentil soup"))
+
     def test_ai_only_repair_gets_verification_feedback_without_mutation_dependency(self):
         invalid = recipe_record("Invalid Original", generated=True)
         invalid["test_constraint_failure"] = True
@@ -266,7 +335,10 @@ class RecipeRoutingTests(unittest.TestCase):
         verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
             "id": 0, "relevance": "match", "passes_verification": True,
             "constraint_violations": [],
-            "constraint_checks": {"constraints.ingredient_storage": {"status": "pass", "evidence": "Uses pantry ingredients."}},
+            "constraint_checks": {
+                "recipe_request": {"status": "pass", "evidence": "Model claims the pantry preparation matches."},
+                "constraints.ingredient_storage": {"status": "pass", "evidence": "Uses pantry ingredients."},
+            },
             "ingredient_storage_check": {
                 "required_non_pantry_ingredients": [], "unspecified_ingredient_forms": [], "conflicting_guidance": [],
             },
@@ -496,7 +568,7 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual(result["source_documents"][0]["name"], "Mild Vegetable Rice Bowl")
         self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 2)
 
-    def test_more_intent_uses_user_requests_not_assistant_claims(self):
+    def test_more_keeps_guidance_reference_data_for_user_selected_ingredients(self):
         original = "Show meals that taste mild but are still flavorful"
         history = [
             {"role": "user", "content": original},
@@ -507,10 +579,47 @@ class RecipeRoutingTests(unittest.TestCase):
         self.ask("more recipes", history)
         arguments = self.service.intent_analyzer.understand_query_intent_with_context.call_args.args
         self.assertEqual(arguments[0], "more recipes")
-        self.assertEqual(arguments[1], [
-            {"role": "user", "content": original},
-            {"role": "user", "content": "more recipes"},
-        ])
+        self.assertEqual(arguments[1], history)
+
+    def test_ingredient_reference_flows_to_search_verification_and_generation(self):
+        query = "can you make a recipe with those ingredients"
+        analyzer = IntentAnalyzer()
+        parsed = analyzer._get_fallback_intent_data(query)
+        parsed["query_type"] = "recipe_search"
+        pool = ["potatoes", "carrots", "beets", "quinoa", "brown rice", "barley", "lentils", "chickpeas", "black beans"]
+        parsed["constraints"]["ingredients_available"] = pool
+        parsed["search_strategy"]["must_match_criteria"] = ["Forgiving preparation with observable doneness cues"]
+        analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))))
+        self.service.intent_analyzer = analyzer
+        history = [
+            {"role": "user", "content": "What foods will still turn out okay even if I don't cook them exactly right?"},
+            {"role": "assistant", "content": "Root vegetables: potatoes, carrots, beets. Grains: quinoa, brown rice, barley. Legumes: lentils, chickpeas, black beans."},
+        ]
+
+        result = self.ask(query, history)
+
+        intent = result["intent_analysis"]
+        request = intent["recipe_request"]
+        for ingredient in pool:
+            self.assertIn(ingredient, request)
+            self.assertIn(ingredient, self.service.search_engine.multi_query_search.call_args.args[0])
+        self.assertIn("Forgiving preparation", request)
+        self.assertIn("one or more main ingredients", request)
+        self.assertEqual(intent["constraints"]["ingredients_must_use"], [])
+        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_args.args[0], request)
+        self.assertEqual(self.service.recipe_verifier.batch_verify_recipes.call_args.args[1]["recipe_request"], request)
+        self.assertIn(history[1]["content"], analyzer.llm.predict.call_args.args[0])
+        self.assertEqual(intent["user_request_context"], [history[0]["content"], query])
+        self.assertIn("user_request_context", RecipeVerifier()._required_checks(intent))
+
+    def test_missing_ingredient_reference_asks_targeted_clarification_without_search(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update({
+            "query_type": "clarification",
+            "clarification_question": "Which ingredients would you like me to use?",
+        })
+        result = self.ask("Make a recipe with those ingredients", [])
+        self.assertEqual(result["response"], "Which ingredients would you like me to use?")
+        self.service.search_engine.multi_query_search.assert_not_called()
 
     def test_contextual_refinement_uses_resolved_request_for_retrieval_and_generation(self):
         resolved = "Mild flavorful vegetarian dinners without onions"
@@ -767,6 +876,21 @@ class GenerationAndVerificationTests(unittest.TestCase):
         generator.generate_personalized_response("pantry meals", [recipe_record("Bean Bowl")], {})
         self.assertIn(INGREDIENT_STORAGE_RULES, llm.predict.call_args.args[0])
 
+    def test_recipe_summary_uses_actual_recipe_not_unverified_assessment_claims(self):
+        recipe = recipe_record("Bean Soup")
+        recipe["instructions"] = ["Simmer the beans in broth until tender."]
+        recipe["verification_details"] = {"reasoning": "The intended texture is soft beans in broth."}
+        generator = ResponseGenerator()
+        model = Mock(predict=Mock(return_value="Here is a soup recipe; texture may still change slightly."))
+        generator.initialize(model)
+        generator.generate_personalized_response("What foods reheat well?", [recipe], {})
+        prompt = model.predict.call_args.args[0]
+        self.assertIn(recipe["instructions"][0], prompt)
+        self.assertIn(recipe["ingredients"][0], prompt)
+        self.assertNotIn(recipe["verification_details"]["reasoning"], prompt)
+        self.assertIn("do not promise zero change", prompt)
+        self.assertIn("explain how each fits the actual request", prompt)
+
     def test_semantic_pantry_search_terms_survive_intent_processing(self):
         analyzer = IntentAnalyzer()
         query = "Show meals that rely on shelf-stable foods."
@@ -806,8 +930,48 @@ class GenerationAndVerificationTests(unittest.TestCase):
         prompt = analyzer.llm.predict.call_args.args[0]
         self.assertIn("I am vegetarian; avoid peanuts", prompt)
         self.assertIn('"recipe_id": "soup"', prompt)
+        self.assertIn('"ingredients": ["1 cup tofu", "1 cup cooked rice"]', prompt)
         self.assertEqual(result["preferences"]["cuisine_types"], ["italian"])
         self.assertIn("Italian vegetarian dinner without peanuts", result["search_strategy"]["enhanced_query"])
+
+    def test_selected_food_list_remains_available_after_more_than_six_turns(self):
+        analyzer = IntentAnalyzer()
+        parsed = analyzer._get_fallback_intent_data("More forgiving lentil and carrot recipes")
+        parsed["constraints"]["ingredients_available"] = ["lentils", "carrots"]
+        analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))))
+        history = [
+            {"role": "user", "content": "Which foods are forgiving to prepare?"},
+            {"role": "assistant", "content": "Lentils and carrots can be simmered until tender."},
+            {"role": "user", "content": "Make recipes using those ingredients"},
+        ]
+        history.extend({"role": "user", "content": "more recipes"} for _ in range(8))
+        result = analyzer.understand_query_intent_with_context("more recipes", history)
+        self.assertIn(history[1]["content"], analyzer.llm.predict.call_args.args[0])
+        self.assertIn("lentils, carrots", result["resolved_query"])
+
+    def test_ingredient_pool_and_all_required_ingredients_have_distinct_meanings(self):
+        analyzer = IntentAnalyzer()
+        for field, expected in (("ingredients_available", "one or more main ingredients"),
+                                ("ingredients_must_use", "every required ingredient")):
+            parsed = analyzer._get_fallback_intent_data("Make a recipe with those ingredients")
+            parsed["constraints"][field] = ["lentils", "carrots"]
+            analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))))
+            result = analyzer.understand_query_intent_with_context("Use those ingredients", [
+                {"role": "assistant", "content": "Lentils and carrots"},
+            ])
+            self.assertIn(expected, result["resolved_query"])
+
+    def test_new_search_does_not_deterministically_inherit_old_ingredient_pool(self):
+        analyzer = IntentAnalyzer()
+        query = "Start over, breakfast recipes"
+        analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(analyzer._get_fallback_intent_data(query)))))
+        result = analyzer.understand_query_intent_with_context(query, [
+            {"role": "user", "content": "Use lentils and carrots"},
+            {"role": "assistant", "content": "Try lentil soup"},
+        ])
+        self.assertEqual(result["constraints"]["ingredients_available"], [])
+        self.assertNotIn("lentils", result["resolved_query"])
+        self.assertEqual(result["user_request_context"], [query])
 
     def test_contextual_intents_are_isolated_between_chats(self):
         analyzer = IntentAnalyzer()
@@ -832,6 +996,7 @@ class GenerationAndVerificationTests(unittest.TestCase):
         prompt = llm.predict.call_args.args[0]
         self.assertIn('"flavor_profiles"', prompt)
         self.assertIn('"constraints"', prompt)
+        self.assertIn('"resolved_query": ""', prompt)
         self.assertIn("Only user messages establish requirements", prompt)
         self.assertNotIn("Your existing intent prompt", prompt)
         self.assertEqual(result["preferences"]["flavor_profiles"], ["mild", "flavorful"])
@@ -933,7 +1098,8 @@ HELPFUL_TIPS:
     def test_verifier_accepts_semantic_match_and_checks_guidelines(self):
         verifier = RecipeVerifier()
         verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
-            "id": 0, "relevance": "match", "constraint_checks": {}, "constraint_violations": []
+            "id": 0, "relevance": "match", "constraint_violations": [],
+            "constraint_checks": {"recipe_request": {"status": "pass", "evidence": "Hot-and-sour soup fits the requested cuisine and meal."}},
         }]))))
         results = verifier.batch_verify_recipes([recipe_record("Hot-and-Sour Soup")], {"recipe_request": "What are some dinner recipes that are Chinese"}, aicr_service)
         self.assertTrue(results[0]["verification_details"]["passes_verification"])

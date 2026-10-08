@@ -228,6 +228,7 @@ HELPFUL_TIPS:
         service.is_initialized = True
         service._contains_phi_like_content = Mock(return_value=False)
         intent = self.intent(QUERIES[1])
+        intent["recipe_request"] = QUERIES[1]
         service.intent_analyzer.understand_query_intent_with_context = Mock(return_value=intent)
         service.search_engine.multi_query_search = Mock(return_value=[])
         service.search_engine.rerank_with_constraint_filtering = Mock(return_value=[])
