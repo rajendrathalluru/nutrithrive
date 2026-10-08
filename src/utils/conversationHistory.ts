@@ -17,6 +17,13 @@ export const buildConversationHistory = (messages: Message[]): ChatMessage[] =>
         database_record_found: recipe.source === 'database_exact' || recipe.source === 'database_completed',
         source_name: recipe.sourceName,
         recipe_link: recipe.sourceUrl,
+        source_notes: recipe.source === 'llm_generated' ? '' : recipe.sourceNotes,
+        unresolved_footnotes: recipe.source === 'llm_generated' ? [] : recipe.unresolvedFootnotes,
+        related_recipes: recipe.source === 'llm_generated' ? [] : recipe.relatedRecipes?.map(reference => ({
+          recipe_id: reference.id, name: reference.title,
+          recipe_link: reference.sourceUrl, source_name: reference.sourceName,
+        })),
+        total_time: recipe.totalTime,
         storage_instructions: recipe.storageGuidance,
         calories: recipe.calories,
         nutrition: recipe.nutrition,

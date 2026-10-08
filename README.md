@@ -344,6 +344,17 @@ Simpler recipe search endpoint without the full conversational adaptation pipeli
 
 Returns detailed backend capability and startup information.
 
+## Recipe retesting regressions
+
+The reported Prompt 54/55/63/64/69/73 examples have offline regression coverage in `test_source_annotations.py` and `test_preparation_validation.py`.
+
+- Database `Notes` now reach expanded cards and same-chat recipe references without losing footnote markers. Referenced ingredient recipes resolve to existing CSV names and source URLs. Missing footnotes are explicitly flagged, never guessed; the imported sheet-pan za'atar note is missing, and the source page also has no separate footnote legend.
+- `preparation_mode` distinguishes no-heat and assembly-only preparation from cold serving. Shared rules apply to intent, generation, repair, and verification. Stove/oven/microwave/kettle steps, hidden cooking dependencies, and incompatible tips cannot qualify merely because a recipe ends with assembly or cooling.
+- Strict frozen-only requests are distinct from including some frozen ingredients. `avoid_steam` and `avoid_splatter` remain separate requirements. No ingredient exceptions or appliance substitutions are silently assumed.
+- Time limits mean total elapsed preparation, including waiting. “Under 5 minutes” excludes exactly 5 minutes; “5 minutes or less” includes it. Verification requires numeric timing with recipe citations and independently checks stated step durations and source total times. These detailed preparation checks use one recipe per assessment, with at most three concurrent calls under the existing output-token limit.
+
+These checks supplement semantic verification; they are not a complete parser of every cooking instruction or a guarantee that cooking cannot splatter. Ambiguous preparation dependencies and unknown timing fail verification. Tests use mocked model assessments, including deliberately incorrect positive verdicts, and real CSV records; they do not establish live-model accuracy or deploy changes to Azure. Existing database-first retrieval, bounded generation retries, provenance labels, per-chat context, and the three-recipe limit remain in place.
+
 ## Local development notes
 
 - If the backend is not fully initialized yet, `/health` may show startup in progress while the server is already reachable.

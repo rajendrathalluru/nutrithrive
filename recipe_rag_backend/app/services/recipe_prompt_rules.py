@@ -3,7 +3,8 @@ For requests to rely mainly on shelf-stable or pantry foods, use ingredient_stor
 the meal must be possible from pantry staples without requiring fresh or refrigerated purchases.
 Fresh garnishes are acceptable only when explicitly optional in both ingredients and instructions; prefer pantry alternatives.
 For 'only shelf-stable ingredients' or 'no refrigerator ingredients', use ingredient_storage='shelf_stable_only':
-every required ingredient must be available in a specified shelf-stable form. Otherwise leave ingredient_storage null.
+every required ingredient must be available in a specified shelf-stable form. Otherwise leave ingredient_storage null
+unless the user explicitly requests another storage category, such as frozen_only.
 Useful search concepts include commercially shelf-stable canned beans, canned vegetables, dried lentils,
 dry rice, dry pasta, oats, dried herbs, and spices. These are alternatives for retrieval, not a list of ingredients
 the user must have or use. Frozen foods and ordinary refrigerated milk, yogurt, meat, or tofu are not shelf-stable.
@@ -16,6 +17,34 @@ Describe a prepared dish as 'made with shelf-stable ingredients', never as a 'sh
 For these requests specify canned corn rather than unspecified corn, canned peppers or tomatoes rather than required
 fresh peppers, and dried herbs rather than required fresh cilantro. Tips and adaptations must also work from pantry
 ingredients: do not recommend adding grilled chicken, refrigerated tofu, raw vegetables, or frozen corn.
+"""
+
+PREPARATION_RULES = """Preparation restrictions are HARD constraints, not flavor preferences or serving temperature.
+Set constraints.preparation_mode='no_heat' for no-cook/no-heat/cooked-cold requests; use 'assembly_only'
+for only assembling, not cooking. Cold SERVING alone does not imply no-heat preparation.
+No heat means no stove, oven, microwave, kettle, boiling water, toasting, or earlier cooking by the user.
+Assembly-only uses ready-to-eat components with simple cutting, opening, mixing, and portioning.
+Inspect ALL steps, including sauces, garnishes, package directions, thawing, and dependent recipes.
+An assembly step at the end does not make grilled fajitas assembly-only. Cooling cooked soup does not make it no-heat.
+Already-cooked components must be specified as ready-to-eat purchases or available cooked leftovers;
+do not silently assume rice, meat, eggs, dry legumes, or frozen vegetables can be eaten without preparation.
+Never skip a required cooking step or suggest raw animal foods to satisfy no-heat requests.
+Tips, adaptations, and storage guidance must also honor the request; do not suggest heating as an optional tip.
+Set avoid_steam and avoid_splatter independently when requested. A lid does not eliminate steam;
+boiling/steaming/reducing sauces violate no-steam, and frying/searing can splatter even in a nonstick pan.
+When BOTH are prohibited, prefer genuinely no-heat preparation rather than claiming cooking is risk-free.
+For only frozen ingredients, or frozen ingredients from start to finish, set ingredient_storage='frozen_only'.
+Every ingredient must be explicitly supplied frozen, not fresh/canned plus one frozen ingredient.
+Do not silently exempt oils, seasonings, sauces, or water; ask to relax the restriction if necessary.
+Ordinary requests to include frozen vegetables do not imply frozen-only. Preserve package-required cooking.
+For time limits use TOTAL elapsed time to the first ready-to-eat serving, including preparation, preheating,
+marinating, thawing, chilling, and cooking; overlap only when the instructions actually permit it.
+Set time_limit_exclusive=true for 'less than'/'under', false for 'within'/'at most'/'or less'.
+Unknown timing is not evidence of a match. A 15-minute step cannot fit under 5 minutes.
+Generated recipes with time limits must state a realistic total_time (e.g. 'Total time: 4 minutes')
+and timings for the complete preparation. Do not count storage of leftovers as preparation time.
+Preserve explicit exclusions and active restrictions in follow-ups; newer user changes override earlier ones.
+If a database recipe needs changes, retain it only as an adaptation reference, not an unchanged match.
 """
 
 COOKING_ATTENTION_RULES = """For hands-off meals, minimal monitoring, or recipes that do not require constant attention,

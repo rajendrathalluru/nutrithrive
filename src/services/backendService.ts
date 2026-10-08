@@ -211,6 +211,19 @@ export class BackendService {
           sourceLabel: doc.source_label || (doc.source === 'llm_generated' ? 'AI Generated' : `Sourced from ${doc.source_name || 'AICR'}`),
           sourceUrl: doc.recipe_link || '',
           sourceName: doc.source_name || '',
+          sourceNotes: typeof doc.source_notes === 'string' ? doc.source_notes.trim() : '',
+          unresolvedFootnotes: Array.isArray(doc.unresolved_footnotes)
+            ? doc.unresolved_footnotes.filter((marker: unknown) => typeof marker === 'string' && /^\*+$/.test(marker))
+            : [],
+          relatedRecipes: Array.isArray(doc.related_recipes) ? doc.related_recipes
+            .filter((reference: any) => reference && typeof reference.name === 'string' && typeof reference.recipe_link === 'string')
+            .map((reference: any) => ({
+              id: reference.recipe_id || reference.recipe_link,
+              title: cleanBackendText(reference.name),
+              sourceUrl: reference.recipe_link,
+              sourceName: reference.source_name || '',
+            })) : [],
+          totalTime: typeof doc.total_time === 'string' ? doc.total_time : undefined,
           verificationDetails: doc.verification_details,
           helpfulTips: doc.helpful_tips ? doc.helpful_tips.map((tip: string) => cleanBackendText(tip)) : [],
           storageGuidance: cleanBackendText(doc.storage_evidence || doc.storage_instructions || ''),

@@ -22,6 +22,11 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
     ? recipe.sourceUrl
     : '';
   const sourceName = recipe.sourceName || 'AICR';
+  const sourceNotes = !isAiGenerated ? recipe.sourceNotes?.trim() : '';
+  const unresolvedFootnotes = !isAiGenerated && Array.isArray(recipe.unresolvedFootnotes)
+    ? recipe.unresolvedFootnotes.filter(marker => /^\*+$/.test(marker)) : [];
+  const relatedRecipes = !isAiGenerated && Array.isArray(recipe.relatedRecipes)
+    ? recipe.relatedRecipes.filter(reference => /^https?:\/\//i.test(reference.sourceUrl)) : [];
   const nutritionItems = [
     recipe.nutrition?.protein !== undefined && recipe.nutrition?.protein !== null
       ? { label: 'protein', value: `${recipe.nutrition.protein}g` }
@@ -175,6 +180,34 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
               </div>
             )}
             
+            {(sourceNotes || unresolvedFootnotes.length > 0) && (
+              <section aria-label="Source notes" className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <h4 className="font-medium text-slate-900 mb-2">Source notes</h4>
+                {sourceNotes && <p className="whitespace-pre-line text-sm leading-6 text-slate-700">{sourceNotes}</p>}
+                {unresolvedFootnotes.length > 0 && (
+                  <p className="text-sm leading-6 text-slate-600 mt-2">
+                    No matching footnote was included in the imported recipe for {unresolvedFootnotes.join(', ')}.
+                    {sourceUrl && <> <a href={sourceUrl} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">Check the original source</a>.</>}
+                  </p>
+                )}
+              </section>
+            )}
+
+            {relatedRecipes.length > 0 && (
+              <section aria-label="Recipes used in these ingredients">
+                <h4 className="font-medium text-slate-900 mb-2">Recipes used in these ingredients</h4>
+                <ul className="list-disc pl-5 text-sm space-y-1">
+                  {relatedRecipes.map(reference => (
+                    <li key={reference.id}>
+                      <a href={reference.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-sky-700 underline underline-offset-2">
+                        {reference.title}{reference.sourceName ? ` (${reference.sourceName})` : ''}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
             {/* Instructions */}
             {instructions.length > 0 && (
               <div>

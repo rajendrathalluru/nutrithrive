@@ -27,3 +27,36 @@ test.each(['database_exact', 'llm_generated'])('renders accessible nested ingred
   fireEvent.click(screen.getByRole('button', { name: 'Show Less' }));
   expect(screen.queryByRole('list', { name: 'Ingredients' })).not.toBeInTheDocument();
 });
+
+test('shows source footnotes with their markers and links ingredient dependencies', () => {
+  render(<RecipeCard recipe={{ ...recipe, source: 'database_exact', sourceNotes: '*Use spinach instead.\n**Use lemon juice.',
+    relatedRecipes: [{ id: 'salad', title: 'Chickpea Salad with Tomatoes and Cucumber', sourceName: 'AHA',
+      sourceUrl: 'https://recipes.heart.org/en/recipes/chickpea-salad-with-tomatoes-and-cucumber' }] }} />);
+  fireEvent.click(screen.getByRole('button', { name: 'View Full Recipe' }));
+  const notes = screen.getByRole('region', { name: 'Source notes' });
+  expect(notes).toHaveTextContent('*Use spinach instead.');
+  expect(notes).toHaveTextContent('**Use lemon juice.');
+  const related = screen.getByRole('link', { name: 'Chickpea Salad with Tomatoes and Cucumber (AHA)' });
+  expect(related).toHaveAttribute('href', 'https://recipes.heart.org/en/recipes/chickpea-salad-with-tomatoes-and-cucumber');
+  expect(related).toHaveAttribute('rel', 'noopener noreferrer');
+});
+
+test('explains a missing footnote honestly and links to the source', () => {
+  render(<RecipeCard recipe={{ ...recipe, ingredients: ["1 tbsp za'atar*"], source: 'database_exact', unresolvedFootnotes: ['*'],
+    sourceUrl: 'https://www.aicr.org/cancer-prevention/recipes/sheet-pan-roasted-vegetables-and-beans/' }} />);
+  fireEvent.click(screen.getByRole('button', { name: 'View Full Recipe' }));
+  expect(screen.getByText("1 tbsp za'atar*")).toBeInTheDocument();
+  expect(screen.getByText(/No matching footnote was included/)).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Check the original source' })).toHaveAttribute('target', '_blank');
+});
+
+test('does not present source notes for AI recipes or unsafe reference links', () => {
+  const annotations = { sourceNotes: '*Source note.', unresolvedFootnotes: ['*'],
+    relatedRecipes: [{ id: 'bad', title: 'Unsafe', sourceName: 'AHA', sourceUrl: 'javascript:alert(1)' }] };
+  const { rerender } = render(<RecipeCard recipe={{ ...recipe, source: 'llm_generated', ...annotations }} />);
+  fireEvent.click(screen.getByRole('button', { name: 'View Full Recipe' }));
+  expect(screen.queryByRole('region', { name: 'Source notes' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: /Unsafe/ })).not.toBeInTheDocument();
+  rerender(<RecipeCard recipe={{ ...recipe, source: 'database_exact', ...annotations }} />);
+  expect(screen.queryByRole('link', { name: /Unsafe/ })).not.toBeInTheDocument();
+});

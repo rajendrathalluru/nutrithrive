@@ -23,6 +23,10 @@ export interface Recipe {
   sourceLabel?: string;
   sourceUrl?: string;
   sourceName?: string;
+  sourceNotes?: string;
+  unresolvedFootnotes?: string[];
+  relatedRecipes?: Array<{ id: string; title: string; sourceUrl: string; sourceName: string }>;
+  totalTime?: string;
   verificationDetails?: any;
   helpfulTips?: string[];
   storageGuidance?: string;

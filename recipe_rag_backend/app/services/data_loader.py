@@ -156,6 +156,35 @@ Notes: {row['Notes'] if row['Notes'] else 'No additional notes'}
             return None
         return self.recipe_lookup.get(self._normalize_name(name))
 
+    def get_source_annotations(self, row: dict) -> dict:
+        ingredients = str(row.get("Ingredients", ""))
+        notes = str(row.get("Notes", "")).strip()
+        markers = set(re.findall(r"(?<=\w)(\*+)", ingredients))
+        explained = set(re.findall(r"^\s*(\*+)(?=\S|\s+\S)", notes, re.M))
+        related = []
+        reference_lines = [
+            self._normalize_name(line) for line in ingredients.splitlines()
+            if re.search(r"\bsee (?:related )?recipes?\b", line, re.I)
+        ]
+        if reference_lines:
+            for name, record in self.recipe_lookup.items():
+                if name == self._normalize_name(row.get("Name", "")):
+                    continue
+                if any(re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", line) for line in reference_lines):
+                    link = str(record.get("Recipe Link", ""))
+                    if re.match(r"^https?://", link, re.I):
+                        related.append({
+                            "recipe_id": record.get("recipe_id", ""),
+                            "name": record.get("Name", ""),
+                            "recipe_link": link,
+                            "source_name": record.get("Source Name (AICR or ACS)", ""),
+                        })
+        return {
+            "source_notes": notes,
+            "unresolved_footnotes": sorted(markers - explained, key=len),
+            "related_recipes": related,
+        }
+
     def build_recipe_text(self, row: dict) -> str:
         if not row:
             return ""

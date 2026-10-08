@@ -2,8 +2,9 @@ import logging
 import json
 import re
 from typing import Dict, Any, List, Optional
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES
 from app.services.chewing_validation import explicit_chewing_requirement
+from app.services.preparation_validation import explicit_preparation_constraints
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,7 @@ recipes using canned beans, canned vegetables, dry grains, and dried legumes eve
 {COOKING_ATTENTION_RULES}
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
+{PREPARATION_RULES}
 Do not infer ingredient counts, protein targets, storage needs, or medical conditions from recipes
 previously suggested by the assistant. Only user messages establish requirements.
 Pantry/shelf-stable ingredients do not imply hands-off cooking. Set attention_level to null unless the
@@ -195,6 +197,10 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             "constraints": {
                 "budget_max": None,
                 "time_max_minutes": None,
+                "time_limit_exclusive": False,
+                "preparation_mode": None,
+                "avoid_steam": False,
+                "avoid_splatter": False,
                 "max_ingredients": None,
                 "min_ingredients": None,
                 "ingredients_available": [],
@@ -256,6 +262,13 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         constraints.setdefault("ingredient_storage", None)
         constraints.setdefault("attention_level", None)
         constraints.setdefault("chewing_effort", None)
+        constraints.setdefault("preparation_mode", None)
+        constraints.setdefault("time_limit_exclusive", False)
+        constraints.setdefault("avoid_steam", False)
+        constraints.setdefault("avoid_splatter", False)
+        constraints.update(explicit_preparation_constraints(query))
+        if current_query:
+            constraints.update(explicit_preparation_constraints(current_query))
         self._apply_chewing_requirement(query, intent_data)
         if current_query:
             self._apply_chewing_requirement(current_query, intent_data)
@@ -488,7 +501,14 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         if constraints.get("ingredient_storage") in {"pantry_based", "shelf_stable_only"}:
             keywords.extend(["canned beans", "canned vegetables", "dried lentils", "rice", "pasta"])
         if constraints.get("attention_level") == "low":
-            keywords.extend(["baked", "roasted", "slow cooker", "assembly", "occasional stirring"])
+            if constraints.get("preparation_mode") not in {"no_heat", "assembly_only"}:
+                keywords.extend(["baked", "roasted", "slow cooker", "assembly", "occasional stirring"])
+        if constraints.get("preparation_mode") in {"no_heat", "assembly_only"} or (
+            constraints.get("avoid_steam") and constraints.get("avoid_splatter")
+        ):
+            keywords.extend(["no-cook", "ready-to-eat", "assembly", "canned beans", "salad"])
+        if constraints.get("ingredient_storage") == "frozen_only":
+            keywords.extend(["frozen ingredients", "frozen vegetables", "frozen fruit"])
         if constraints.get("chewing_effort") == "low":
             keywords.extend(["soft moist", "pureed soup", "mashed beans", "porridge", "soft scrambled eggs"])
         return list(dict.fromkeys([keyword for keyword in keywords if keyword]))
@@ -516,7 +536,14 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         if constraints.get("ingredient_storage") in {"pantry_based", "shelf_stable_only"}:
             parts.append("pantry canned beans canned vegetables dried lentils dry grains")
         if constraints.get("attention_level") == "low":
-            parts.append("hands-off baking roasting slow cooker assembly minimal active attention")
+            if constraints.get("preparation_mode") not in {"no_heat", "assembly_only"}:
+                parts.append("hands-off baking roasting slow cooker assembly minimal active attention")
+        if constraints.get("preparation_mode") in {"no_heat", "assembly_only"} or (
+            constraints.get("avoid_steam") and constraints.get("avoid_splatter")
+        ):
+            parts.append("no-cook ready-to-eat assembly salads canned beans")
+        if constraints.get("ingredient_storage") == "frozen_only":
+            parts.append("only frozen ingredients frozen vegetables frozen fruit")
         if constraints.get("chewing_effort") == "low":
             parts.append("low chewing effort soft moist pureed mashed porridge")
         return " ".join(dict.fromkeys([part for part in parts if part]))

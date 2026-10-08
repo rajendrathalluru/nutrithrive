@@ -5,9 +5,10 @@ import hashlib
 import re
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES
 from app.services.pantry_validation import audit_pantry_ingredients
 from app.services.chewing_validation import audit_chewing_assessment
+from app.services.preparation_validation import audit_preparation
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,28 @@ For other requests ingredient_storage_check may be null.
             },
             "reasoning": "Brief evidence-based explanation",
         }
+        constraints = intent_data.get("constraints", {})
+        preparation_contract = ""
+        if constraints.get("preparation_mode") in {"no_heat", "assembly_only"} or constraints.get("avoid_steam") or constraints.get("avoid_splatter"):
+            example["preparation_check"] = {
+                "conflicting_steps": [], "unresolved_dependencies": [], "conflicting_guidance": []
+            }
+            preparation_contract += """Return preparation_check with exact incompatible steps, dependencies whose
+preparation cannot be established (including purchased vs user-cooked components), and incompatible guidance.
+Review every ingredient and direction, not just the last assembly/serving step. All three arrays must be empty to pass.
+"""
+        if constraints.get("ingredient_storage") == "frozen_only":
+            example["frozen_ingredient_check"] = {
+                "non_frozen_ingredients": [], "unspecified_forms": [], "conflicting_guidance": []
+            }
+            preparation_contract += "Return frozen_ingredient_check covering every ingredient, tip, and adaptation; all three arrays must be empty to pass.\n"
+        if constraints.get("time_max_minutes") is not None:
+            example["time_check"] = {"total_minutes": None, "evidence": []}
+            preparation_contract += """Return time_check with total_minutes for the complete elapsed preparation, or null if unknown.
+Supply evidence citations with field (instructions/source_notes/description/total_time), index for instruction arrays,
+and an exact quote containing the relevant duration. A partial cooking time is not total time.
+Do not invent timing for untimed preparation. Check all mandatory steps against the stated total and requested limit.
+"""
         texture_contract = ""
         if intent_data.get("constraints", {}).get("chewing_effort") == "low":
             example["chewing_check"] = {
@@ -128,6 +151,7 @@ Mark unknown and adaptable when the final texture cannot be established from the
         return f"""REQUIRED CHECKS (return each exact key, including every member of list requirements):
 {json.dumps(required)}
 {texture_contract}
+{preparation_contract}
 For each check, status must be pass, fail, or unknown, with concise evidence from the recipe.
 Use unknown if the recipe lacks evidence; do not invent missing amounts, timing, or ingredient forms.
 Assess shelf stability BEFORE opening/cooking. Canned tomatoes and canned broth are pantry ingredients;
@@ -160,6 +184,12 @@ Example shape (replace all example values with your assessment, never copy examp
         verification["constraint_violations"] = list(dict.fromkeys(str(value) for value in violations))
         verification["passes_verification"] = verification.get("relevance") == "match" and not violations
         verification = self._enforce_storage_check(verification, intent_data, recipe)
+        preparation_problems = audit_preparation(recipe, intent_data.get("constraints", {}), verification)
+        if preparation_problems:
+            verification["constraint_violations"].extend(preparation_problems)
+            verification["passes_verification"] = False
+            if verification.get("relevance") == "match":
+                verification["relevance"] = "adaptable"
         if intent_data.get("constraints", {}).get("chewing_effort") == "low":
             texture_problems = audit_chewing_assessment(recipe, verification.get("chewing_check"))
             if texture_problems:
@@ -176,7 +206,15 @@ Example shape (replace all example values with your assessment, never copy examp
         if not recipes:
             return []
 
-        batch_size = 1 if intent_data.get("constraints", {}).get("chewing_effort") == "low" else 3
+        constraints = intent_data.get("constraints", {})
+        detailed_checks = (
+            constraints.get("chewing_effort") == "low"
+            or constraints.get("preparation_mode") in {"no_heat", "assembly_only"}
+            or constraints.get("ingredient_storage") == "frozen_only"
+            or constraints.get("time_max_minutes") is not None
+            or constraints.get("avoid_steam") or constraints.get("avoid_splatter")
+        )
+        batch_size = 1 if detailed_checks else 3
         if batch_size == 1 and len(recipes) > 1:
             with ThreadPoolExecutor(max_workers=min(3, len(recipes))) as executor:
                 assessments = executor.map(
@@ -200,6 +238,9 @@ Example shape (replace all example values with your assessment, never copy examp
                     "type": recipe.get("type", "Unknown"),
                     "description": recipe.get("description", ""),
                     "storage_evidence": recipe.get("storage_evidence", ""),
+                    "source_notes": recipe.get("source_notes", ""),
+                    "total_time": recipe.get("total_time", ""),
+                    "related_recipes": recipe.get("related_recipes", []),
                     "ingredients": recipe.get("ingredients", []),
                     "instructions": recipe.get("instructions", []),
                     "helpful_tips": recipe.get("helpful_tips", []),
@@ -229,6 +270,9 @@ Example shape (replace all example values with your assessment, never copy examp
                         "relevance": verification.get("relevance", "unrelated"),
                         "ingredient_storage_check": verification.get("ingredient_storage_check"),
                         "chewing_check": verification.get("chewing_check"),
+                        "preparation_check": verification.get("preparation_check"),
+                        "time_check": verification.get("time_check"),
+                        "frozen_ingredient_check": verification.get("frozen_ingredient_check"),
                         "verification_score": verification.get("verification_score", 0),
                         "reasoning": verification.get("reasoning", ""),
                         "constraint_violations": verification.get("constraint_violations", []),
@@ -288,6 +332,7 @@ Verify EACH recipe (by id) against ALL constraints in "constraints" section.
 {COOKING_ATTENTION_RULES}
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
+{PREPARATION_RULES}
 {self.STORAGE_VERIFICATION_RULES}
 
 {self._verification_contract(intent_data)}
@@ -439,6 +484,9 @@ RECIPE:
     "ingredient_adaptations": recipe_data.get("ingredient_adaptations", []),
     "storage_instructions": recipe_data.get("storage_instructions", ""),
     "storage_evidence": recipe_data.get("storage_evidence", ""),
+    "source_notes": recipe_data.get("source_notes", ""),
+    "total_time": recipe_data.get("total_time", ""),
+    "related_recipes": recipe_data.get("related_recipes", []),
     "content": recipe_data.get("content", "")[:500]
 }, indent=2)}
 
@@ -460,6 +508,7 @@ Evaluate this recipe against ALL constraints intelligently:
 {COOKING_ATTENTION_RULES}
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
+{PREPARATION_RULES}
 {self.STORAGE_VERIFICATION_RULES}
 
 {self._verification_contract(intent_data)}

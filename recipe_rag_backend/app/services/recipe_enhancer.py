@@ -4,7 +4,7 @@ import re
 import hashlib
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +225,7 @@ USER REQUIREMENTS:
 {COOKING_ATTENTION_RULES}
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
+{PREPARATION_RULES}
 
 YOUR TASK - Generate ALL of the following in ONE response:
 
@@ -232,7 +233,8 @@ YOUR TASK - Generate ALL of the following in ONE response:
 [One ingredient per line starting with "-". If the recipe already has ingredients, preserve them unless a nutrition or safety improvement is needed.]
 
 2. COOKING_INSTRUCTIONS:
-[Numbered steps 1., 2., 3., etc. - Include cooking temperatures for food safety, clear practical instructions]
+[Numbered steps 1., 2., 3., etc. - Clear practical instructions. Include cooking temperatures only when cooking is permitted.
+For a time limit, include a total elapsed preparation time and step timings in these instructions.]
 
 3. INGREDIENT_MODIFICATIONS:
 [Any nutrition-appropriate substitutions/changes needed - one per line starting with "-"]
@@ -432,6 +434,7 @@ USER REQUIREMENTS:
 {COOKING_ATTENTION_RULES}
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
+{PREPARATION_RULES}
 
 {self._build_grounding_context(grounding_recipes)}
 
@@ -443,7 +446,8 @@ YOUR TASK:
 
 RECIPE REQUIREMENTS:
 - Include protein source (see AICR protein sources above - aim for 20-30g)
-- Follow food safety rules (fully cooked, safe ingredients, cooking temperatures)
+- Follow food safety rules; for no-heat requests use appropriate ready-to-eat ingredients, not raw foods that require cooking.
+- Include cooking temperatures only when cooking is permitted by the user.
 - Address digestive comfort if mentioned (see AICR guidelines above)
 - Avoid foods to limit (processed meats, high sodium)
 - Meet all user constraints (max/min ingredients, dietary restrictions, equipment, etc.)
@@ -465,19 +469,20 @@ OUTPUT FORMAT (valid JSON only):
         "type": "Main Dish|Side Dish|Soup|Smoothie|Breakfast|Snack",
         "calories": 420,
         "protein_grams": 24,
+        "total_time": "Total elapsed time with units, or empty if not established",
         "ingredients": [
             "1 cup ingredient one",
             "4 oz ingredient two",
             "..."
         ],
         "instructions": [
-            "1. First step with specific details and cooking temp",
-            "2. Cook chicken to 165°F internal temperature",
-            "3. Final step"
+            "1. First preparation step consistent with the user's constraints",
+            "2. Next preparation step with realistic timing",
+            "3. Serving step"
         ],
         "description": "Why this recipe meets user needs and AICR guidelines",
         "nutrition_benefits": "Specific benefits (high protein 25g, easy to digest, nourishing)",
-        "storage_instructions": "How long to refrigerate or freeze leftovers and how to reheat safely",
+        "storage_instructions": "Storage guidance consistent with the request, including a cold-serving option for no-heat requests",
         "generated_by_llm": true,
         "meets_requirements": true
     }}
@@ -521,6 +526,7 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
                     "ingredients": recipe.get("ingredients", []),
                     "instructions": recipe.get("instructions", []),
                     "description": recipe.get("description", "Custom generated recipe for optimal nutrition"),
+                    "total_time": recipe.get("total_time", ""),
                     "nutrition_benefits": recipe.get("nutrition_benefits", ""),
                     "storage_instructions": storage_instructions,
                     "storage_evidence": storage_instructions,
@@ -561,7 +567,7 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
     ) -> str:
         rejected_recipe = {key: recipe.get(key) for key in (
             "name", "type", "ingredients", "instructions", "description", "helpful_tips",
-            "ingredient_adaptations", "storage_instructions", "verification_details"
+            "ingredient_adaptations", "storage_instructions", "total_time", "verification_details"
         )}
         return f"""Repair ONE rejected recipe, not a new batch of recipe ideas.
 USER REQUEST: {query}
@@ -583,12 +589,13 @@ Recheck the entire resulting ingredient list; fixing one issue while keeping ano
 {COOKING_ATTENTION_RULES}
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
+{PREPARATION_RULES}
 NUTRITION AND FOOD SAFETY GUIDELINES:
 {guidelines}
 
 Return a valid JSON array containing exactly ONE complete corrected recipe with these keys:
 name, type, calories (number), protein_grams (number), ingredients (array of ingredient lines),
-instructions (array of complete steps), description, nutrition_benefits, storage_instructions.
+instructions (array of complete steps), total_time (elapsed time with units), description, nutrition_benefits, storage_instructions.
 Update the instructions to use the corrected ingredients; include all ingredients required by the steps.
 Do not add helpful tips or further adaptations. No markdown, comments, trailing commas, or placeholders.
 The output will undergo the same independent verification as every other recipe.

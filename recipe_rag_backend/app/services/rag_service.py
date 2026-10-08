@@ -330,7 +330,8 @@ class RecipeRAGService:
             "recipe_link": record.get("Recipe Link", ""),
             "source_name": record.get("Source Name (AICR or ACS)", ""),
             "database_record_found": True,
-            **recipe_details
+            **recipe_details,
+            **self.data_loader.get_source_annotations(record),
         }
 
     def _get_leftover_friendly_database_recipes(self, limit: int) -> List[Dict[str, Any]]:
