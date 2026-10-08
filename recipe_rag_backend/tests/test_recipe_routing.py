@@ -131,6 +131,123 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertTrue(all(call.kwargs["grounding_recipes"][0]["name"] == "Related Soup" for call in calls))
 
+    def test_exhausted_hybrid_stage_starts_fresh_ai_only_generation(self):
+        reference = recipe_record("Related Soup", "adaptable")
+        invalid = recipe_record("Rejected Hybrid", generated=True)
+        invalid["test_constraint_failure"] = True
+        self.service.search_engine.multi_query_search.return_value = [reference]
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [
+            [copy.deepcopy(invalid)], [copy.deepcopy(invalid)], [recipe_record("Original Dinner", generated=True)],
+        ]
+        self.service.recipe_enhancer.generate_structured_fallback_recipe.return_value = [copy.deepcopy(invalid)]
+
+        result = self.ask()
+
+        self.assertEqual(result["source_documents"][0]["name"], "Original Dinner")
+        self.assertEqual(result["source_documents"][0]["source_label"], "AI Generated")
+        calls = self.service.recipe_enhancer.generate_fallback_recipes.call_args_list
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(call.kwargs["grounding_recipes"] for call in calls[:2]))
+        self.assertEqual(calls[2].kwargs["grounding_recipes"], [])
+        self.assertEqual(calls[2].args[2], [])
+        self.assertEqual(calls[2].args[1], calls[0].args[1])
+        self.service.recipe_enhancer.generate_structured_fallback_recipe.assert_called_once()
+
+    def test_both_generation_stages_exhaust_before_no_results(self):
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Related Soup", "adaptable")]
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = []
+
+        result = self.ask()
+
+        self.assertEqual(result["source"], "no_results")
+        calls = self.service.recipe_enhancer.generate_fallback_recipes.call_args_list
+        self.assertEqual([bool(call.kwargs["grounding_recipes"]) for call in calls], [True, True, False, False])
+        calls = self.service.recipe_enhancer.generate_structured_fallback_recipe.call_args_list
+        self.assertEqual([bool(call.kwargs["grounding_recipes"]) for call in calls], [True, False])
+
+    def test_ai_only_stage_can_recover_using_structured_output(self):
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Related Soup", "adaptable")]
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = []
+        self.service.recipe_enhancer.generate_structured_fallback_recipe.side_effect = [
+            [], [recipe_record("Original Soup", generated=True)],
+        ]
+        result = self.ask()
+        self.assertEqual(result["source_documents"][0]["name"], "Original Soup")
+        self.assertEqual(self.service.recipe_enhancer.generate_structured_fallback_recipe.call_args.kwargs["grounding_recipes"], [])
+
+    def test_frozen_recipe_request_routes_through_hybrid_then_ai_only(self):
+        query = "What meals use frozen ingredients from start to finish?"
+        analyzer = IntentAnalyzer()
+        predicted = analyzer._get_fallback_intent_data(query)
+        predicted["query_type"] = "food_guidance"
+        analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(predicted))))
+        self.service.intent_analyzer = analyzer
+        self.service.response_generator.answer_food_guidance = Mock(return_value="General ideas only")
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Related Vegetables", "adaptable")]
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [
+            [], [], [recipe_record("Frozen Vegetable Bowl", generated=True)],
+        ]
+
+        result = self.ask(query)
+
+        self.assertEqual(result["matches_found"], 1)
+        self.assertEqual(result["intent_analysis"]["query_type"], "recipe_search")
+        self.assertEqual(result["intent_analysis"]["constraints"]["ingredient_storage"], "frozen_only")
+        self.service.response_generator.answer_food_guidance.assert_not_called()
+        for call in self.service.recipe_enhancer.generate_fallback_recipes.call_args_list:
+            self.assertEqual(call.args[1]["constraints"]["ingredient_storage"], "frozen_only")
+
+    def test_ai_only_repair_gets_verification_feedback_without_mutation_dependency(self):
+        invalid = recipe_record("Invalid Original", generated=True)
+        invalid["test_constraint_failure"] = True
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Related Soup", "adaptable")]
+        self.service.recipe_verifier.batch_verify_recipes.side_effect = lambda recipes, intent, guidelines: self.verify(
+            copy.deepcopy(recipes), intent, guidelines
+        )
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [
+            [], [], [invalid], [recipe_record("Repaired Original", generated=True)],
+        ]
+
+        result = self.ask()
+
+        self.assertEqual(result["source_documents"][0]["name"], "Repaired Original")
+        retry = self.service.recipe_enhancer.generate_fallback_recipes.call_args
+        self.assertEqual(retry.kwargs["grounding_recipes"], [])
+        self.assertEqual(retry.args[2][0]["verification_details"]["constraint_violations"], ["Dietary restriction"])
+
+    def test_ai_only_stage_preserves_followup_requirements_and_exclusions(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update({
+            "resolved_query": "Vegetarian dinners without peanuts", "constraints": {
+                "dietary_restrictions": ["vegetarian"], "allergens_to_avoid": ["peanuts"],
+            },
+        })
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Related Soup", "adaptable")]
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [
+            [], [], [recipe_record("Previous Dinner", generated=True)], [recipe_record("Different Dinner", generated=True)],
+        ]
+        result = self.ask("more recipes", [
+            {"role": "user", "content": "Vegetarian dinners without peanuts"},
+            {"role": "assistant", "content": "Previously shown recipes: Previous Dinner"},
+        ])
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["Different Dinner"])
+        for call in self.service.recipe_enhancer.generate_fallback_recipes.call_args_list:
+            self.assertIn("previous dinner", call.args[0])
+            self.assertEqual(call.args[1]["constraints"]["allergens_to_avoid"], ["peanuts"])
+            self.assertEqual(call.args[1]["constraints"]["dietary_restrictions"], ["vegetarian"])
+
+    def test_explicit_recipe_adaptation_never_falls_back_to_unrelated_ai_recipe(self):
+        reference = recipe_record("Selected Soup", "adaptable")
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update({
+            "query_type": "recipe_adaptation", "resolved_query": "Make Selected Soup vegetarian",
+            "referenced_recipe_ids": [reference["recipe_id"]],
+        })
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = []
+        result = self.ask("Make it vegetarian", [{"role": "assistant", "content": "Soup", "recipes": [reference]}])
+        self.assertEqual(result["source"], "no_results")
+        calls = self.service.recipe_enhancer.generate_fallback_recipes.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(call.kwargs["grounding_recipes"][0]["recipe_id"] == reference["recipe_id"] for call in calls))
+
     def test_generated_constraints_are_verified_and_retried(self):
         invalid = recipe_record("Invalid Dinner", generated=True)
         invalid["test_constraint_failure"] = True
@@ -249,7 +366,9 @@ class RecipeRoutingTests(unittest.TestCase):
         result = self.ask("Show meals that rely on shelf-stable foods.")
         self.assertEqual(result["source"], "no_results")
         self.assertNotIn("additional", result["response"])
-        self.service.recipe_enhancer.generate_fallback_recipes.assert_called_once()
+        calls = self.service.recipe_enhancer.generate_fallback_recipes.call_args_list
+        self.assertEqual([bool(call.kwargs["grounding_recipes"]) for call in calls], [True, False])
+        self.service.recipe_enhancer.generate_structured_fallback_recipe.assert_not_called()
 
     def test_final_correction_still_rejects_constraint_failures(self):
         self.service.search_engine.multi_query_search.return_value = [recipe_record("Database Bowl")]
@@ -263,7 +382,7 @@ class RecipeRoutingTests(unittest.TestCase):
         result = self.ask("Show meals that rely on shelf-stable foods.")
         self.assertEqual(result["source"], "no_results")
         self.assertEqual(result["source_documents"], [])
-        self.service.recipe_enhancer.generate_fallback_recipes.assert_called_once()
+        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 2)
 
     def test_final_correction_preserves_follow_up_exclusions_and_database_context(self):
         reference = recipe_record("Database Bowl")
@@ -278,9 +397,33 @@ class RecipeRoutingTests(unittest.TestCase):
             {"role": "assistant", "content": "Previously shown recipes: Previous Dinner"},
         ])
         self.assertEqual(result["source_documents"], [])
-        call = self.service.recipe_enhancer.generate_fallback_recipes.call_args
-        self.assertIn("previous dinner", call.args[0])
-        self.assertEqual(call.kwargs["grounding_recipes"][0]["recipe_id"], reference["recipe_id"])
+        calls = self.service.recipe_enhancer.generate_fallback_recipes.call_args_list
+        self.assertTrue(all("previous dinner" in call.args[0] for call in calls))
+        self.assertEqual(calls[0].kwargs["grounding_recipes"][0]["recipe_id"], reference["recipe_id"])
+        self.assertEqual(calls[1].kwargs["grounding_recipes"], [])
+
+    def test_final_correction_falls_back_to_verified_ai_only_recipe(self):
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Database Bowl")]
+        self.service.recipe_enhancer.batch_enhance_recipes.side_effect = lambda recipes, intent: [
+            {**recipe, "guidance_generated": True} for recipe in recipes
+        ]
+        self.service._validate_final_recipes = Mock(return_value=[])
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [
+            [], [recipe_record("Original Bowl", generated=True)],
+        ]
+        result = self.ask()
+        self.assertEqual(result["source_documents"][0]["name"], "Original Bowl")
+        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_args.kwargs["grounding_recipes"], [])
+        self.service.recipe_enhancer.generate_structured_fallback_recipe.assert_not_called()
+
+    def test_no_results_does_not_blame_phrasing_or_suggest_relaxing_dietary_restrictions(self):
+        generator = ResponseGenerator()
+        for constraints in ({}, {"dietary_restrictions": ["vegetarian"], "allergens_to_avoid": ["peanuts"]}):
+            response = generator.generate_helpful_no_results_message("Dinner recipes", {"constraints": constraints})
+            self.assertIn("verify", response)
+            self.assertNotIn("rephras", response.lower())
+            self.assertNotIn("flexible", response.lower())
+            self.assertNotIn("relaxing", response.lower())
 
     def test_invalid_generated_results_are_not_shown(self):
         self.service.recipe_enhancer.generate_fallback_recipes.return_value = [recipe_record("Wrong Dish", "unrelated", True)]

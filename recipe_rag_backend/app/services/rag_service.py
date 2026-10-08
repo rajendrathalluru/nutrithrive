@@ -140,6 +140,44 @@ class RecipeRAGService:
         new_recipes = self._exclude_previously_shown_recipes(recipes, excluded_names)
         return self._get_verified_matches(self._verify_candidates(new_recipes, intent_data), intent_data)
 
+    def _generate_verified_fallback_recipes(
+        self, query: str, intent_data: Dict[str, Any], failed_recipes: List[Dict[str, Any]],
+        grounding_recipes: List[Dict[str, Any]], excluded_names: set[str], *,
+        max_attempts: int = 2, use_structured_fallback: bool = True
+    ) -> List[Dict[str, Any]]:
+        stages = [grounding_recipes]
+        if grounding_recipes and intent_data.get("query_type") != "recipe_adaptation":
+            stages.append([])
+
+        for stage_index, references in enumerate(stages):
+            stage_name = "reference_guided" if references else "ai_only"
+            stage_failures = list(failed_recipes) if stage_index == 0 else []
+            for attempt in range(max_attempts):
+                generation_query = query if attempt == 0 else (
+                    f"Create complete recipes with ingredients and step-by-step instructions for: {query}"
+                )
+                logger.info("Recipe generation stage=%s attempt=%s", stage_name, attempt + 1)
+                candidates = self.recipe_enhancer.generate_fallback_recipes(
+                    generation_query, intent_data, stage_failures, grounding_recipes=references
+                )
+                candidates = self._exclude_previously_shown_recipes(candidates, excluded_names)
+                assessed = self._verify_candidates(candidates, intent_data)
+                matches = self._get_verified_matches(assessed, intent_data)
+                if matches:
+                    return matches
+                stage_failures = [*assessed, *stage_failures]
+
+            if use_structured_fallback:
+                candidates = self.recipe_enhancer.generate_structured_fallback_recipe(
+                    query, intent_data, grounding_recipes=references
+                )
+                matches = self._verify_new_generated_recipes(candidates, intent_data, excluded_names)
+                if matches:
+                    return matches
+            logger.warning("Recipe generation stage=%s exhausted without verified matches", stage_name)
+
+        return []
+
     def _validate_final_recipes(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         verified = self._verify_candidates(recipes, intent_data)
         matches = self._get_verified_matches(verified, intent_data)
@@ -611,40 +649,13 @@ class RecipeRAGService:
                         ". Generate different recipes and do not repeat: "
                         + ", ".join(sorted(previously_shown_names))
                     )
-                generated_recipes = self.recipe_enhancer.generate_fallback_recipes(
+                generated_recipes = self._generate_verified_fallback_recipes(
                     generation_query,
                     intent_data,
                     failed_recipes,
-                    grounding_recipes=grounding_recipes
+                    grounding_recipes=grounding_recipes,
+                    excluded_names=excluded_names
                 )
-                generation_candidates = generated_recipes
-                generated_recipes = self._verify_new_generated_recipes(
-                    generated_recipes, intent_data, excluded_names
-                )
-
-                if not generated_recipes:
-                    failed_recipes = [*generation_candidates, *failed_recipes]
-                    logger.warning("Initial AI recipe generation returned no usable recipes - retrying once")
-                    generated_recipes = self.recipe_enhancer.generate_fallback_recipes(
-                        f"Create complete recipes with ingredients and step-by-step instructions for: {generation_query}",
-                        intent_data,
-                        failed_recipes,
-                        grounding_recipes=grounding_recipes
-                    )
-                    generated_recipes = self._verify_new_generated_recipes(
-                        generated_recipes, intent_data, excluded_names
-                    )
-
-                if not generated_recipes:
-                    logger.warning("JSON recipe generation failed - using structured recipe fallback")
-                    generated_recipes = self.recipe_enhancer.generate_structured_fallback_recipe(
-                        generation_query,
-                        intent_data,
-                        grounding_recipes=grounding_recipes
-                    )
-                    generated_recipes = self._verify_new_generated_recipes(
-                        generated_recipes, intent_data, excluded_names
-                    )
                 
                 if generated_recipes:
                     source_docs = generated_recipes
@@ -687,18 +698,18 @@ class RecipeRAGService:
                         if recipe.get("database_record_found")
                         and recipe.get("verification_details", {}).get("relevance") in {"match", "adaptable"}
                     ][:3]
-                    logger.warning("Final validation removed all selected recipes; attempting one verified correction")
+                    logger.warning("Final validation removed all selected recipes; attempting bounded staged correction")
                     correction_query = (
                         f"Create complete recipes for: {normalized_recipe_request}. "
                         "Correct the reported ingredient and guidance violations without relaxing any user requirements."
                     )
                     if excluded_names:
                         correction_query += " Do not repeat: " + ", ".join(sorted(excluded_names))
-                    corrected_recipes = self.recipe_enhancer.generate_fallback_recipes(
+                    source_docs = self._generate_verified_fallback_recipes(
                         correction_query, intent_data, enhanced_candidates,
-                        grounding_recipes=correction_references
+                        grounding_recipes=correction_references, excluded_names=excluded_names,
+                        max_attempts=1, use_structured_fallback=False
                     )
-                    source_docs = self._verify_new_generated_recipes(corrected_recipes, intent_data, excluded_names)
             source_docs = self._deduplicate_recipes(source_docs)
             source_docs = self._apply_deterministic_constraints(source_docs, intent_data)
             source_docs = self._annotate_recipe_source_tiers(source_docs)

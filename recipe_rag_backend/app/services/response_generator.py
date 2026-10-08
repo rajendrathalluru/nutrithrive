@@ -285,9 +285,15 @@ Avoid medical terminology or health condition references.
             constraint_summary.append("suitable for storing and eating across multiple sittings")
         
         if constraint_summary:
-            return f"I couldn't find or generate AICR-compliant recipes that meet all your requirements ({', '.join(constraint_summary)}). This combination might be too specific. Could you try:\n\n• Relaxing some constraints\n• Changing ingredient count requirements\n• Asking about different types of recipes\n• Being more flexible with dietary restrictions"
+            return (
+                f"I couldn't verify a complete recipe meeting all your requirements ({', '.join(constraint_summary)}) right now. "
+                "I kept your requirements rather than substituting an unsuitable recipe. Please try again."
+            )
         else:
-            return "I couldn't find recipes matching your query. Could you try rephrasing or providing more details about what you're looking for?"
+            return (
+                "I couldn't verify a complete recipe that meets your request right now. "
+                "I haven't substituted general meal ideas for a recipe. Please try again."
+            )
 
     def generate_error_response(self, error: Exception, query: str) -> str:
         """Generate user-friendly error response"""

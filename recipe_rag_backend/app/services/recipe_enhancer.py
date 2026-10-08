@@ -354,7 +354,7 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
     
     def _build_grounding_context(self, grounding_recipes: List[Dict[str, Any]] = None) -> str:
         if not grounding_recipes:
-            return "No useful database recipe context is available. Create an original AI recipe following the guidelines and all user requirements."
+            return "No recipe reference is being used for this attempt. Create an original AI recipe following the guidelines and all user requirements."
         references = [{
             "recipe_id": recipe.get("recipe_id", ""),
             "name": recipe.get("name", ""),
