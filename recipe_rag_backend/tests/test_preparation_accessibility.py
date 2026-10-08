@@ -15,6 +15,7 @@ from app.services.recipe_verifier import RecipeVerifier
 
 SEATED_QUERY = "Show meals I can prepare sitting down."
 HAND_QUERY = "What recipes require minimal hand strength to prepare?"
+TIMING_QUERY = "What foods can I prepare without timing precision?"
 
 
 def assembly_recipe():
@@ -79,11 +80,13 @@ class PreparationAccessibilityTests(unittest.TestCase):
 
     def test_recipe_discovery_paraphrases_and_advice_are_distinct(self):
         for query in ("What meals can I prepare seated?", "Suggest dinners I can make while sitting.", "Give me lunch ideas.",
-                      "What meals use frozen ingredients from start to finish?"):
+                      "What meals use frozen ingredients from start to finish?", TIMING_QUERY,
+                      "Which foods can I make without exact timing?", "Suggest foods I can assemble without a timer"):
             self.assertEqual(self.intent(query)["query_type"], "recipe_search")
         self.assertEqual(self.intent("What meals use frozen ingredients from start to finish?")["constraints"]["ingredient_storage"], "frozen_only")
         for query in ("Give me tips for preparing meals sitting down", "Explain how to organize a seated workspace",
-                      "Show foods that taste good warm but not hot"):
+                      "Show foods that taste good warm but not hot", "Explain why cooking times vary",
+                      "Give me tips for preparing foods without timing precision"):
             self.assertEqual(self.intent(query)["query_type"], "food_guidance")
         analyzer = IntentAnalyzer()
         for route in ("recipe_question", "recipe_adaptation", "clarification"):
@@ -115,8 +118,58 @@ class PreparationAccessibilityTests(unittest.TestCase):
                                   ("Remove the hand-strength restriction", ("seated", None)),
                                   ("Start over: soup recipes", (None, None))):
             resolved = SEATED_QUERY + " " + HAND_QUERY
-            intent = analyzer._post_process_intent(resolved, analyzer._get_fallback_intent_data(resolved), current_query=current)
+            parsed = analyzer._get_fallback_intent_data(resolved)
+            parsed["search_strategy"]["must_match_criteria"] = ["Seated preparation", "Low hand strength"]
+            intent = analyzer._post_process_intent(
+                resolved, parsed,
+                [{"role": "user", "content": resolved}], current_query=current,
+            )
             self.assertEqual((intent["constraints"]["preparation_position"], intent["constraints"]["hand_effort"]), expected)
+            expected_criteria = [criterion for criterion, value in zip(["Seated preparation", "Low hand strength"], expected) if value]
+            self.assertEqual(intent["search_strategy"]["must_match_criteria"], expected_criteria)
+
+    def test_unrequested_physical_constraints_are_removed_from_intent_and_search(self):
+        for query in (TIMING_QUERY, "Hands-off dinner recipes", "Recipes I can eat in one sitting"):
+            for history in ([], [{"role": "user", "content": query},
+                                {"role": "assistant", "content": SEATED_QUERY + " " + HAND_QUERY}]):
+                with self.subTest(query=query, history=bool(history)):
+                    analyzer = IntentAnalyzer()
+                    parsed = analyzer._get_fallback_intent_data(query + " with low hand effort and seated preparation")
+                    parsed["query_type"] = "food_guidance"
+                    parsed["constraints"].update({"hand_effort": "low", "preparation_position": "seated"})
+                    parsed["search_strategy"]["must_match_criteria"] = ["Low hand effort", "Seated preparation", query]
+                    analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))))
+                    intent = analyzer.understand_query_intent_with_context(query, history)
+                    self.assertIsNone(intent["constraints"]["hand_effort"])
+                    self.assertIsNone(intent["constraints"]["preparation_position"])
+                    self.assertEqual(intent["resolved_query"], query)
+                    self.assertEqual(intent["search_strategy"]["must_match_criteria"], [query])
+                    self.assertNotIn("pre-cut", intent["search_strategy"]["enhanced_query"])
+                    self.assertNotIn("seated", intent["search_strategy"]["enhanced_query"])
+                    self.assertNotIn("gentle mixing", intent["search_strategy"]["search_keywords"])
+
+    def test_timing_request_preserves_real_hand_requirement_but_reset_clears_it(self):
+        analyzer = IntentAnalyzer()
+        analyzer.initialize(Mock(predict=Mock(side_effect=lambda prompt: json.dumps(analyzer._get_fallback_intent_data(TIMING_QUERY)))))
+        history = [{"role": "user", "content": HAND_QUERY}]
+        result = analyzer.understand_query_intent_with_context(TIMING_QUERY, history)
+        self.assertEqual(result["constraints"]["hand_effort"], "low")
+        reset = analyzer.understand_query_intent_with_context("Start over: " + TIMING_QUERY, history)
+        self.assertIsNone(reset["constraints"]["hand_effort"])
+        self.assertIsNone(reset["constraints"]["preparation_mode"])
+        self.assertIsNone(reset["constraints"]["time_max_minutes"])
+
+    def test_timing_preparation_request_returns_cards_through_existing_pipeline(self):
+        recipe = assembly_recipe()
+        recipe.update({"generated_by_llm": False, "database_record_found": True, "source_name": "AICR",
+                       "recipe_link": "https://www.aicr.org/cancer-prevention/recipes/example/"})
+        service = self.service(TIMING_QUERY, [recipe])
+        service.response_generator.generate_personalized_response = Mock(return_value="A recipe with flexible preparation timing.")
+        result = service.ask_question(TIMING_QUERY)
+        self.assertEqual(result["matches_found"], 1)
+        self.assertEqual(result["source_documents"][0]["source_label"], "Sourced from AICR")
+        service.response_generator.answer_food_guidance.assert_not_called()
+        service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
 
     def test_reported_database_recipes_fail_seated_check_despite_positive_model(self):
         service = RecipeRAGService()

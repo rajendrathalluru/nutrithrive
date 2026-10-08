@@ -212,6 +212,10 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         text = query.lower()
         if re.search(r"\b(?:tips|advice|explain|explanation|why)\b", text):
             return False
+        if re.search(r"\b(?:what|which) foods?\b[^.!?]{0,40}\b(?:prepare|make|cook|assemble)\b|"
+                     r"\b(?:show|suggest|recommend|find|give|provide)\b[^.!?]{0,35}\bfoods?\b"
+                     r"[^.!?]{0,40}\b(?:prepare|make|cook|assemble)\b", text):
+            return True
         foods = r"(?:recipes?|meals?|dishes?|dinners?|lunch(?:es)?|breakfasts?)"
         return bool(re.search(
             r"\b(?:show|give|find|suggest|recommend|provide|generate|list|more)\b[^.!?]{0,60}\b" + foods + r"\b|"
@@ -324,17 +328,25 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         )
         requirement_requests.append(current_query or query)
         for request in requirement_requests:
-            for field, extract in (("preparation_position", explicit_preparation_position), ("hand_effort", explicit_hand_effort),
-                                   ("ingredient_storage", explicit_canned_requirement)):
-                if re.search(r"\b(?:start over|new search|forget (?:the )?previous)\b", request, re.I):
-                    constraints[field] = None
-                requirement = extract(request)
-                if field == "ingredient_storage" and not requirement:
-                    requirement = explicit_preparation_constraints(request).get("ingredient_storage")
-                    if not requirement and constraints.get(field) == "canned_only":
-                        requirement = explicit_ingredient_storage(request)
-                if requirement:
-                    constraints[field] = None if requirement == "unrestricted" else requirement
+            if re.search(r"\b(?:start over|new search|forget (?:the )?previous)\b", request, re.I):
+                constraints["ingredient_storage"] = None
+            requirement = explicit_canned_requirement(request)
+            if not requirement:
+                requirement = explicit_preparation_constraints(request).get("ingredient_storage")
+                if not requirement and constraints.get("ingredient_storage") == "canned_only":
+                    requirement = explicit_ingredient_storage(request)
+            if requirement:
+                constraints["ingredient_storage"] = None if requirement == "unrestricted" else requirement
+        corrected_request = self._ground_physical_requirements(
+            str(intent_data.get("resolved_query") or query), constraints, strategy,
+            conversation_history, current_query if current_query is not None else query,
+        )
+        if corrected_request:
+            query = corrected_request
+            intent_data["resolved_query"] = query
+            strategy["primary_focus"] = query
+            strategy["enhanced_query"] = query
+            strategy["search_keywords"] = []
         self._apply_chewing_requirement(query, intent_data)
         if current_query:
             self._apply_chewing_requirement(current_query, intent_data)
@@ -422,6 +434,62 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         strategy["enhanced_query"] = self._build_enhanced_query(semantic_query, preferences, constraints, cancer_specific)
 
         return intent_data
+
+    def _ground_physical_requirements(
+        self, resolved_query: str, constraints: Dict[str, Any], strategy: Dict[str, Any],
+        conversation_history: Optional[List[Dict[str, Any]]], current_query: Optional[str]
+    ) -> Optional[str]:
+        requests = [
+            message["content"] for message in self._sanitize_conversation_history(conversation_history or [])
+            if message["role"] == "user"
+        ]
+        requests.append(current_query if current_query is not None else resolved_query)
+        active_requests = []
+        for request in requests:
+            if re.search(r"\b(?:start over|new search|forget (?:the )?previous)\b", request, re.I):
+                active_requests = []
+            active_requests.append(request)
+
+        def has_physical_evidence(text: str, pattern: str) -> bool:
+            physical_text = re.sub(r"\bhands?[- ]off\b|\bstanding (?:over|at|by) (?:the )?stove\b|"
+                                   r"\b(?:one|single|multiple) sittings?\b", "", text, flags=re.I)
+            return bool(re.search(pattern, physical_text, re.I))
+
+        user_text = "\n".join(active_requests)
+        fields = (
+            ("hand_effort", explicit_hand_effort, r"\b(?:hands?|grip|gripping|fingers?|dexterity|low[- ]force|forceful|manual (?:force|strength|effort))\b"),
+            ("preparation_position", explicit_preparation_position, r"\b(?:sit|sitting|seated|stand|standing)\b"),
+        )
+        corrected = False
+        for field, extract, evidence_pattern in fields:
+            clear_criteria = not has_physical_evidence(user_text, evidence_pattern)
+            if clear_criteria:
+                corrected = corrected or constraints.get(field) is not None or has_physical_evidence(resolved_query, evidence_pattern)
+                constraints[field] = None
+            latest_requirement = None
+            for request in active_requests:
+                requirement = extract(request)
+                if requirement:
+                    latest_requirement = requirement
+                    constraints[field] = None if requirement == "unrestricted" else requirement
+            if latest_requirement == "unrestricted":
+                clear_criteria = True
+                corrected = True
+            if clear_criteria:
+                criteria = strategy.get("must_match_criteria", [])
+                if isinstance(criteria, list):
+                    strategy["must_match_criteria"] = [
+                        criterion for criterion in criteria if not has_physical_evidence(str(criterion), evidence_pattern)
+                    ]
+                    corrected = corrected or criteria != strategy["must_match_criteria"]
+        if not corrected:
+            return None
+        if len(set(active_requests)) == 1:
+            return active_requests[0]
+        return (
+            f"Earlier user requests (oldest first): {json.dumps(active_requests[:-1])}\n"
+            f"Current user request (overrides earlier requests): {active_requests[-1]}"
+        )
 
     def _apply_chewing_requirement(self, query: str, intent_data: Dict[str, Any]) -> None:
         requirement = explicit_chewing_requirement(query)

@@ -7,6 +7,10 @@ do not infer no-heat, frozen-only, canned-only, or an ingredient-count limit fro
 Ordinary ready-to-eat produce, dressings, or seasonings may accompany the cooked components unless excluded.
 'Best breakfast', 'simple dinner', and similar casual requests ask for suitable suggestions, not proof
 of a uniquely optimal meal or unstated medical, nutrition, time, or ingredient requirements.
+Timing flexibility means a forgiving preparation process, not weak hands, seated preparation, no heat,
+short total time, or low monitoring. Preserve this request in must_match_criteria rather than converting it
+to those different restrictions. No-cook assembly can fit, but cooking remains allowed when timing is forgiving.
+Use the actual preparation to judge the fit; do not waive food-safety or required doneness checks.
 """
 
 INGREDIENT_STORAGE_RULES = """Ingredient storage requirements refer to ingredients before opening or cooking, not to cooked leftovers.
@@ -74,6 +78,8 @@ a recipe_search for that food type, not an adaptation of an existing recipe; do 
 'Show meals I can prepare sitting down' asks for actual recipes, not general advice about food categories.
 'What meals can I prepare ...', 'Suggest dinners ...', and 'Show meals ...' are recipe discovery requests.
 Questions explicitly asking for preparation tips or an explanation can still be food_guidance.
+'What foods can I prepare/make/cook ...?' is also recipe discovery, not automatically food_guidance.
+The word 'foods' alone does not change a preparation request into a category explanation.
 """
 
 SERVING_TEMPERATURE_RULES = """Serving temperature is separate from preparation method and spice intensity.
