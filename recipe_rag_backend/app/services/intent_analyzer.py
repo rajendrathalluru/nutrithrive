@@ -2,7 +2,7 @@ import logging
 import json
 import re
 from typing import Dict, Any, List, Optional
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, FOOD_GUIDANCE_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, FOOD_GUIDANCE_RULES, REQUEST_MEANING_RULES
 from app.services.chewing_validation import explicit_chewing_requirement
 from app.services.preparation_validation import explicit_preparation_constraints, explicit_preparation_position, explicit_hand_effort
 from app.services.serving_temperature import explicit_serving_temperature, is_temperature_food_guidance
@@ -166,6 +166,9 @@ Use numbers for numeric limits, arrays of strings for list fields, and null or e
 Extract hard requirements into constraints, including dietary restrictions, allergens, ingredient limits,
 equipment, budget, and preparation time. Preserve additional explicit requirements in
 search_strategy.must_match_criteria rather than silently dropping them.
+For example, a request to use pre-cooked ingredients must preserve their already-cooked starting state
+in must_match_criteria; it does not prohibit reheating. Do not invent additional requirements.
+{REQUEST_MEANING_RULES}
 Extract mild, spicy, sweet, savory, and other flavor requests into preferences.flavor_profiles.
 Keep the original meaning in search_strategy.primary_focus and search_strategy.enhanced_query.
 Expand conceptual requests into concrete ingredient and cooking terms in search_strategy.search_keywords

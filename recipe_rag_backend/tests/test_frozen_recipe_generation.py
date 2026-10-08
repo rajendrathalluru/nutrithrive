@@ -8,7 +8,7 @@ from app.services.intent_analyzer import IntentAnalyzer
 from app.services.recipe_enhancer import RecipeEnhancer
 from app.services.recipe_prompt_rules import (
     CHEWING_RULES, COOKING_ATTENTION_RULES, FROZEN_INGREDIENT_RULES, INGREDIENT_STORAGE_RULES,
-    MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, active_recipe_rules,
+    MEAL_PORTION_RULES, PREPARATION_RULES, REQUEST_MEANING_RULES, SERVING_TEMPERATURE_RULES, active_recipe_rules,
 )
 from app.services.recipe_verifier import RecipeVerifier
 from app.services.rag_service import RecipeRAGService
@@ -65,7 +65,7 @@ class FrozenRecipeGenerationTests(unittest.TestCase):
         self.assertIn(MEAL_PORTION_RULES, rules)
         for unrelated in (INGREDIENT_STORAGE_RULES, PREPARATION_RULES, CHEWING_RULES, COOKING_ATTENTION_RULES, SERVING_TEMPERATURE_RULES):
             self.assertNotIn(unrelated, rules)
-        self.assertEqual(active_recipe_rules({}), "")
+        self.assertEqual(active_recipe_rules({}), REQUEST_MEANING_RULES)
 
     def test_combined_requirements_keep_all_relevant_rules(self):
         intent = {"constraints": {

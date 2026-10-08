@@ -332,7 +332,7 @@ class RecipeRoutingTests(unittest.TestCase):
         recipe.update({"guidance_generated": True, "helpful_tips": ["Add grilled chicken."], "test_constraint_failure": True})
         self.assertEqual(self.service._validate_final_recipes([recipe], {}), [])
 
-    def test_final_validation_failure_attempts_correction_instead_of_stopping(self):
+    def test_optional_guidance_failure_preserves_verified_original(self):
         database_recipe = recipe_record("Database Bean Bowl")
         self.service.search_engine.multi_query_search.return_value = [database_recipe]
         self.service.recipe_enhancer.batch_enhance_recipes.side_effect = lambda recipes, intent: [
@@ -342,21 +342,22 @@ class RecipeRoutingTests(unittest.TestCase):
         self.service._validate_final_recipes = Mock(return_value=[])
         result = self.ask("Show meals that rely on shelf-stable foods.")
         self.assertEqual(result["matches_found"], 1)
-        self.assertEqual(result["source_documents"][0]["name"], "New Dinner")
-        self.service.recipe_enhancer.generate_fallback_recipes.assert_called_once()
+        self.assertEqual(result["source_documents"][0]["name"], "Database Bean Bowl")
+        self.assertNotIn("helpful_tips", result["source_documents"][0])
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
         self.assertEqual(self.service.recipe_enhancer.batch_enhance_recipes.call_count, 1)
 
-    def test_final_validation_failure_uses_remaining_database_matches_first(self):
+    def test_optional_enhancement_failure_keeps_original_three_database_matches(self):
         self.service.search_engine.multi_query_search.return_value = [recipe_record(f"Dinner {number}") for number in range(4)]
         self.service.recipe_enhancer.batch_enhance_recipes.side_effect = lambda recipes, intent: [
             {**recipe, "guidance_generated": True} for recipe in recipes
         ]
         self.service._validate_final_recipes = Mock(return_value=[])
         result = self.ask()
-        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["Dinner 3"])
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["Dinner 0", "Dinner 1", "Dinner 2"])
         self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
 
-    def test_failed_final_correction_is_bounded_and_first_request_is_not_called_additional(self):
+    def test_failed_optional_enhancement_does_not_launch_more_generation(self):
         self.service.search_engine.multi_query_search.return_value = [recipe_record("Database Bowl")]
         self.service.recipe_enhancer.batch_enhance_recipes.side_effect = lambda recipes, intent: [
             {**recipe, "guidance_generated": True} for recipe in recipes
@@ -364,13 +365,12 @@ class RecipeRoutingTests(unittest.TestCase):
         self.service._validate_final_recipes = Mock(return_value=[])
         self.service.recipe_enhancer.generate_fallback_recipes.return_value = []
         result = self.ask("Show meals that rely on shelf-stable foods.")
-        self.assertEqual(result["source"], "no_results")
+        self.assertEqual(result["source"], "database_exact")
         self.assertNotIn("additional", result["response"])
-        calls = self.service.recipe_enhancer.generate_fallback_recipes.call_args_list
-        self.assertEqual([bool(call.kwargs["grounding_recipes"]) for call in calls], [True, False])
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
         self.service.recipe_enhancer.generate_structured_fallback_recipe.assert_not_called()
 
-    def test_final_correction_still_rejects_constraint_failures(self):
+    def test_rejected_optional_changes_cannot_replace_valid_original(self):
         self.service.search_engine.multi_query_search.return_value = [recipe_record("Database Bowl")]
         self.service.recipe_enhancer.batch_enhance_recipes.side_effect = lambda recipes, intent: [
             {**recipe, "guidance_generated": True} for recipe in recipes
@@ -380,11 +380,11 @@ class RecipeRoutingTests(unittest.TestCase):
         invalid["test_constraint_failure"] = True
         self.service.recipe_enhancer.generate_fallback_recipes.return_value = [invalid]
         result = self.ask("Show meals that rely on shelf-stable foods.")
-        self.assertEqual(result["source"], "no_results")
-        self.assertEqual(result["source_documents"], [])
-        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 2)
+        self.assertEqual(result["source"], "database_exact")
+        self.assertEqual(result["source_documents"][0]["name"], "Database Bowl")
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
 
-    def test_final_correction_preserves_follow_up_exclusions_and_database_context(self):
+    def test_original_recipe_restore_preserves_followup_exclusions_and_provenance(self):
         reference = recipe_record("Database Bowl")
         self.service.search_engine.multi_query_search.return_value = [reference]
         self.service.recipe_enhancer.batch_enhance_recipes.side_effect = lambda recipes, intent: [
@@ -396,25 +396,59 @@ class RecipeRoutingTests(unittest.TestCase):
             {"role": "user", "content": "Meals from pantry ingredients"},
             {"role": "assistant", "content": "Previously shown recipes: Previous Dinner"},
         ])
-        self.assertEqual(result["source_documents"], [])
-        calls = self.service.recipe_enhancer.generate_fallback_recipes.call_args_list
-        self.assertTrue(all("previous dinner" in call.args[0] for call in calls))
-        self.assertEqual(calls[0].kwargs["grounding_recipes"][0]["recipe_id"], reference["recipe_id"])
-        self.assertEqual(calls[1].kwargs["grounding_recipes"], [])
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["Database Bowl"])
+        self.assertEqual(result["source_documents"][0]["recipe_link"], reference["recipe_link"])
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
 
-    def test_final_correction_falls_back_to_verified_ai_only_recipe(self):
-        self.service.search_engine.multi_query_search.return_value = [recipe_record("Database Bowl")]
+    def test_ai_only_recipe_survives_optional_enhancement_failure(self):
         self.service.recipe_enhancer.batch_enhance_recipes.side_effect = lambda recipes, intent: [
             {**recipe, "guidance_generated": True} for recipe in recipes
         ]
         self.service._validate_final_recipes = Mock(return_value=[])
-        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [
-            [], [recipe_record("Original Bowl", generated=True)],
-        ]
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [recipe_record("Original Bowl", generated=True)]
         result = self.ask()
         self.assertEqual(result["source_documents"][0]["name"], "Original Bowl")
         self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_args.kwargs["grounding_recipes"], [])
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_called_once()
         self.service.recipe_enhancer.generate_structured_fallback_recipe.assert_not_called()
+
+    def test_enhancement_cannot_mutate_the_verified_baseline_or_request(self):
+        original = recipe_record("Verified Bowl")
+        self.service.search_engine.multi_query_search.return_value = [original]
+
+        def break_enhancement(recipes, intent):
+            recipes[0]["ingredients"].append("Unrequested allergen")
+            recipes[0]["verification_details"]["passes_verification"] = False
+            intent["constraints"]["dietary_restrictions"] = ["Unexpected restriction"]
+            raise RuntimeError("Optional enrichment unavailable")
+
+        self.service.recipe_enhancer.batch_enhance_recipes.side_effect = break_enhancement
+        result = self.ask("Show dinner recipes")
+        self.assertEqual(result["source_documents"][0]["ingredients"], original["ingredients"])
+        self.assertTrue(result["source_documents"][0]["verification_details"]["passes_verification"])
+        self.assertNotIn("dietary_restrictions", result["intent_analysis"]["constraints"])
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+
+    def test_partial_enhancement_failure_keeps_each_verified_recipe(self):
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("First Bowl"), recipe_record("Second Bowl")]
+        self.service.recipe_enhancer.batch_enhance_recipes.side_effect = lambda recipes, intent: [
+            {**recipe, "helpful_tips": ["Suitable tip"], "guidance_generated": True} for recipe in recipes
+        ]
+        self.service._validate_final_recipes = Mock(side_effect=lambda recipes, intent: recipes[:1])
+        result = self.ask()
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["First Bowl", "Second Bowl"])
+        self.assertIn("helpful_tips", result["source_documents"][0])
+        self.assertNotIn("helpful_tips", result["source_documents"][1])
+
+    def test_unflagged_recipe_changes_still_need_verification(self):
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Verified Bowl")]
+        self.service.recipe_enhancer.batch_enhance_recipes.side_effect = lambda recipes, intent: [
+            {**recipe, "ingredients": ["Unrequested allergen"]} for recipe in recipes
+        ]
+        self.service._validate_final_recipes = Mock(return_value=[])
+        result = self.ask()
+        self.assertNotEqual(result["source_documents"][0]["ingredients"], ["Unrequested allergen"])
+        self.service._validate_final_recipes.assert_called_once()
 
     def test_no_results_does_not_blame_phrasing_or_suggest_relaxing_dietary_restrictions(self):
         generator = ResponseGenerator()
@@ -598,6 +632,26 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual(len(second), 1)
         self.assertNotEqual(first[0]["recipe_id"], second[0]["recipe_id"])
 
+    def test_casual_breakfast_request_prioritizes_breakfast_category(self):
+        service = RecipeRAGService()
+        service.data_loader.load_data(str(Path(__file__).parents[1] / "app/data/Recipe.csv"))
+        for query in ("best breakfast that i can eat", "help me prepare some easy breakfast recipes"):
+            with self.subTest(query=query):
+                candidates = service._get_database_search_candidates(
+                    query, {"preferences": {"meal_types": ["breakfast"]}}, set(), 3,
+                )
+                self.assertEqual(len(candidates), 3)
+                self.assertTrue(all("breakfast" in recipe["type"].lower() for recipe in candidates))
+
+    def test_ingredient_form_ranks_above_incidental_description_match(self):
+        service = RecipeRAGService()
+        service.data_loader.load_data(str(Path(__file__).parents[1] / "app/data/Recipe.csv"))
+        candidates = service._get_database_search_candidates(
+            "Generate recipes using pre-cooked ingredients", {}, set(), 3,
+        )
+        self.assertEqual(len(candidates), 3)
+        self.assertTrue(all(any("cooked" in ingredient.lower().split() for ingredient in recipe["ingredients"]) for recipe in candidates))
+
 
 class GenerationAndVerificationTests(unittest.TestCase):
     def test_pantry_checks_reject_each_conflict_even_with_model_pass(self):
@@ -673,7 +727,6 @@ class GenerationAndVerificationTests(unittest.TestCase):
             candidate_names.append([recipe["name"] for recipe in candidates])
         self.assertTrue(candidate_names[0])
         self.assertEqual(candidate_names[0], candidate_names[1])
-        self.assertIn("Tuna, Brown Rice and White Bean Salad", candidate_names[0])
 
     def test_vector_search_uses_semantic_keywords(self):
         engine = SearchEngine()

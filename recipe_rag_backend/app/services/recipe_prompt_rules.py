@@ -1,3 +1,14 @@
+REQUEST_MEANING_RULES = """Interpret the request without silently strengthening it.
+'Using' an ingredient or ingredient form does not mean 'only' that form unless the user says so.
+Pre-cooked ingredients are already cooked BEFORE this recipe starts: use purchased cooked components
+or cooked leftovers the user has specified. Cooking raw meat, dry pasta, or dry grains in this recipe
+does not satisfy a request to start with pre-cooked ingredients. Reheating and assembly are allowed;
+do not infer no-heat, frozen-only, canned-only, or an ingredient-count limit from 'pre-cooked'.
+Ordinary ready-to-eat produce, dressings, or seasonings may accompany the cooked components unless excluded.
+'Best breakfast', 'simple dinner', and similar casual requests ask for suitable suggestions, not proof
+of a uniquely optimal meal or unstated medical, nutrition, time, or ingredient requirements.
+"""
+
 INGREDIENT_STORAGE_RULES = """Ingredient storage requirements refer to ingredients before opening or cooking, not to cooked leftovers.
 For ONLY canned ingredients/foods, set ingredient_storage='canned_only', not pantry_based or shelf_stable_only.
 Every food ingredient, garnish, optional addition, side suggestion, and substitution must explicitly be canned.
@@ -193,7 +204,7 @@ Summaries must identify portioning and supplied storage guidance without adding 
 
 def active_recipe_rules(intent_data: dict) -> str:
     constraints = intent_data.get("constraints", {})
-    rules = []
+    rules = [REQUEST_MEANING_RULES]
     storage = constraints.get("ingredient_storage")
     if storage == "frozen_only":
         rules.append(FROZEN_INGREDIENT_RULES)

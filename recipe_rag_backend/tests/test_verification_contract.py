@@ -86,6 +86,8 @@ class VerificationContractTests(unittest.TestCase):
         verifier = RecipeVerifier()
 
         def response(prompt):
+            example = prompt.split("Example shape (replace all example values with your assessment, never copy example evidence):\n")[1].split("\n")[0]
+            self.assertEqual(json.loads(example)[0]["id"], 0)
             count = 3 if "Verify ALL 3 recipes." in prompt else 1
             return json.dumps([{**self.assessment, "id": index} for index in range(count)])
 
