@@ -4,7 +4,7 @@ import re
 import hashlib
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,10 @@ class RecipeEnhancer:
             "health_conditions",
             "skill_level",
             "avoid_red_meat",
-            "leftover_friendly"
+            "leftover_friendly",
+            "chewing_effort",
+            "meal_suitability",
+            "portion_size"
         ]
         preference_keys_that_need_adaptation = [
             "texture_preferences",
@@ -220,6 +223,8 @@ USER REQUIREMENTS:
 
 {INGREDIENT_STORAGE_RULES}
 {COOKING_ATTENTION_RULES}
+{CHEWING_RULES}
+{MEAL_PORTION_RULES}
 
 YOUR TASK - Generate ALL of the following in ONE response:
 
@@ -377,7 +382,8 @@ Generate all four sections. Be specific, nutrition-appropriate, and AICR-complia
                 failures = [{
                     "name": r.get("name"), 
                     "violations": r.get("verification_details", {}).get("constraint_violations", []),
-                    "ingredient_storage_check": r.get("verification_details", {}).get("ingredient_storage_check")
+                    "ingredient_storage_check": r.get("verification_details", {}).get("ingredient_storage_check"),
+                    "chewing_check": r.get("verification_details", {}).get("chewing_check")
                 } for r in failed_recipes[:2]]
                 failure_context = f"\n\nPrevious Failed Recipes:\n{json.dumps(failures, indent=2)}"
 
@@ -424,6 +430,8 @@ USER REQUIREMENTS:
 
 {INGREDIENT_STORAGE_RULES}
 {COOKING_ATTENTION_RULES}
+{CHEWING_RULES}
+{MEAL_PORTION_RULES}
 
 {self._build_grounding_context(grounding_recipes)}
 
@@ -573,6 +581,8 @@ Recheck the entire resulting ingredient list; fixing one issue while keeping ano
 
 {INGREDIENT_STORAGE_RULES}
 {COOKING_ATTENTION_RULES}
+{CHEWING_RULES}
+{MEAL_PORTION_RULES}
 NUTRITION AND FOOD SAFETY GUIDELINES:
 {guidelines}
 

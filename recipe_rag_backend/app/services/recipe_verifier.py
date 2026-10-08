@@ -5,8 +5,9 @@ import hashlib
 import re
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES
 from app.services.pantry_validation import audit_pantry_ingredients
+from app.services.chewing_validation import audit_chewing_assessment
 
 logger = logging.getLogger(__name__)
 
@@ -101,8 +102,32 @@ For other requests ingredient_storage_check may be null.
             },
             "reasoning": "Brief evidence-based explanation",
         }
+        texture_contract = ""
+        if intent_data.get("constraints", {}).get("chewing_effort") == "low":
+            example["chewing_check"] = {
+                "components": [{
+                    "ingredient_index": 0, "status": "unknown",
+                    "evidence": [{"field": "instructions", "index": 0, "quote": "Exact recipe substring"}],
+                }],
+                "serving_evidence": [{"field": "instructions", "index": 0, "quote": "Exact preparation substring"}],
+                "conflicting_guidance": [],
+            }
+            texture_contract = """For low chewing effort, also return chewing_check. Assess EVERY ingredient line
+by its zero-based ingredient_index, including components, sauces, and toppings. Ingredient section headings
+are non-food labels; identify them as such in their evidence. Each component needs pass/fail/unknown plus
+evidence citations with field ('ingredients' or 'instructions'), zero-based index, and an exact quote.
+Use one concise citation per component, quoting at most 12 words; do not repeat full cooking steps.
+Ingredient citations must reference that same ingredient. Softness claims in titles/descriptions are not evidence.
+Use ingredient evidence for inherently soft forms/liquids; cite the actual instructions for transformations.
+Return serving_evidence citations to instructions supporting the finished texture, and conflicting_guidance
+as an array of exact conflicting instructions, tips, descriptions, or adaptations. Do not invent processing steps.
+Chopped chicken and whole meatballs still need evidence of a moist, easily broken-down final texture;
+soft rice or mashed potatoes on the side do not establish the texture of the protein component.
+Mark unknown and adaptable when the final texture cannot be established from the recipe as written.
+"""
         return f"""REQUIRED CHECKS (return each exact key, including every member of list requirements):
 {json.dumps(required)}
+{texture_contract}
 For each check, status must be pass, fail, or unknown, with concise evidence from the recipe.
 Use unknown if the recipe lacks evidence; do not invent missing amounts, timing, or ingredient forms.
 Assess shelf stability BEFORE opening/cooking. Canned tomatoes and canned broth are pantry ingredients;
@@ -135,6 +160,13 @@ Example shape (replace all example values with your assessment, never copy examp
         verification["constraint_violations"] = list(dict.fromkeys(str(value) for value in violations))
         verification["passes_verification"] = verification.get("relevance") == "match" and not violations
         verification = self._enforce_storage_check(verification, intent_data, recipe)
+        if intent_data.get("constraints", {}).get("chewing_effort") == "low":
+            texture_problems = audit_chewing_assessment(recipe, verification.get("chewing_check"))
+            if texture_problems:
+                verification["constraint_violations"].extend(texture_problems)
+                verification["passes_verification"] = False
+                if verification.get("relevance") == "match":
+                    verification["relevance"] = "adaptable"
         verification["meets_preferences"] = verification["passes_verification"]
         verification["verification_score"] = 100 if verification["passes_verification"] else 0
         return verification
@@ -144,11 +176,19 @@ Example shape (replace all example values with your assessment, never copy examp
         if not recipes:
             return []
 
-        if len(recipes) > 3:
+        batch_size = 1 if intent_data.get("constraints", {}).get("chewing_effort") == "low" else 3
+        if batch_size == 1 and len(recipes) > 1:
+            with ThreadPoolExecutor(max_workers=min(3, len(recipes))) as executor:
+                assessments = executor.map(
+                    lambda recipe: self.batch_verify_recipes([recipe], intent_data, aicr_service)[0],
+                    recipes,
+                )
+                return list(assessments)
+        if len(recipes) > batch_size:
             return [
                 recipe
-                for start in range(0, len(recipes), 3)
-                for recipe in self.batch_verify_recipes(recipes[start:start + 3], intent_data, aicr_service)
+                for start in range(0, len(recipes), batch_size)
+                for recipe in self.batch_verify_recipes(recipes[start:start + batch_size], intent_data, aicr_service)
             ]
         
         try:
@@ -159,7 +199,7 @@ Example shape (replace all example values with your assessment, never copy examp
                     "name": recipe.get("name", "Unknown"),
                     "type": recipe.get("type", "Unknown"),
                     "description": recipe.get("description", ""),
-                    "storage_evidence": recipe.get("storage_evidence", "")[:400],
+                    "storage_evidence": recipe.get("storage_evidence", ""),
                     "ingredients": recipe.get("ingredients", []),
                     "instructions": recipe.get("instructions", []),
                     "helpful_tips": recipe.get("helpful_tips", []),
@@ -188,6 +228,7 @@ Example shape (replace all example values with your assessment, never copy examp
                         ),
                         "relevance": verification.get("relevance", "unrelated"),
                         "ingredient_storage_check": verification.get("ingredient_storage_check"),
+                        "chewing_check": verification.get("chewing_check"),
                         "verification_score": verification.get("verification_score", 0),
                         "reasoning": verification.get("reasoning", ""),
                         "constraint_violations": verification.get("constraint_violations", []),
@@ -245,6 +286,8 @@ Verify EACH recipe (by id) against ALL constraints in "constraints" section.
 {self.RELEVANCE_RULES}
 {INGREDIENT_STORAGE_RULES}
 {COOKING_ATTENTION_RULES}
+{CHEWING_RULES}
+{MEAL_PORTION_RULES}
 {self.STORAGE_VERIFICATION_RULES}
 
 {self._verification_contract(intent_data)}
@@ -395,6 +438,7 @@ RECIPE:
     "helpful_tips": recipe_data.get("helpful_tips", []),
     "ingredient_adaptations": recipe_data.get("ingredient_adaptations", []),
     "storage_instructions": recipe_data.get("storage_instructions", ""),
+    "storage_evidence": recipe_data.get("storage_evidence", ""),
     "content": recipe_data.get("content", "")[:500]
 }, indent=2)}
 
@@ -414,6 +458,8 @@ Evaluate this recipe against ALL constraints intelligently:
 {self.RELEVANCE_RULES}
 {INGREDIENT_STORAGE_RULES}
 {COOKING_ATTENTION_RULES}
+{CHEWING_RULES}
+{MEAL_PORTION_RULES}
 {self.STORAGE_VERIFICATION_RULES}
 
 {self._verification_contract(intent_data)}

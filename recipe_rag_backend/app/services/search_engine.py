@@ -3,6 +3,7 @@ import re
 import json
 from typing import List, Dict, Any
 from langchain.schema import Document
+from app.services.storage_guidance import extract_storage_guidance
 
 logger = logging.getLogger(__name__)
 
@@ -198,30 +199,7 @@ Return {top_k} best indices as JSON:
         return sum(1 for pattern in self.STORAGE_EVIDENCE_PATTERNS if pattern.search(str(text)))
 
     def extract_storage_evidence(self, text: str) -> str:
-        normalized = re.sub(r"\s+", " ", str(text)).strip()
-        if not normalized:
-            return ""
-
-        snippets = []
-        for pattern in self.STORAGE_EVIDENCE_PATTERNS:
-            match = pattern.search(normalized)
-            if not match:
-                continue
-            start = max(0, normalized.rfind(".", 0, match.start()) + 1)
-            end = normalized.find(".", match.end())
-            end = len(normalized) if end == -1 else end + 1
-            snippet = normalized[start:end].strip()
-            if "Description:" in snippet:
-                snippet = snippet.split("Description:", 1)[1].strip()
-            snippet = re.sub(r"^(?:Directions|Notes):\s*", "", snippet)
-            for field_marker in (" Calories:", " Ingredients:", " Directions:", " Notes:"):
-                marker_index = snippet.find(field_marker)
-                if marker_index > 0:
-                    snippet = snippet[:marker_index].strip()
-            if snippet and snippet not in snippets:
-                snippets.append(snippet)
-
-        return " ".join(snippets[:2])
+        return extract_storage_guidance(text)
     
     def extract_recipe_details(self, content: str) -> Dict[str, Any]:
         """Extract structured recipe details"""
@@ -273,7 +251,7 @@ Return {top_k} best indices as JSON:
                             if cleaned:
                                 extracted_instructions.append(cleaned)
                     
-                    if len(extracted_instructions) >= 3:
+                    if extracted_instructions:
                         details["instructions"] = [f"{i+1}. {inst}" for i, inst in enumerate(extracted_instructions[:8])]
                         instructions_found = True
                         break

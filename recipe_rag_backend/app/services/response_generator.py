@@ -1,7 +1,9 @@
 import logging
 import json
 from typing import List, Dict, Any
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, CHEWING_RULES, MEAL_PORTION_RULES
+from app.services.chewing_validation import audit_chewing_assessment
+from app.services.storage_guidance import storage_summary
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,8 @@ If suggesting a substitution, preserve active restrictions and the recipe's diet
 not claim equivalent or increased protein without supporting data. Identify suggestions as adaptations.
 Do not infer a medical condition. Keep the answer concise and name the recipe being discussed.
 {INGREDIENT_STORAGE_RULES}
+{CHEWING_RULES}
+{MEAL_PORTION_RULES}
 """
         try:
             return self.llm.predict(prompt).strip()
@@ -53,8 +57,11 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
             if constraints.get("leftover_friendly"):
                 constraint_mentions.append("suitable for leftovers and multiple sittings")
 
+            if constraints.get("chewing_effort") == "low":
+                return self._generate_low_chewing_response(source_docs, constraints)
+
             if constraints.get("leftover_friendly"):
-                return self._generate_leftover_friendly_response(source_docs)
+                return self._generate_leftover_friendly_response(source_docs, constraints)
             
             constraint_text = ", ".join(constraint_mentions) if constraint_mentions else ""
             
@@ -118,17 +125,33 @@ Avoid medical terminology or health condition references.
                 f"that match your request. Highlights include {highlighted_names}."
             )
 
-    def _generate_leftover_friendly_response(self, source_docs: List[Dict]) -> str:
+    def _generate_low_chewing_response(self, source_docs: List[Dict], constraints: Dict[str, Any]) -> str:
+        lines = [f"I found {len(source_docs)} recipe{'s' if len(source_docs) != 1 else ''} for your low-chewing request:"]
+        for recipe in source_docs[:3]:
+            assessment = recipe.get("verification_details", {}).get("chewing_check")
+            evidence = ""
+            if not audit_chewing_assessment(recipe, assessment):
+                evidence = " ".join(dict.fromkeys(citation["quote"] for citation in assessment["serving_evidence"]))[:320]
+            lines.append(f"• {recipe.get('name', 'Recipe')}" + (f": {evidence}" if evidence else ""))
+            if constraints.get("leftover_friendly"):
+                storage = str(recipe.get("storage_evidence") or recipe.get("storage_instructions") or "").strip()
+                if storage:
+                    lines.append(f"Storage: {storage_summary(storage)}")
+        lines.append("Open the recipe cards for the complete ingredients and preparation steps.")
+        return "\n".join(lines)
+
+    def _generate_leftover_friendly_response(self, source_docs: List[Dict], constraints: Dict[str, Any] = None) -> str:
         recipe_count = len(source_docs)
+        portioning = "multiple small servings" if (constraints or {}).get("portion_size") == "small" else "multiple sittings"
         lines = [
-            f"I found {recipe_count} recipe{'s' if recipe_count != 1 else ''} that can be divided across multiple sittings:"
+            f"I found {recipe_count} recipe{'s' if recipe_count != 1 else ''} that can be divided across {portioning}:"
         ]
 
         for recipe in source_docs[:3]:
             evidence = str(
                 recipe.get("storage_evidence") or recipe.get("storage_instructions") or ""
             ).strip()
-            evidence = evidence[:320].rstrip()
+            evidence = storage_summary(evidence)
             lines.append(f"• {recipe.get('name', 'Recipe')}: {evidence}")
 
         lines.append("Open a recipe card for ingredients, directions, and complete storage guidance.")

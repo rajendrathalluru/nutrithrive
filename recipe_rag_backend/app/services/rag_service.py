@@ -122,6 +122,8 @@ class RecipeRAGService:
 
     def _verify_candidates(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
+        if intent_data.get("constraints", {}).get("leftover_friendly"):
+            prepared = [{**recipe, "storage_evidence": self._get_recipe_storage_evidence(recipe)} for recipe in prepared]
         return self.recipe_verifier.batch_verify_recipes(prepared, intent_data, aicr_service)
 
     def _get_verified_matches(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -181,17 +183,20 @@ class RecipeRAGService:
         return matching_recipes
 
     def _get_recipe_storage_evidence(self, recipe: Dict[str, Any]) -> str:
-        explicit_guidance = str(
-            recipe.get("storage_evidence") or recipe.get("storage_instructions") or ""
-        ).strip()
-        if explicit_guidance:
-            return explicit_guidance
+        if recipe.get("database_record_found") and self._classify_recipe_source_tier(recipe) == "database_exact":
+            source_guidance = self.search_engine.extract_storage_evidence(recipe.get("content", ""))
+            if source_guidance:
+                return source_guidance
+        for field in ("storage_instructions", "storage_evidence"):
+            guidance = self.search_engine.extract_storage_evidence(recipe.get(field, ""))
+            if guidance:
+                return guidance
 
         searchable_fields = [
             recipe.get("content", ""),
             recipe.get("description", ""),
-            " ".join(str(item) for item in recipe.get("instructions", []) if item),
-            " ".join(str(item) for item in recipe.get("helpful_tips", []) if item),
+            "\n".join(str(item) for item in recipe.get("instructions", []) if item),
+            "\n".join(str(item) for item in recipe.get("helpful_tips", []) if item),
         ]
         return self.search_engine.extract_storage_evidence("\n".join(map(str, searchable_fields)))
 

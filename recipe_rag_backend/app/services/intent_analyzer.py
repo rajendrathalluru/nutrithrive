@@ -2,7 +2,8 @@ import logging
 import json
 import re
 from typing import Dict, Any, List, Optional
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES
+from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES
+from app.services.chewing_validation import explicit_chewing_requirement
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ Pay special attention to:
             response = self.llm.predict(enhanced_prompt)
             intent_data = self._parse_intent_response(response)
             resolved_query = str(intent_data.get("resolved_query") or query).strip()
-            intent_data = self._post_process_intent(resolved_query, intent_data)
+            intent_data = self._post_process_intent(resolved_query, intent_data, current_query=query)
             logger.info(f"Context-aware intent analysis: {intent_data['query_type']}")
             
             # Cache with context consideration
@@ -156,6 +157,8 @@ and enhanced_query, while preserving the request. For example, shelf-stable meal
 recipes using canned beans, canned vegetables, dry grains, and dried legumes even without that exact phrase.
 {INGREDIENT_STORAGE_RULES}
 {COOKING_ATTENTION_RULES}
+{CHEWING_RULES}
+{MEAL_PORTION_RULES}
 Do not infer ingredient counts, protein targets, storage needs, or medical conditions from recipes
 previously suggested by the assistant. Only user messages establish requirements.
 Pantry/shelf-stable ingredients do not imply hands-off cooking. Set attention_level to null unless the
@@ -204,7 +207,10 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
                 "skill_level": None,
                 "leftover_friendly": False,
                 "ingredient_storage": None,
-                "attention_level": None
+                "attention_level": None,
+                "chewing_effort": None,
+                "meal_suitability": None,
+                "portion_size": None
             },
             "preferences": {
                 "cuisine_types": [],
@@ -231,7 +237,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         self,
         query: str,
         intent_data: Dict[str, Any],
-        conversation_history: Optional[List[Dict[str, Any]]] = None
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+        current_query: Optional[str] = None
     ) -> Dict[str, Any]:
         constraints = intent_data.setdefault("constraints", {})
         preferences = intent_data.setdefault("preferences", {})
@@ -248,6 +255,15 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         constraints.setdefault("leftover_friendly", False)
         constraints.setdefault("ingredient_storage", None)
         constraints.setdefault("attention_level", None)
+        constraints.setdefault("chewing_effort", None)
+        self._apply_chewing_requirement(query, intent_data)
+        if current_query:
+            self._apply_chewing_requirement(current_query, intent_data)
+        constraints.setdefault("meal_suitability", None)
+        constraints.setdefault("portion_size", None)
+        self._apply_meal_portion_requirements(query, constraints)
+        if current_query:
+            self._apply_meal_portion_requirements(current_query, constraints)
         preferences.setdefault("cuisine_types", [])
         preferences.setdefault("meal_types", [])
         preferences.setdefault("nutritional_goals", [])
@@ -327,6 +343,22 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         strategy["enhanced_query"] = self._build_enhanced_query(semantic_query, preferences, constraints, cancer_specific)
 
         return intent_data
+
+    def _apply_chewing_requirement(self, query: str, intent_data: Dict[str, Any]) -> None:
+        requirement = explicit_chewing_requirement(query)
+        if requirement:
+            intent_data.setdefault("constraints", {})["chewing_effort"] = "low" if requirement == "low" else None
+
+    def _apply_meal_portion_requirements(self, query: str, constraints: Dict[str, Any]) -> None:
+        normalized = query.lower().replace("’", "'")
+        if re.search(r"\bmeals?\b", normalized) and not re.search(r"\b(?:not|no|rather than|instead of) meals?\b", normalized):
+            constraints["meal_suitability"] = "meal"
+        elif re.search(r"\b(?:snacks?|condiments?|side dishes) (?:only|instead)\b|\bnot meals?\b", normalized):
+            constraints["meal_suitability"] = None
+        if re.search(r"\b(?:small|smaller) (?:servings|portions)\b", normalized):
+            constraints["portion_size"] = "small"
+        if self._requests_leftover_friendly(normalized):
+            constraints["leftover_friendly"] = True
 
     def _extract_context_from_history(self, conversation_history: List[Dict[str, Any]]) -> Dict[str, Any]:
         cuisine_types: List[str] = []
@@ -431,7 +463,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             r"\bmake[- ]ahead\b",
             r"\bbatch[- ]cook(?:ing|ed)?\b",
             r"\b(?:eat|enjoy) (?:it|them|some) (?:over time|later|the next day)\b",
-            r"\bmultiple (?:meals|days|servings)\b"
+            r"\bmultiple (?:small |smaller )?(?:meals|days|servings|portions)\b",
+            r"\b(?:break|split|divide|portion)\b.{0,45}\b(?:small|smaller) (?:servings|portions)\b"
         ]
         return any(re.search(pattern, text) for pattern in patterns)
 
@@ -456,6 +489,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             keywords.extend(["canned beans", "canned vegetables", "dried lentils", "rice", "pasta"])
         if constraints.get("attention_level") == "low":
             keywords.extend(["baked", "roasted", "slow cooker", "assembly", "occasional stirring"])
+        if constraints.get("chewing_effort") == "low":
+            keywords.extend(["soft moist", "pureed soup", "mashed beans", "porridge", "soft scrambled eggs"])
         return list(dict.fromkeys([keyword for keyword in keywords if keyword]))
 
     def _build_enhanced_query(
@@ -482,6 +517,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             parts.append("pantry canned beans canned vegetables dried lentils dry grains")
         if constraints.get("attention_level") == "low":
             parts.append("hands-off baking roasting slow cooker assembly minimal active attention")
+        if constraints.get("chewing_effort") == "low":
+            parts.append("low chewing effort soft moist pureed mashed porridge")
         return " ".join(dict.fromkeys([part for part in parts if part]))
 
     def _merge_unique(self, existing: List[str], incoming: List[str]) -> List[str]:
