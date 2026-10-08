@@ -144,6 +144,13 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                 lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
                 lines.append("Open a recipe card for the ingredients and preparation steps. Canned-only does not necessarily mean no cooking.")
                 return "\n".join(lines)
+
+            if constraints.get("ingredient_storage") == "frozen_only":
+                noun = "recipe" if recipe_count == 1 else "recipes"
+                lines = [f"Here {'is' if recipe_count == 1 else 'are'} {recipe_count} {noun} made with ingredients supplied frozen:"]
+                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.append("Open a recipe card for the ingredients and complete preparation steps. Frozen ingredients may still require cooking or reheating.")
+                return "\n".join(lines)
             
             constraint_text = ", ".join(constraint_mentions) if constraint_mentions else ""
             
@@ -261,6 +268,11 @@ Avoid medical terminology or health condition references.
             return (
                 "I couldn't verify a recipe meeting all your requirements using only canned food ingredients right now. "
                 "I haven't substituted dry pantry staples or fresh ingredients. Please try again."
+            )
+        if constraints.get("ingredient_storage") == "frozen_only":
+            return (
+                "I couldn't verify a complete recipe meeting your frozen-only requirement right now. "
+                "I kept that requirement rather than adding non-frozen ingredients or leaving preparation steps incomplete. Please try again."
             )
         if constraints.get("time_max_minutes") is not None:
             comparison = "less than" if constraints.get("time_limit_exclusive") else "at most"

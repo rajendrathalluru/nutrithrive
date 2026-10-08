@@ -99,6 +99,34 @@ def _guidance_lines(recipe: Dict[str, Any]):
                 yield field, index, str(line)
 
 
+def _audit_frozen_guidance(recipe: Dict[str, Any]) -> List[str]:
+    declared = " ".join(str(ingredient).lower() for ingredient in recipe.get("ingredients", []))
+    foods = re.compile(
+        r"\b(?:cooking spray|stir[- ]fry sauce|soy sauce|rice|quinoa|pasta|noodles|grains|chicken|turkey|fish|shrimp|"
+        r"tofu|edamame|vegetables|broccoli|cauliflower|carrots?|corn|peas|fruit|berries|herbs|cilantro|parsley|"
+        r"lime(?: juice)?|lemon(?: juice)?|nuts?|seeds?|yogurt|milk|cheese|butter|cream|oil|water|salt|pepper|"
+        r"garlic powder|ground ginger|cumin|paprika)\b", re.I,
+    )
+    problems = []
+    for field, index, line in _guidance_lines(recipe):
+        for food in foods.finditer(line):
+            prefix = line[max(0, food.start() - 50):food.start()].lower()
+            if re.search(r"\b(?:do not|don't|avoid|omit|skip|without|no)\s+(?:(?:add|adding|added|extra|any|use|using)\s+)*$", prefix):
+                continue
+            if food[0].lower() == "water" and re.search(r"\b(?:rinse|wash)\b", line, re.I) and not re.search(r"\b(?:add|cook|boil|mix)\b", line, re.I):
+                continue
+            if re.search(r"\b(?:fresh|canned|dried|non[- ]frozen)\s*$", prefix):
+                problems.append(f"Non-frozen addition in {field}[{index}]: {line}")
+                break
+            if food[0].lower() in declared:
+                continue
+            if re.search(r"\bfrozen\s+(?:(?:cooked|mixed|shelled|diced|chopped|low-sodium|brown|white|cauliflower)\s+){0,3}$", prefix):
+                continue
+            problems.append(f"Unverified frozen form in {field}[{index}]: {line}")
+            break
+    return problems
+
+
 def _duration_minutes(text: str) -> List[float]:
     durations = []
     for match in DURATION.finditer(text):
@@ -258,6 +286,7 @@ def audit_preparation(recipe: Dict[str, Any], constraints: Dict[str, Any], asses
             problems.append("Frozen ingredient assessment is missing or incomplete")
         elif any(check[field] for field in fields):
             problems.append("Recipe is not achievable using only frozen ingredients")
+        problems.extend(_audit_frozen_guidance(recipe))
         for ingredient in recipe.get("ingredients", []):
             text = str(ingredient).strip()
             if not text or text.endswith(":"):
@@ -266,6 +295,13 @@ def audit_preparation(recipe: Dict[str, Any], constraints: Dict[str, Any], asses
                 r"\b(?:fresh|canned|dried|refrigerated|not frozen|non[- ]frozen)\b", text, re.I
             ):
                 problems.append(f"Ingredient not specified exclusively in frozen form: {text}")
+        for field, index, line in _guidance_lines(recipe):
+            served_frozen = re.search(
+                r"\b(?:serve|eat|enjoy|spoon|pour)\b[^.!?]*\bfrozen\s+(?:cooked\s+|brown\s+|white\s+|mixed\s+)*"
+                r"(?:rice|quinoa|grains?|chicken|turkey|fish|shrimp|meat|vegetables?|edamame|peas|broccoli)\b", line, re.I,
+            )
+            if served_frozen and not re.search(r"\b(?:previously|formerly|from) frozen\b", served_frozen.group(), re.I):
+                problems.append(f"Frozen component served without a ready-to-eat final state in {field}[{index}]: {line}")
     limit = constraints.get("time_max_minutes")
     if limit is not None:
         if isinstance(limit, (int, float)) and not isinstance(limit, bool) and math.isfinite(limit) and limit >= 0:

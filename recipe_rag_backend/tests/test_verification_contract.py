@@ -146,7 +146,9 @@ class AttentionIntentTests(unittest.TestCase):
 
     def test_attention_rules_are_shared_by_intent_and_verification(self):
         self.assertIn(COOKING_ATTENTION_RULES, IntentAnalyzer()._build_intent_prompt("Hands-off recipes"))
-        self.assertIn(COOKING_ATTENTION_RULES, RecipeVerifier()._build_individual_verification_prompt({}, {}))
+        self.assertIn(COOKING_ATTENTION_RULES, RecipeVerifier()._build_individual_verification_prompt(
+            {}, {"constraints": {"attention_level": "low"}}
+        ))
 
     def test_follow_up_retains_resolved_attention_and_other_chat_does_not(self):
         analyzer = IntentAnalyzer()

@@ -5,7 +5,7 @@ import hashlib
 import re
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES
+from app.services.recipe_prompt_rules import active_recipe_rules
 from app.services.pantry_validation import audit_pantry_ingredients, audit_canned_recipe
 from app.services.chewing_validation import audit_chewing_assessment
 from app.services.preparation_validation import audit_preparation, declared_time_check
@@ -99,13 +99,15 @@ For other requests ingredient_storage_check may be null.
                 for key in required
             },
             "constraint_violations": [],
-            "ingredient_storage_check": {
-                "required_non_pantry_ingredients": [], "unspecified_ingredient_forms": [], "conflicting_guidance": []
-            },
             "reasoning": "Brief evidence-based explanation",
         }
         constraints = intent_data.get("constraints", {})
         preparation_contract = ""
+        if constraints.get("ingredient_storage") in {"pantry_based", "shelf_stable_only"}:
+            example["ingredient_storage_check"] = {
+                "required_non_pantry_ingredients": [], "unspecified_ingredient_forms": [], "conflicting_guidance": []
+            }
+            preparation_contract += "Assess shelf stability before opening/cooking; refrigerating prepared leftovers does not conflict with pantry ingredients.\n"
         if constraints.get("ingredient_storage") == "canned_only":
             example["canned_ingredient_check"] = {
                 "non_canned_ingredients": [], "unspecified_forms": [], "conflicting_guidance": [],
@@ -202,8 +204,6 @@ Mark unknown and adaptable when the final texture cannot be established from the
 {preparation_contract}
 For each check, status must be pass, fail, or unknown, with concise evidence from the recipe.
 Use unknown if the recipe lacks evidence; do not invent missing amounts, timing, or ingredient forms.
-Assess shelf stability BEFORE opening/cooking. Canned tomatoes and canned broth are pantry ingredients;
-refrigerating cooked leftovers does not conflict with a pantry request. Assess instructions for cooking attention.
 constraint_violations must list actual unmet requirements, not optional improvements or unstated preferences.
 The backend calculates acceptance from these checks. Do NOT output passes_verification or a numeric score.
 Example shape (replace all example values with your assessment, never copy example evidence):
@@ -397,6 +397,12 @@ The backend will retain existing failures and independently validate this eviden
             logger.info(f"Batch verification took {time.time() - start_time:.2f}s for {len(recipes)} recipes")
             
             verification_results = self._parse_verification_response(response)
+            if len(recipes) == 1:
+                if isinstance(verification_results, dict):
+                    verification_results = [verification_results]
+                if (isinstance(verification_results, list) and len(verification_results) == 1
+                        and isinstance(verification_results[0], dict) and "id" not in verification_results[0]):
+                    verification_results = [{"id": 0, **verification_results[0]}]
             results_map = {r["id"]: r for r in verification_results}
             
             for i, recipe in enumerate(recipes):
@@ -473,13 +479,8 @@ Verify EACH recipe (by id) against ALL constraints in "constraints" section.
 - ANY constraint violation = FAIL for that recipe
 
 {self.RELEVANCE_RULES}
-{INGREDIENT_STORAGE_RULES}
-{COOKING_ATTENTION_RULES}
-{CHEWING_RULES}
-{MEAL_PORTION_RULES}
-{PREPARATION_RULES}
-{SERVING_TEMPERATURE_RULES}
-{self.STORAGE_VERIFICATION_RULES}
+{active_recipe_rules(intent_data)}
+{self.STORAGE_VERIFICATION_RULES if intent_data.get('constraints', {}).get('ingredient_storage') in {'pantry_based', 'shelf_stable_only'} else ''}
 
 {self._verification_contract(intent_data)}
 Return ONLY a valid JSON array with one assessment per recipe. Include its integer id in each assessment.
@@ -650,13 +651,8 @@ Evaluate this recipe against ALL constraints intelligently:
 - ANY constraint violation = FAIL
 
 {self.RELEVANCE_RULES}
-{INGREDIENT_STORAGE_RULES}
-{COOKING_ATTENTION_RULES}
-{CHEWING_RULES}
-{MEAL_PORTION_RULES}
-{PREPARATION_RULES}
-{SERVING_TEMPERATURE_RULES}
-{self.STORAGE_VERIFICATION_RULES}
+{active_recipe_rules(intent_data)}
+{self.STORAGE_VERIFICATION_RULES if intent_data.get('constraints', {}).get('ingredient_storage') in {'pantry_based', 'shelf_stable_only'} else ''}
 
 {self._verification_contract(intent_data)}
 Return ONLY one valid JSON assessment object.

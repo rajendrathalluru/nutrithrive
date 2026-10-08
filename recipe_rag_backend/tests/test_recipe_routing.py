@@ -700,8 +700,9 @@ class GenerationAndVerificationTests(unittest.TestCase):
         analyzer = IntentAnalyzer()
         self.assertIn(INGREDIENT_STORAGE_RULES, analyzer._build_intent_prompt("pantry meals"))
         verifier = RecipeVerifier()
-        self.assertIn(INGREDIENT_STORAGE_RULES, verifier._build_batch_verification_prompt([], {}))
-        self.assertIn(INGREDIENT_STORAGE_RULES, verifier._build_individual_verification_prompt({}, {}))
+        intent = {"constraints": {"ingredient_storage": "pantry_based"}}
+        self.assertIn(INGREDIENT_STORAGE_RULES, verifier._build_batch_verification_prompt([], intent))
+        self.assertIn(INGREDIENT_STORAGE_RULES, verifier._build_individual_verification_prompt({}, intent))
         enhancer = RecipeEnhancer()
         llm = Mock(predict=Mock(return_value=json.dumps([recipe_record("Bean Bowl", generated=True)])))
         enhancer.initialize(llm, aicr_service)

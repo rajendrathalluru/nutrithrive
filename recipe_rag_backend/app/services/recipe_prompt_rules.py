@@ -29,6 +29,27 @@ fresh peppers, and dried herbs rather than required fresh cilantro. Tips and ada
 ingredients: do not recommend adding grilled chicken, refrigerated tofu, raw vegetables, or frozen corn.
 """
 
+FROZEN_INGREDIENT_RULES = """FROZEN-ONLY: ALL food ingredients must be supplied as frozen products BEFORE preparation.
+This is not a request for some frozen vegetables with ordinary pantry ingredients. Inspect every ingredient,
+sauce, seasoning, garnish, side, instruction, tip, and adaptation. Do not add ordinary milk, yogurt, chia seeds,
+oil, cooking spray, soy sauce, dried spices, salt, fresh herbs, or non-frozen cooked rice.
+Do not invent 'frozen oil' or 'frozen salt', or tell the user to freeze non-frozen purchases first.
+Build a coherent meal from realistic purchased frozen components, such as frozen cooked grains, frozen
+vegetables, frozen shelled edamame, or frozen fully cooked proteins, when consistent with the other requirements.
+Frozen herb cubes or a frozen sauce can add flavor only if explicitly supplied frozen. These are options,
+not mandatory ingredients or permission to ignore dietary restrictions, allergies, equipment, or meal type.
+Use quantities and complete directions. Choose products/methods that need no added non-frozen ingredients;
+do not silently assume extra oil or water from generic package directions. Specify a product suitable for
+the stated method without added ingredients. Do not substitute a vegetable side alone for a requested meal.
+Cooking, thawing, and hot serving are allowed unless independently prohibited: ingredients need not remain
+frozen during preparation or eating. Preserve package-required cooking and thawing and food-safety guidance.
+Frozen vegetables/proteins requiring cooking cannot be used raw to satisfy another no-heat constraint.
+Give an explicit cooking/reheating step for EACH component that requires it, including frozen cooked rice
+and frozen cooked proteins. Do not simply say 'serve over frozen cooked rice' or leave a frozen side unprepared.
+Refrigerating prepared leftovers is not a frozen-ingredient violation. A title containing 'frozen' does not
+establish ingredient forms. Fail or mark adaptable when any required component is non-frozen or unspecified.
+"""
+
 FOOD_GUIDANCE_RULES = """Choose query_type='food_guidance' for culinary explanations, food categories, or examples
 without a request for recipes or cooking instructions. 'Show foods that taste good warm but not hot' asks for
 food ideas, not automatically recipe cards. Answer the category question first and offer recipes as a follow-up.
@@ -168,3 +189,26 @@ Storage instructions for one unused ingredient, like leftover chipotle peppers, 
 the prepared meal can be saved. Do not infer 'all week' from a two-day refrigeration instruction.
 Summaries must identify portioning and supplied storage guidance without adding unrelated nutrition tips.
 """
+
+
+def active_recipe_rules(intent_data: dict) -> str:
+    constraints = intent_data.get("constraints", {})
+    rules = []
+    storage = constraints.get("ingredient_storage")
+    if storage == "frozen_only":
+        rules.append(FROZEN_INGREDIENT_RULES)
+    elif storage in {"canned_only", "pantry_based", "shelf_stable_only"}:
+        rules.append(INGREDIENT_STORAGE_RULES)
+    if constraints.get("attention_level"):
+        rules.append(COOKING_ATTENTION_RULES)
+    if constraints.get("chewing_effort"):
+        rules.append(CHEWING_RULES)
+    if any(constraints.get(field) for field in ("meal_suitability", "portion_size", "leftover_friendly")):
+        rules.append(MEAL_PORTION_RULES)
+    if any(constraints.get(field) for field in (
+        "preparation_mode", "preparation_position", "hand_effort", "avoid_steam", "avoid_splatter",
+    )) or constraints.get("time_max_minutes") is not None:
+        rules.append(PREPARATION_RULES)
+    if constraints.get("serving_temperature"):
+        rules.append(SERVING_TEMPERATURE_RULES)
+    return "\n".join(rules)

@@ -192,8 +192,9 @@ class PreparationValidationTests(unittest.TestCase):
 
     def test_shared_rules_reach_both_verification_prompts_and_intent(self):
         verifier = RecipeVerifier()
-        self.assertIn(PREPARATION_RULES, verifier._build_batch_verification_prompt([], {}))
-        self.assertIn(PREPARATION_RULES, verifier._build_individual_verification_prompt({}, {}))
+        intent = {"constraints": {"preparation_mode": "no_heat"}}
+        self.assertIn(PREPARATION_RULES, verifier._build_batch_verification_prompt([], intent))
+        self.assertIn(PREPARATION_RULES, verifier._build_individual_verification_prompt({}, intent))
         self.assertIn(PREPARATION_RULES, IntentAnalyzer()._build_intent_prompt("no heat"))
 
     def routing_service(self, candidates):
