@@ -720,6 +720,55 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual([recipe["name"] for recipe in references], ["Second Recipe"])
         self.service.search_engine.multi_query_search.assert_not_called()
 
+    def test_simplification_generates_changed_card_without_search_or_extra_tips(self):
+        original = recipe_record("Sheet Pan Roasted Vegetables and Beans")
+        saved_original = copy.deepcopy(original)
+        simplified = recipe_record("Simplified Sheet Pan Vegetables and Beans", generated=True)
+        simplified["ingredients"] = ["4 cups purchased pre-cut vegetables", "1 can white beans", "1 tbsp olive oil"]
+        simplified["instructions"] = ["Toss everything on a sheet pan. Roast at 400 F until tender, 35-40 minutes."]
+        analyzer = IntentAnalyzer()
+        parsed = analyzer._get_fallback_intent_data(original["name"])
+        parsed["query_type"] = "recipe_search"
+        analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))))
+        self.service.intent_analyzer = analyzer
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [simplified]
+        history = [
+            {"role": "user", "content": "heet Pan Roasted Vegetables and Beans"},
+            {"role": "assistant", "content": "Here is your recipe", "recipes": [original]},
+        ]
+        result = self.ask("Can you simplify this recipe even more?", history)
+        self.assertEqual(result["matches_found"], 1)
+        self.assertEqual(result["source_documents"][0]["source_label"], "AI Generated")
+        self.assertEqual(result["source_documents"][0]["name"], simplified["name"])
+        references = self.service.recipe_enhancer.generate_fallback_recipes.call_args.kwargs["grounding_recipes"]
+        self.assertEqual(references, [saved_original])
+        self.assertEqual(original, saved_original)
+        self.service.search_engine.multi_query_search.assert_not_called()
+        self.service.search_engine.rerank_with_constraint_filtering.assert_not_called()
+        self.service._get_database_search_candidates.assert_not_called()
+        self.service.recipe_enhancer.batch_enhance_recipes.assert_not_called()
+        assessed_names = [recipe["name"] for call in self.service.recipe_verifier.batch_verify_recipes.call_args_list
+                          for recipe in call.args[0]]
+        self.assertNotIn(original["name"], assessed_names)
+
+    def test_adaptation_of_already_matching_reference_still_requires_generation(self):
+        original = recipe_record("Original Recipe")
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update({
+            "query_type": "recipe_adaptation", "referenced_recipe_ids": [original["recipe_id"]],
+        })
+        result = self.ask("Modify this recipe", [{"role": "assistant", "content": "Original", "recipes": [original]}])
+        self.assertEqual(result["source"], "llm_generated")
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_called_once()
+
+    def test_missing_simplification_target_clarifies_instead_of_small_talk(self):
+        self.service.intent_analyzer = IntentAnalyzer()
+        self.service._is_small_talk_query = RecipeRAGService._is_small_talk_query.__get__(self.service)
+        result = self.ask("Make it simpler", [])
+        self.assertEqual(result["source"], "recipe_follow_up")
+        self.assertIn("Which recipe", result["response"])
+        self.service.search_engine.multi_query_search.assert_not_called()
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+
     def test_context_resolution_failure_does_not_search_without_previous_constraints(self):
         self.service.intent_analyzer.understand_query_intent_with_context.return_value["context_resolution_failed"] = True
         result = self.ask("without onions", [{"role": "user", "content": "Vegetarian dinners"}])

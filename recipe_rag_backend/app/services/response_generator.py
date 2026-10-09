@@ -87,6 +87,32 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
         try:
             recipe_count = len(source_docs)
             constraints = intent_data.get("constraints", {})
+            gentle = constraints.get("digestive_comfort") == "gentle"
+            low_exertion = constraints.get("preparation_effort") == "low"
+            if gentle or low_exertion:
+                noun = "recipe" if recipe_count == 1 else "recipes"
+                focus = "mildly seasoned, lower-effort" if gentle and low_exertion else "mildly seasoned" if gentle else "lower-effort"
+                lines = [f"Here {'is' if recipe_count == 1 else 'are'} {recipe_count} {focus} {noun} to consider:"]
+                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.append("Open a card for the ingredients, starting ingredient forms, and preparation steps.")
+                if gentle:
+                    lines.append(
+                        "Food tolerance varies; I can't confirm what is medically safe for the cause of an upset stomach. "
+                        "Try a small portion of foods you normally tolerate and follow your care team's advice. "
+                        "If symptoms are severe or persistent, or you can't keep fluids down, contact your care team."
+                    )
+                if low_exertion:
+                    lines.append(
+                        "Choose only preparation you can comfortably manage. Don't push through cooking if you feel weak or unsteady; "
+                        "rest or ask for help rather than handle hot or heavy cookware. Discuss new or worsening weakness with your care team."
+                    )
+                return "\n".join(lines)
+            if intent_data.get("adaptation_request", {}).get("operation") == "simplify":
+                noun = "version" if recipe_count == 1 else "versions"
+                lines = [f"Here {'is a' if recipe_count == 1 else 'are'} simplified {noun} of the selected {'recipe' if recipe_count == 1 else 'recipes'}:"]
+                lines.extend(f"• {recipe['name']}: {recipe.get('description', '')}" for recipe in source_docs)
+                lines.append("This is an AI-generated adaptation. Open the card for the complete ingredients and steps.")
+                return "\n".join(lines)
             constraint_mentions = []
             
             if constraints.get("max_ingredients"):
@@ -267,6 +293,17 @@ Avoid medical terminology or health condition references.
     def generate_helpful_no_results_message(self, query: str, intent_data: Dict[str, Any]) -> str:
         """Generate a helpful message when no recipes can be found or generated"""
         constraints = intent_data.get("constraints", {})
+        if constraints.get("digestive_comfort") == "gentle":
+            return (
+                "I couldn't find a recipe meeting all your requirements right now, and I can't establish medical safety "
+                "from an upset-stomach description alone. Which foods do you usually tolerate? "
+                "For severe or persistent symptoms, or if you can't keep fluids down, contact your care team."
+            )
+        if constraints.get("preparation_effort") == "low":
+            return (
+                "I couldn't verify a recipe with sufficiently low preparation effort for your request right now. "
+                "Would simple assembly with ready-to-eat ingredients work for you? Don't push through cooking if you feel weak or unsteady."
+            )
         if constraints.get("preparation_position") == "seated":
             return (
                 "I couldn't verify a meal whose complete preparation works at a seated workspace right now. "

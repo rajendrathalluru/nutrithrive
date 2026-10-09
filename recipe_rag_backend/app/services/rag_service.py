@@ -17,6 +17,9 @@ from app.services.response_generator import ResponseGenerator
 from app.services.safety_service import safety_service
 from app.services.conversation_scope import scope_recipe_history
 from app.services.equipment_validation import equipment_usage_evidence
+from app.services.digestive_comfort import digestive_tolerance_cautions
+from app.services.preparation_validation import audit_preparation_effort
+from app.services.recipe_follow_up import resolve_simplification
 
 logger = logging.getLogger(__name__)
 MAX_RECIPES_PER_RESPONSE = 3
@@ -100,6 +103,7 @@ class RecipeRAGService:
         terms = {term for term in terms if len(term) > 2}
         meal_types = intent_data.get("preferences", {}).get("meal_types", [])
         equipment = intent_data.get("constraints", {}).get("equipment_required", [])
+        low_exertion = intent_data.get("constraints", {}).get("preparation_effort") == "low"
         ranked = []
         for _, row in self.data_loader.df.iterrows():
             record = row.to_dict()
@@ -124,10 +128,14 @@ class RecipeRAGService:
             equipment_matches = len(equipment_usage_evidence(
                 {"instructions": str(record.get("Directions", "")).splitlines()}, equipment
             )) if equipment else 0
+            effort_conflicts = len(audit_preparation_effort({
+                "ingredients": str(record.get("Ingredients", "")).splitlines(),
+                "instructions": str(record.get("Directions", "")).splitlines(),
+            })) if low_exertion else 0
             if score or equipment_matches:
-                ranked.append((equipment_matches, score, record))
-        ranked.sort(key=lambda item: item[:2], reverse=True)
-        return [self._build_recipe_data_from_record(record) for _, _, record in ranked[:limit]]
+                ranked.append((-effort_conflicts, equipment_matches, score, record))
+        ranked.sort(key=lambda item: item[:3], reverse=True)
+        return [self._build_recipe_data_from_record(record) for _, _, _, record in ranked[:limit]]
 
     def _verify_candidates(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
@@ -141,7 +149,11 @@ class RecipeRAGService:
             if recipe.get("verification_details", {}).get("passes_verification") is True
             and recipe.get("verification_details", {}).get("relevance") == "match"
         ]
-        return self._apply_deterministic_constraints(matches, intent_data)
+        matches = self._apply_deterministic_constraints(matches, intent_data)
+        if matches and intent_data.get("constraints", {}).get("digestive_comfort") == "gentle":
+            least_cautions = min(len(digestive_tolerance_cautions(recipe)) for recipe in matches)
+            matches = [recipe for recipe in matches if len(digestive_tolerance_cautions(recipe)) == least_cautions]
+        return matches
 
     def _verify_new_generated_recipes(
         self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any], excluded_names: set[str]
@@ -214,6 +226,10 @@ class RecipeRAGService:
         ])
         if not baseline:
             return []
+        if (intent_data.get("adaptation_request", {}).get("operation") == "simplify"
+                or intent_data.get("constraints", {}).get("digestive_comfort") == "gentle"
+                or intent_data.get("constraints", {}).get("preparation_effort") == "low"):
+            return baseline
         originals = {self._get_recipe_identity(recipe): recipe for recipe in baseline}
         try:
             enhanced = self.recipe_enhancer.batch_enhance_recipes(deepcopy(baseline), deepcopy(intent_data))
@@ -551,7 +567,8 @@ class RecipeRAGService:
             references_previous_recipe = bool(conversation_recipes) and bool(re.search(
                 r"\b(it|them|those|these|that|first|second|third|one|ones)\b", query, re.IGNORECASE
             ))
-            if self._is_small_talk_query(query) and not references_previous_recipe:
+            simplification_request = resolve_simplification(query, recipe_history) is not None
+            if self._is_small_talk_query(query) and not references_previous_recipe and not simplification_request:
                 logger.info("Detected small-talk query, returning conversational response")
                 return self._build_small_talk_response(query, mode, conversation_history)
 
@@ -616,11 +633,11 @@ class RecipeRAGService:
             logger.info(f"Search complete: {time.time() - start_time:.2f}s, found {len(docs)} docs")
             
             # Step 3: Reranking
-            reranked_docs = self.search_engine.rerank_with_constraint_filtering(docs, effective_query, intent_data, top_k=settings.SEARCH_K)
+            reranked_docs = [] if is_recipe_adaptation else self.search_engine.rerank_with_constraint_filtering(docs, effective_query, intent_data, top_k=settings.SEARCH_K)
             logger.info(f"Reranking complete: {time.time() - start_time:.2f}s, {len(reranked_docs)} docs")
             
             # Step 4: Extract recipe details
-            candidate_recipes = referenced_recipes if is_recipe_adaptation else []
+            candidate_recipes = []
             for doc in reranked_docs:
                 try:
                     candidate_recipes.append(self._build_recipe_data_from_doc(doc))
@@ -706,7 +723,8 @@ class RecipeRAGService:
                         "source_documents": []
                     }
             
-            source_docs = self._enhance_verified_recipes(source_docs[:MAX_RECIPES_PER_RESPONSE], intent_data)
+            recipe_limit = min(MAX_RECIPES_PER_RESPONSE, len(referenced_recipes)) if is_recipe_adaptation else MAX_RECIPES_PER_RESPONSE
+            source_docs = self._enhance_verified_recipes(source_docs[:recipe_limit], intent_data)
             source_docs = self._deduplicate_recipes(source_docs)
             source_docs = self._apply_deterministic_constraints(source_docs, intent_data)
             source_docs = self._annotate_recipe_source_tiers(source_docs)

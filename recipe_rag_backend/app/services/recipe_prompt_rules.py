@@ -1,3 +1,6 @@
+from app.services.recipe_follow_up import SIMPLIFICATION_RULES
+
+
 REQUEST_MEANING_RULES = """Interpret the request without silently strengthening it.
 If user_request_context is supplied, it contains user turns in chronological order. Retain the active
 user goals when selecting ingredients or asking for more, even if the resolved query omits a goal.
@@ -176,6 +179,42 @@ Preserve explicit exclusions and active restrictions in follow-ups; newer user c
 If a database recipe needs changes, retain it only as an adaptation reference, not an unchanged match.
 """
 
+DIGESTIVE_COMFORT_RULES = """An upset/sensitive stomach or nausea request calls for cautious, mildly seasoned food
+options, not medical clearance. Set digestive_comfort='gentle'; do not infer reflux, diarrhea, an allergy,
+swallowing difficulty, a cancer diagnosis, or a prescribed restrictive diet from this vague symptom.
+General nutrition benefits do not establish digestive tolerance. Prioritize plain rice/noodles/potatoes,
+tender cooked vegetables, broth-based preparations, and tolerated lean proteins. These are alternatives,
+not mandatory ingredients or a permanent low-fiber diet. Do not impose arbitrary protein/calorie targets.
+Evaluate actual amounts, ingredients, cooking, garnishes, tips and adaptations. Reject hot chili seasonings
+and deep-frying as default gentle options. Bean-heavy chili/soups and heavily seasoned dishes are poor
+defaults when tolerance is unknown, even when they are nutritious. Mark these adaptable, not unchanged matches.
+Do not blanket-ban tomatoes, lemon, dairy, every legume, or every spice: preparation, amounts and individual
+tolerance matter. A little pepper in an otherwise plain meal is not equivalent to several tablespoons of chili powder.
+Do not call a soup gentle just because it is soup. If suitability cannot be supported as written, mark unknown
+and adaptable. Generate a complete, clearly labeled adaptation when ingredients or method must change.
+Keep safety/doneness requirements; do not omit necessary cooking. Never claim a recipe cures symptoms,
+is universally safe, or replaces clinical advice. Summaries must acknowledge variable tolerance and
+recommend contacting the care team for severe/persistent symptoms or inability to keep fluids down.
+"""
+
+LOW_EXERTION_RULES = """For cooking with body weakness, fatigue, or little energy, set preparation_effort='low'.
+This means less TOTAL physical preparation work, not just a short ingredient list, a healthy dish, low skill,
+or a long passive cook. Do not infer weak hands, inability to stand, a no-heat restriction, a time limit,
+or a diagnosis. Those are independent requirements and must be explicitly supported by the user.
+Do not impose small portions or a meals-only restriction when the user has only asked for recipes.
+Check hidden preparation in ingredient lines as well as every instruction: chopping, peeling, shredding,
+raw-component preparation, multiple pans, sustained stirring, heavy cookware, hot draining/transfers,
+and cleanup. 'Apples, diced' does not establish purchased diced apples. A no-cook salad can still be laborious.
+Prefer simple assembly or brief reheating with explicitly purchased/pre-cut/ready-to-eat components and
+light, manageable dishes. Brief cooking or light cutting can qualify; do not require zero cooking or zero cutting.
+A long passive wait alone is not a violation. Assess the actual active effort rather than inventing a minute cap.
+Source recipes requiring changes remain adaptation references, not matches. Never silently pretend the
+source called for pre-cut vegetables. Generated adaptations must explicitly state convenient starting forms.
+Avoid promoting strenuous batch cooking or heavy-pot meal prep in tips. Do not assume a helper or adaptive
+equipment. Explain setup assumptions rather than claiming universal accessibility or a cure for weakness.
+Do not echo 'push through' as advice: if weak or unsteady, rest or seek help rather than handling hot/heavy items.
+"""
+
 EQUIPMENT_RULES = """A request to make meals with/in/using an appliance requires actually using it in preparation.
 Put it in equipment_required. Merely owning equipment, an optional alternative, or an explicit exclusion
 does not make it required. equipment_only limits allowed appliances ONLY when the user explicitly says only;
@@ -243,6 +282,12 @@ Summaries must identify portioning and supplied storage guidance without adding 
 def active_recipe_rules(intent_data: dict) -> str:
     constraints = intent_data.get("constraints", {})
     rules = [REQUEST_MEANING_RULES]
+    if intent_data.get("adaptation_request", {}).get("operation") == "simplify":
+        rules.append(SIMPLIFICATION_RULES)
+    if constraints.get("digestive_comfort") == "gentle":
+        rules.append(DIGESTIVE_COMFORT_RULES)
+    if constraints.get("preparation_effort") == "low":
+        rules.append(LOW_EXERTION_RULES)
     if constraints.get("equipment_required") or constraints.get("equipment_only"):
         rules.append(EQUIPMENT_RULES)
     storage = constraints.get("ingredient_storage")

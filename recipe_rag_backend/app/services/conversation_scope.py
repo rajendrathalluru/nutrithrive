@@ -18,6 +18,7 @@ DISCOVERY = re.compile(
     r"\b(?:what|which)\s+(?:(?:are|would be)\s+)?(?:some\s+)?(?:(?:kinds?|types?) of\s+)?"
     r"(?:foods?|recipes?|meals?|dishes?|dinners?|lunch(?:es)?|breakfasts?)\b|"
     r"\bwhat (?:can|could|should) (?:i|we) (?:make|cook|prepare|eat|assemble)\b|"
+    r"\bwhat (?:is|would be) safe to (?:cook|make|prepare|eat)\b|"
     r"\b(?:show|give|find|suggest|recommend|provide|generate|list)\b[^.!?]{0,60}"
     r"\b(?:recipes?|meals?|dishes?|dinners?|lunch(?:es)?|breakfasts?|foods?)\b|"
     r"\bhelp me (?:to )?(?:prepare|make|cook|assemble)\b|"

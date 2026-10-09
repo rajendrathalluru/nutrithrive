@@ -41,6 +41,19 @@ def explicit_hand_effort(query: str) -> str | None:
     return None
 
 
+def explicit_preparation_effort(query: str) -> str | None:
+    text = query.lower().replace("’", "'")
+    if re.search(r"\b(?:(?:drop|remove) (?:the )?(?:low[- ]effort|low[- ]exertion) (?:requirement|restriction)|"
+                 r"(?:no longer|not) (?:feeling )?(?:weak|fatigued|exhausted)|(?:energy|strength) (?:is )?back to normal)\b", text):
+        return "unrestricted"
+    if re.search(r"\b(?:body weakness|physically weak|(?:feel|feeling|am) (?:very |too )?weak|"
+                 r"fatigued?|exhausted|too tired to (?:cook|prepare|make)|"
+                 r"(?:little|low|limited|not much) energy (?:to|for) (?:cook|cooking|prepare|preparing)|"
+                 r"(?:minimal|low|little) (?:physical effort|exertion))\b", text):
+        return "low"
+    return None
+
+
 def explicit_preparation_constraints(query: str) -> Dict[str, Any]:
     text = query.lower().replace("’", "'")
     constraints = {}
@@ -256,6 +269,8 @@ def _audit_time(recipe: Dict[str, Any], constraints: Dict[str, Any], check: Any)
 
 def audit_preparation(recipe: Dict[str, Any], constraints: Dict[str, Any], assessment: Dict[str, Any]) -> List[str]:
     problems = []
+    if constraints.get("preparation_effort") == "low":
+        problems.extend(audit_preparation_effort(recipe))
     if constraints.get("preparation_position") == "seated":
         problems.extend(audit_seated_preparation(recipe, assessment.get("seated_preparation_check")))
     if constraints.get("hand_effort") == "low":
@@ -309,6 +324,39 @@ def audit_preparation(recipe: Dict[str, Any], constraints: Dict[str, Any], asses
         else:
             problems.append("Invalid numeric time requirement")
     return list(dict.fromkeys(problems))
+
+
+def audit_preparation_effort(recipe: Dict[str, Any]) -> List[str]:
+    manual_prep = re.compile(r"\b(?:cut|pit(?:ted)?|chop(?:ped)?|dic(?:e|ed)|slic(?:e|ed)|shred(?:ded)?|minc(?:e|ed)|peel(?:ed)?|grat(?:e|ed))\b", re.I)
+    prepared_form = re.compile(r"\b(?:pre[- ]?(?:cut|chopped|diced|sliced|shredded|peeled|minced)|"
+                               r"store[- ]bought|purchased|packaged|ready[- ]to[- ]use|frozen|canned|jarred)\b", re.I)
+    ingredients = recipe.get("ingredients") or []
+    if isinstance(ingredients, str):
+        ingredients = ingredients.splitlines()
+    prep_lines = [str(line) for line in ingredients if manual_prep.search(str(line))
+                  and not prepared_form.search(str(line)) and not re.search(r"\boptional\b", str(line), re.I)]
+    problems = []
+    if len(prep_lines) >= 3:
+        problems.append("Low-exertion request has multiple unaccounted chopping/preparation tasks: " + "; ".join(prep_lines))
+    for line in prep_lines:
+        if re.search(r"\b(?:rutabaga|swede|butternut|pumpkin|acorn squash)\b", line, re.I):
+            problems.append(f"Low-exertion request requires cutting dense whole produce rather than purchased prepared pieces: {line}")
+    instructions = recipe.get("instructions") or []
+    instructions = instructions if isinstance(instructions, str) else " ".join(str(line) for line in instructions)
+    if re.search(r"\b(?:cast[- ]iron|heavy (?:pot|pan|skillet)|dutch oven)\b", instructions, re.I) and re.search(
+        r"\b(?:remove|transfer|lift|carry|place|return)\b[^.!?]{0,75}\b(?:oven|stove|rack)\b", instructions, re.I,
+    ):
+        problems.append("Low-exertion request requires moving heavy cookware between cooking surfaces")
+    sustained_work = re.compile(r"\b(?:stir|whisk|beat)\s+(?:constantly|continuously|vigorously)|"
+                               r"\b(?:knead|pound|assembly[- ]line|breading station|dredge|dredging|dip each|bread each)\b", re.I)
+    if re.search(r"\b(?:dip|coat)\b[^.!?]{0,250}\b(?:egg|cornstarch|panko|breadcrumbs?)\b", instructions, re.I) and re.search(
+        r"\b(?:repeat|batches)\b", instructions, re.I,
+    ):
+        problems.append("Low-exertion request requires repeated multi-stage coating or breading")
+    for field, index, line in _guidance_lines(recipe):
+        if _positive_action(line, sustained_work):
+            problems.append(f"Low-exertion request conflicts with sustained manual work in {field}[{index}]: {line}")
+    return problems
 
 
 def _audit_preparation_steps(recipe: Dict[str, Any], assessment: Any, label: str) -> List[str]:
