@@ -10,6 +10,8 @@ from app.services.pantry_validation import audit_pantry_ingredients, audit_canne
 from app.services.chewing_validation import audit_chewing_assessment
 from app.services.preparation_validation import audit_preparation, declared_time_check
 from app.services.serving_temperature import audit_serving_temperature
+from app.services.required_ingredients import missing_required_ingredients
+from app.services.equipment_validation import audit_equipment
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +97,11 @@ For other requests ingredient_storage_check may be null.
         for section in ("constraints", "preferences", "cancer_patient_specific"):
             for key, value in intent_data.get(section, {}).items():
                 if value is not None and value is not False and value not in ("", [], {}):
-                    checks[f"{section}.{key}"] = value
+                    if section == "constraints" and key in {"ingredients_must_use", "equipment_required"} and isinstance(value, list):
+                        for index, ingredient in enumerate(value):
+                            checks[f"constraints.{key}[{index}]"] = ingredient
+                    else:
+                        checks[f"{section}.{key}"] = value
         criteria = intent_data.get("search_strategy", {}).get("must_match_criteria")
         if criteria:
             checks["search_strategy.must_match_criteria"] = criteria
@@ -215,6 +221,8 @@ Mark unknown and adaptable when the final texture cannot be established from the
 {texture_contract}
 {preparation_contract}
 For each check, status must be pass, fail, or unknown, with concise evidence from the recipe.
+Each indexed ingredients_must_use check is mandatory on its own: identify that ingredient in the actual
+ingredient list and preparation. Matching just one of several required ingredients is not a pass for the others.
 The recipe_request check covers the user's actual requested properties, even when no named constraints
 were extracted. Judge the recipe as written, not just whether it is generally nutritious or easy.
 If the request is unsupported or unmet, mark that check unknown or fail; do not leave it pass while
@@ -251,6 +259,27 @@ Example shape (replace all example values with your assessment, never copy examp
             elif check["status"] != "pass":
                 violations.append(f"{key}: {check['evidence']}")
         verification["constraint_checks"] = checks
+        equipment_problems = audit_equipment(recipe, intent_data.get("constraints", {}))
+        if equipment_problems:
+            violations.extend(equipment_problems)
+            if verification.get("relevance") == "match":
+                verification["relevance"] = "adaptable"
+        if intent_data.get("constraints", {}).get("meal_suitability") == "meal":
+            categories = [category.strip().lower() for category in re.split(r"[,|/]", str(recipe.get("type", ""))) if category.strip()]
+            side_categories = {"side dish", "side dishes", "appetizer", "appetizers", "snack", "snacks",
+                               "condiment", "condiments", "sauce", "sauces", "dessert", "desserts"}
+            if categories and all(category in side_categories for category in categories):
+                violations.append("Recipe is categorized only as a side, snack, or accompaniment, not a meal as written")
+                if verification.get("relevance") == "match":
+                    verification["relevance"] = "adaptable"
+        required = intent_data.get("constraints", {}).get("ingredients_must_use") or []
+        if isinstance(required, str):
+            required = [required]
+        missing = missing_required_ingredients(recipe, required)
+        if missing:
+            violations.extend(f"Required ingredient missing from ingredient list: {ingredient}" for ingredient in missing)
+            if verification.get("relevance") == "match":
+                verification["relevance"] = "unrelated" if len(missing) == len(required) else "adaptable"
         verification["constraint_violations"] = list(dict.fromkeys(str(value) for value in violations))
         verification["passes_verification"] = verification.get("relevance") == "match" and not violations
         verification = self._enforce_storage_check(verification, intent_data, recipe)

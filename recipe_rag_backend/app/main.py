@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from app.models.schemas import (
     RecipeRequest, 
@@ -37,6 +37,7 @@ class ChatMessage(BaseModel):
     role: str
     content: str
     recipes: Optional[List[Dict[str, Any]]] = None
+    context_action: Optional[Literal["new_request", "continue_request"]] = None
 
     @field_validator("role")
     @classmethod
@@ -313,12 +314,9 @@ async def ask_question(request: ConversationQueryRequest):  # UPDATED: Use new r
             conversation_history=conv_history  # NEW: Pass conversation history
         )
         
-        # Add conversation context info to response
-        if conv_history:
-            response_data["conversation_context_used"] = True
-            response_data["previous_messages_considered"] = len(conv_history)
-        else:
-            response_data["conversation_context_used"] = False
+        context_used = bool(conv_history) and response_data.get("intent_analysis", {}).get("context_action") != "new_request"
+        response_data.setdefault("conversation_context_used", context_used)
+        response_data.setdefault("previous_messages_considered", len(conv_history) if context_used else 0)
         
         # Log what we're returning
         logger.info(f"Returning {response_data.get('matches_found', 0)} recipes")

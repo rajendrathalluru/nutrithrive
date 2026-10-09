@@ -633,6 +633,46 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual(self.service.search_engine.multi_query_search.call_args.args[0], resolved)
         self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_args.args[0], resolved)
 
+    def test_new_ingredient_request_does_not_use_old_time_limit_or_time_summary(self):
+        query = "What can I make with barley, tofu and spinach?"
+        old_query = "Show recipes under 20 minutes"
+        analyzer = IntentAnalyzer()
+        parsed = analyzer._get_fallback_intent_data(query)
+        parsed["constraints"]["ingredients_must_use"] = ["barley", "tofu", "spinach"]
+        analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))))
+        self.service.intent_analyzer = analyzer
+        recipe = recipe_record("Barley Tofu Spinach Bowl")
+        recipe["ingredients"] = ["1 cup barley", "1 cup tofu", "2 cups spinach"]
+        self.service.search_engine.multi_query_search.return_value = [recipe]
+        self.service.response_generator = ResponseGenerator()
+        self.service.response_generator.initialize(Mock(predict=Mock(return_value="A barley, tofu and spinach bowl.")))
+
+        result = self.ask(query, [{"role": "user", "content": old_query}])
+
+        self.assertNotIn(old_query, analyzer.llm.predict.call_args.args[0])
+        self.assertIsNone(result["intent_analysis"]["constraints"]["time_max_minutes"])
+        self.assertFalse(result["conversation_context_used"])
+        self.assertEqual(result["previous_messages_considered"], 0)
+        self.assertNotIn("time check", result["response"])
+        self.assertEqual(result["source"], "database_exact")
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+
+    def test_more_only_excludes_recipes_from_active_task(self):
+        older_recipe = recipe_record("Barley Bowl")
+        recent_recipe = recipe_record("Spinach Bowl")
+        self.service.search_engine.multi_query_search.return_value = [older_recipe, recent_recipe]
+        history = [
+            {"role": "user", "content": "Show recipes under 20 minutes"},
+            {"role": "assistant", "content": "Old results", "recipes": [older_recipe]},
+            {"role": "user", "content": "What can I make with barley, tofu and spinach?"},
+            {"role": "assistant", "content": "New results", "recipes": [recent_recipe], "context_action": "new_request"},
+        ]
+        result = self.ask("more recipes", history)
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["Barley Bowl"])
+        sent_history = self.service.intent_analyzer.understand_query_intent_with_context.call_args.args[1]
+        self.assertEqual(sent_history[0], history[2])
+        self.assertEqual(sent_history[1]["context_action"], "new_request")
+
     def test_recipe_question_answers_from_referenced_recipe_without_search(self):
         recipe = recipe_record("Soup")
         self.service._is_small_talk_query = RecipeRAGService._is_small_talk_query.__get__(self.service)

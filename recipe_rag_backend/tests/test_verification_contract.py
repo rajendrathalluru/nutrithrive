@@ -128,6 +128,23 @@ class VerificationContractTests(unittest.TestCase):
         }
         self.assertTrue(self.verify(assessment, intent)["passes_verification"])
 
+    def test_each_explicitly_required_ingredient_needs_its_own_check(self):
+        intent = {"constraints": {"ingredients_must_use": ["barley", "tofu", "spinach"]}}
+        checks = RecipeVerifier()._required_checks(intent)
+        self.assertEqual(checks, {
+            "constraints.ingredients_must_use[0]": "barley",
+            "constraints.ingredients_must_use[1]": "tofu",
+            "constraints.ingredients_must_use[2]": "spinach",
+        })
+        assessment = {
+            "relevance": "match", "constraint_violations": [],
+            "constraint_checks": {"constraints.ingredients_must_use[1]": {"status": "pass", "evidence": "Tofu is present."}},
+        }
+        result = self.verify(assessment, intent)
+        self.assertFalse(result["passes_verification"])
+        self.assertTrue(any("ingredients_must_use[0]" in violation for violation in result["constraint_violations"]))
+        self.assertTrue(any("ingredients_must_use[2]" in violation for violation in result["constraint_violations"]))
+
     def test_attention_is_verified_against_instructions_not_total_time(self):
         intent = {"constraints": {"attention_level": "low"}}
         assessment = {

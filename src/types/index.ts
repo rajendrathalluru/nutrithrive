@@ -59,6 +59,7 @@ export interface ChatMessage {
   role: string;
   content: string;
   recipes?: Array<Record<string, any>>;
+  context_action?: 'new_request' | 'continue_request';
 }
 
 export interface QueryRequest {

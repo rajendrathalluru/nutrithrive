@@ -15,6 +15,8 @@ from app.services.recipe_enhancer import RecipeEnhancer
 from app.services.search_engine import SearchEngine
 from app.services.response_generator import ResponseGenerator
 from app.services.safety_service import safety_service
+from app.services.conversation_scope import scope_recipe_history
+from app.services.equipment_validation import equipment_usage_evidence
 
 logger = logging.getLogger(__name__)
 MAX_RECIPES_PER_RESPONSE = 3
@@ -97,6 +99,7 @@ class RecipeRAGService:
         terms = set(re.findall(r"[a-z0-9]+", search_text.lower())) - generic_terms
         terms = {term for term in terms if len(term) > 2}
         meal_types = intent_data.get("preferences", {}).get("meal_types", [])
+        equipment = intent_data.get("constraints", {}).get("equipment_required", [])
         ranked = []
         for _, row in self.data_loader.df.iterrows():
             record = row.to_dict()
@@ -118,10 +121,13 @@ class RecipeRAGService:
                 score += 3
             if intent_data.get("constraints", {}).get("leftover_friendly"):
                 score += self.search_engine.storage_evidence_score(content)
-            if score:
-                ranked.append((score, record))
-        ranked.sort(key=lambda item: item[0], reverse=True)
-        return [self._build_recipe_data_from_record(record) for _, record in ranked[:limit]]
+            equipment_matches = len(equipment_usage_evidence(
+                {"instructions": str(record.get("Directions", "")).splitlines()}, equipment
+            )) if equipment else 0
+            if score or equipment_matches:
+                ranked.append((equipment_matches, score, record))
+        ranked.sort(key=lambda item: item[:2], reverse=True)
+        return [self._build_recipe_data_from_record(record) for _, _, record in ranked[:limit]]
 
     def _verify_candidates(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
@@ -305,6 +311,10 @@ class RecipeRAGService:
         for message in conversation_history or []:
             if not isinstance(message, dict) or str(message.get("role", "")).lower() != "assistant":
                 continue
+
+            for recipe in message.get("recipes", []):
+                if isinstance(recipe, dict) and recipe.get("name"):
+                    shown_names.add(self._normalize_recipe_name(recipe["name"]))
 
             content = str(message.get("content", ""))
             for line in content.splitlines():
@@ -534,7 +544,10 @@ class RecipeRAGService:
                 logger.info("Detected PHI-like content, returning privacy redirect response")
                 return self._build_phi_redirect_response(query, mode, conversation_history)
 
-            conversation_recipes = self._get_conversation_recipes(conversation_history)
+            recipe_history, _ = scope_recipe_history(
+                query, self.intent_analyzer._sanitize_conversation_history(conversation_history or [])
+            )
+            conversation_recipes = self._get_conversation_recipes(recipe_history)
             references_previous_recipe = bool(conversation_recipes) and bool(re.search(
                 r"\b(it|them|those|these|that|first|second|third|one|ones)\b", query, re.IGNORECASE
             ))
@@ -543,16 +556,16 @@ class RecipeRAGService:
                 return self._build_small_talk_response(query, mode, conversation_history)
 
             is_more_request = self._is_more_recipes_query(query)
-            previous_recipe_request = self._get_previous_recipe_request(conversation_history)
+            previous_recipe_request = self._get_previous_recipe_request(recipe_history)
             recipe_request_query = previous_recipe_request if is_more_request and previous_recipe_request else query
-            previously_shown_names = self._get_previously_shown_recipe_names(conversation_history)
+            previously_shown_names = self._get_previously_shown_recipe_names(recipe_history)
             excluded_names = previously_shown_names if is_more_request else set()
-            intent_history = conversation_history
+            intent_history = recipe_history
             if is_more_request:
                 intent_history = [
-                    ({"role": "assistant", "content": "Previously shown recipe reference data.", "recipes": message["recipes"]}
+                    ({**message, "content": "Previously shown recipe reference data."}
                      if message.get("role") == "assistant" and message.get("recipes") else message)
-                    for message in (conversation_history or [])
+                    for message in recipe_history
                     if isinstance(message, dict)
                     and message.get("role") in {"user", "assistant"}
                 ]
@@ -566,6 +579,7 @@ class RecipeRAGService:
                 )
             recipe_request_query = str(intent_data.get("resolved_query") or recipe_request_query)
             intent_data = {**intent_data, "recipe_request": self._normalize_recipe_request(recipe_request_query)}
+            context_used = bool(recipe_history) and intent_data.get("context_action") != "new_request"
             query_type = intent_data.get("query_type")
             reference_ids = intent_data.get("referenced_recipe_ids") or []
             referenced_recipes = [recipe for recipe in conversation_recipes if recipe["recipe_id"] in reference_ids]
@@ -591,7 +605,7 @@ class RecipeRAGService:
                 return {
                     **self._build_context_reply(query, mode, intent_data, response),
                     "source": "food_guidance",
-                    "conversation_context_used": bool(conversation_history),
+                    "conversation_context_used": context_used,
                 }
             is_recipe_adaptation = query_type == "recipe_adaptation"
             logger.info(f"Intent analysis: {time.time() - start_time:.2f}s")
@@ -744,8 +758,8 @@ class RecipeRAGService:
                 "performance": {
                     "total_time_seconds": round(total_time, 2)
                 },
-                "conversation_context_used": conversation_history is not None and len(conversation_history) > 0,
-                "previous_messages_considered": len(conversation_history) if conversation_history else 0
+                "conversation_context_used": context_used,
+                "previous_messages_considered": len(recipe_history) if context_used else 0
             }
             
         except Exception as e:

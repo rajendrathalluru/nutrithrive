@@ -1,6 +1,7 @@
 import logging
 import json
 import re
+from copy import deepcopy
 from typing import Dict, Any, List, Optional
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, COOKING_ATTENTION_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, FOOD_GUIDANCE_RULES, REQUEST_MEANING_RULES
 from app.services.chewing_validation import explicit_chewing_requirement
@@ -8,6 +9,10 @@ from app.services.preparation_validation import explicit_preparation_constraints
 from app.services.serving_temperature import explicit_serving_temperature, is_temperature_food_guidance
 from app.services.pantry_validation import explicit_canned_requirement, explicit_ingredient_storage
 from app.services.storage_guidance import requests_reheating
+from app.services.conversation_scope import scope_recipe_history
+from app.services.required_ingredients import explicit_ingredient_combination
+from app.services.equipment_validation import explicit_equipment_constraints, normalize_equipment
+from app.services.recipe_prompt_rules import EQUIPMENT_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +52,15 @@ class IntentAnalyzer:
     def understand_query_intent_with_context(self, query: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
         """Enhanced intent analysis with conversation context"""
         if not conversation_history:
-            return self.understand_query_intent(query)
-        
+            return self._understand_independent_request(query)
+        sanitized_history = []
         try:
             sanitized_history = self._sanitize_conversation_history(conversation_history)
+            sanitized_history, new_request = scope_recipe_history(query, sanitized_history)
+            if new_request:
+                return self._understand_independent_request(query)
             if not sanitized_history:
-                return self.understand_query_intent(query)
+                return self._understand_independent_request(query)
 
             # Build conversation context
             context_lines = []
@@ -72,7 +80,7 @@ class IntentAnalyzer:
             
             conversation_context = "\n".join(context_lines)
             
-            enhanced_prompt = f"""{self._build_intent_prompt(query)}
+            enhanced_prompt = f"""{self._build_intent_prompt(query, with_context=True)}
 
 Resolve this request WITH conversation context before filling the intent fields.
 
@@ -88,6 +96,12 @@ Analyze this query considering the conversation history. Extract ALL relevant in
 3. **Search Strategy** (considering the full conversation flow)
 
 Pay special attention to:
+- Each self-contained request is independent, even within this chat. Use context only for a follow-up,
+  refinement, or reference to a previous message. A new ingredient list or a new named dish is a new task
+  unless the user explicitly links it to the earlier request. Do not inherit time limits, dietary preferences,
+  preparation restrictions, or ingredients from a different task.
+- Return context_action='new_request' for a new task or 'continue_request' for a follow-up/reference.
+  If this is a new task, the backend will analyze it independently of this history.
 - Follow-up questions that reference previous recipes
 - Refinements or changes to previous constraints
 - New information that builds on previous context
@@ -110,8 +124,8 @@ Pay special attention to:
   Carry the same resolved meaning into enhanced_query and search_keywords. If the referenced ingredients
   are absent or genuinely ambiguous, use clarification and provide clarification_question rather than guessing.
 - Later explicit changes override earlier preferences; "start over" clears the earlier recipe task.
-  A new dish or cuisine replaces the old dish or cuisine, while user-stated dietary restrictions remain
-  unless explicitly changed. Do not combine conflicting old and new requirements.
+  A refinement such as "Italian instead" retains other requirements within the active task.
+  A standalone new request does not retain any earlier task's requirements.
 - Set query_type to food_guidance for culinary category questions, recipe_search for recipe discovery/refinement, recipe_adaptation for an explicit request
   to modify a shown recipe, recipe_question for questions/comparisons about shown recipes, or clarification
   when a reference is ambiguous. Set referenced_recipe_ids to actual IDs from the reference data, never invented IDs.
@@ -124,6 +138,9 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
 
             response = self.llm.predict(enhanced_prompt)
             intent_data = self._parse_intent_response(response)
+            if intent_data.get("context_action") == "new_request":
+                return self._understand_independent_request(query)
+            intent_data["context_action"] = "continue_request"
             active_temperature = None
             for message in [*sanitized_history, {"role": "user", "content": query}]:
                 if message.get("role") != "user":
@@ -169,7 +186,13 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
             logger.error(f"Error in context-aware intent analysis: {e}")
             fallback_intent = self._get_fallback_intent_data(query)
             fallback_intent["context_resolution_failed"] = True
-            return self._post_process_intent(query, fallback_intent, conversation_history)
+            return self._post_process_intent(query, fallback_intent, sanitized_history)
+
+    def _understand_independent_request(self, query: str) -> Dict[str, Any]:
+        intent = deepcopy(self.understand_query_intent(query))
+        intent["context_action"] = "new_request"
+        intent["user_request_context"] = [query]
+        return intent
 
     def _sanitize_conversation_history(self, conversation_history: List[Any]) -> List[Dict[str, Any]]:
         sanitized: List[Dict[str, Any]] = []
@@ -181,6 +204,8 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
                     message = {"role": role, "content": content}
                     if role == "assistant" and isinstance(msg.get("recipes"), list):
                         message["recipes"] = [recipe for recipe in msg["recipes"] if isinstance(recipe, dict)]
+                    if role == "assistant" and msg.get("context_action") in {"new_request", "continue_request"}:
+                        message["context_action"] = msg["context_action"]
                     sanitized.append(message)
             elif isinstance(msg, str):
                 content = msg.strip()
@@ -188,9 +213,10 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
                     sanitized.append({"role": "user", "content": content})
         return sanitized
     
-    def _build_intent_prompt(self, query: str) -> str:
+    def _build_intent_prompt(self, query: str, with_context: bool = False) -> str:
         """Build the intent analysis prompt"""
         template = self._get_fallback_intent_data("")
+        template["context_action"] = "continue_request" if with_context else "new_request"
         return f"""You are an expert at understanding user recipe queries. Analyze this query and extract ALL relevant information.
 
 User Query: "{query}"
@@ -205,6 +231,9 @@ search_strategy.must_match_criteria rather than silently dropping them.
 Populate resolved_query with a self-contained request, and search_strategy with meaningful retrieval
 terms, not the unchanged pronouns of a follow-up. ingredients_available is a pool of possible main
 ingredients; ingredients_must_use lists individually mandatory ingredients, not every suggested alternative.
+A direct request for a recipe "with X, Y and Z" requires X, Y AND Z: put each in ingredients_must_use.
+Use ingredients_available for explicitly offered alternatives or a flexible pantry inventory, not to weaken
+an explicit ingredient combination. The user need not add the word "all" to a direct ingredient request.
 For example, a request to use pre-cooked ingredients must preserve their already-cooked starting state
 in must_match_criteria; it does not prohibit reheating. Do not invent additional requirements.
 {REQUEST_MEANING_RULES}
@@ -218,6 +247,7 @@ recipes using canned beans, canned vegetables, dry grains, and dried legumes eve
 {CHEWING_RULES}
 {MEAL_PORTION_RULES}
 {PREPARATION_RULES}
+{EQUIPMENT_RULES}
 {SERVING_TEMPERATURE_RULES}
 {FOOD_GUIDANCE_RULES}
 Do not infer ingredient counts, protein targets, storage needs, or medical conditions from recipes
@@ -265,7 +295,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         return bool(re.search(
             r"\b(?:show|give|find|suggest|recommend|provide|generate|list|more)\b[^.!?]{0,60}\b" + foods + r"\b|"
             r"\bhelp me (?:to )?(?:prepare|make|cook|assemble)\b[^.!?]{0,60}\b" + foods + r"\b|"
-            r"\b(?:what|which)\s+(?:are\s+)?(?:some\s+)?(?:(?:kinds?|types?) of\s+)?" + foods + r"\b", text,
+            r"\b(?:what|which)\s+(?:are\s+)?(?:some\s+)?(?:(?:kinds?|types?) of\s+)?" + foods + r"\b|"
+            r"\bwhat (?:can|could|should) (?:i|we) (?:make|cook|prepare|eat|assemble)\b", text,
         ))
     
     def _get_fallback_intent_data(self, query: str) -> Dict[str, Any]:
@@ -373,6 +404,24 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             if isinstance(message, dict) and message.get("role") == "user"
         )
         requirement_requests.append(current_query or query)
+        ingredient_requests = [
+            message.get("content", "") for message in (conversation_history or [])
+            if isinstance(message, dict) and message.get("role") == "user"
+        ] + [current_query or query]
+        for field in ("equipment_required", "equipment_only"):
+            constraints[field] = normalize_equipment(constraints.get(field))
+        equipment_constraints = explicit_equipment_constraints(current_query or query)
+        if conversation_history and not re.search(r"\binstead\b", current_query or query, re.I):
+            constraints["equipment_required"] = self._merge_unique(
+                constraints["equipment_required"], equipment_constraints.get("equipment_required", [])
+            )
+            if equipment_constraints.get("equipment_only"):
+                constraints["equipment_only"] = equipment_constraints["equipment_only"]
+        else:
+            constraints.update(equipment_constraints)
+        available = constraints.get("ingredients_available", [])
+        if any(explicit_ingredient_combination(request, available) for request in ingredient_requests):
+            constraints["ingredients_must_use"] = self._merge_unique(constraints["ingredients_must_use"], available)
         for request in requirement_requests:
             if re.search(r"\b(?:start over|new search|forget (?:the )?previous)\b", request, re.I):
                 constraints["ingredient_storage"] = None

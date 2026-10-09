@@ -76,6 +76,9 @@ class SearchEngine:
         if strategy.get("enhanced_query"):
             queries.append(strategy["enhanced_query"])
 
+        if constraints.get("equipment_required"):
+            queries.append(f"{' '.join(constraints['equipment_required'])} cooking recipes")
+
         search_keywords = strategy.get("search_keywords", [])
         if isinstance(search_keywords, list):
             semantic_query = " ".join(keyword.strip() for keyword in search_keywords[:10] if isinstance(keyword, str) and keyword.strip())
@@ -146,6 +149,8 @@ class SearchEngine:
                 constraints_text += f"- Max {constraints['max_ingredients']} ingredients\n"
             if constraints.get("dietary_restrictions"):
                 constraints_text += f"- {', '.join(constraints['dietary_restrictions'])}\n"
+            if constraints.get("equipment_required"):
+                constraints_text += f"- Actual preparation must use: {', '.join(constraints['equipment_required'])}\n"
             if constraints.get("leftover_friendly"):
                 constraints_text += (
                     "- MUST be suitable for multiple sittings, with explicit evidence that it stores, "

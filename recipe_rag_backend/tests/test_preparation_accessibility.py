@@ -102,7 +102,7 @@ class PreparationAccessibilityTests(unittest.TestCase):
     def test_user_requirements_survive_followups_and_remain_chat_local(self):
         analyzer = IntentAnalyzer()
         analyzer.initialize(Mock(predict=Mock(side_effect=lambda prompt: json.dumps(analyzer._get_fallback_intent_data("More recipes")))))
-        history = [{"role": "user", "content": SEATED_QUERY}, {"role": "user", "content": HAND_QUERY}]
+        history = [{"role": "user", "content": SEATED_QUERY}, {"role": "user", "content": "Also, " + HAND_QUERY}]
         intent = analyzer.understand_query_intent_with_context("More recipes", history)
         self.assertEqual(intent["constraints"]["preparation_position"], "seated")
         self.assertEqual(intent["constraints"]["hand_effort"], "low")
@@ -148,12 +148,14 @@ class PreparationAccessibilityTests(unittest.TestCase):
                     self.assertNotIn("seated", intent["search_strategy"]["enhanced_query"])
                     self.assertNotIn("gentle mixing", intent["search_strategy"]["search_keywords"])
 
-    def test_timing_request_preserves_real_hand_requirement_but_reset_clears_it(self):
+    def test_new_timing_request_drops_hand_requirement_but_followup_keeps_it(self):
         analyzer = IntentAnalyzer()
         analyzer.initialize(Mock(predict=Mock(side_effect=lambda prompt: json.dumps(analyzer._get_fallback_intent_data(TIMING_QUERY)))))
         history = [{"role": "user", "content": HAND_QUERY}]
         result = analyzer.understand_query_intent_with_context(TIMING_QUERY, history)
-        self.assertEqual(result["constraints"]["hand_effort"], "low")
+        self.assertIsNone(result["constraints"]["hand_effort"])
+        followup = analyzer.understand_query_intent_with_context("Also, " + TIMING_QUERY, history)
+        self.assertEqual(followup["constraints"]["hand_effort"], "low")
         reset = analyzer.understand_query_intent_with_context("Start over: " + TIMING_QUERY, history)
         self.assertIsNone(reset["constraints"]["hand_effort"])
         self.assertIsNone(reset["constraints"]["preparation_mode"])

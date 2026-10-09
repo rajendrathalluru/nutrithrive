@@ -176,6 +176,22 @@ Preserve explicit exclusions and active restrictions in follow-ups; newer user c
 If a database recipe needs changes, retain it only as an adaptation reference, not an unchanged match.
 """
 
+EQUIPMENT_RULES = """A request to make meals with/in/using an appliance requires actually using it in preparation.
+Put it in equipment_required. Merely owning equipment, an optional alternative, or an explicit exclusion
+does not make it required. equipment_only limits allowed appliances ONLY when the user explicitly says only;
+using an air fryer does not prohibit bowls, knives, a stove, or other equipment for remaining components.
+Evaluate the actual cooking/preparation steps, not names, descriptions, or equipment lists. A cold salad
+does not become an air-fryer recipe because its ingredients could hypothetically be air-fried.
+Preheating alone is insufficient: the recipe must load food and actually cook/process it in the requested appliance.
+Do not invent missing steps for a database recipe. If converting its method is necessary, use it only as
+an adaptation reference and create a complete AI Generated recipe, including appliance setup, cooking time,
+temperature/setting and doneness guidance where applicable. Preserve all other user requirements.
+When meals are requested, an appliance-cooked side alone is not a complete meal. Construct a coherent meal
+with a substantive component prepared in the requested appliance, not a token garnish cooked just to pass.
+For each required appliance, cite the actual instruction establishing its use. For equipment_only, also
+check every preparation dependency for prohibited appliances. Basic manual utensils are not cooking appliances.
+"""
+
 COOKING_ATTENTION_RULES = """For hands-off meals, minimal monitoring, or recipes that do not require constant attention,
 set constraints.attention_level='low'. This means little active work after setup, not a short total cooking time.
 Prefer assembly, oven baking, roasting, or suitable slow-cooker methods with explicit timing and occasional checks.
@@ -227,6 +243,8 @@ Summaries must identify portioning and supplied storage guidance without adding 
 def active_recipe_rules(intent_data: dict) -> str:
     constraints = intent_data.get("constraints", {})
     rules = [REQUEST_MEANING_RULES]
+    if constraints.get("equipment_required") or constraints.get("equipment_only"):
+        rules.append(EQUIPMENT_RULES)
     storage = constraints.get("ingredient_storage")
     if storage == "frozen_only":
         rules.append(FROZEN_INGREDIENT_RULES)

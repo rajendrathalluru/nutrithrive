@@ -3,6 +3,10 @@ import { ChatMessage, Message } from '../types';
 export const buildConversationHistory = (messages: Message[]): ChatMessage[] =>
   messages.filter(message => !message.isLoading).map(message => {
     const history: ChatMessage = { role: message.role, content: message.content };
+    const contextAction = message.backendData?.intent_analysis?.context_action;
+    if (message.role === 'assistant' && (contextAction === 'new_request' || contextAction === 'continue_request')) {
+      history.context_action = contextAction;
+    }
     if (message.role === 'assistant' && message.recipes?.length) {
       history.content += `\nPreviously shown recipes: ${message.recipes.map(recipe => recipe.title).join(' | ')}`;
       history.recipes = message.recipes.map(recipe => ({

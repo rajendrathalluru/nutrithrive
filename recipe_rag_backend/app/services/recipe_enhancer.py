@@ -503,6 +503,7 @@ CONSTRAINT COMPLIANCE:
 - If max_ingredients exists → recipes MUST have ≤ that number
 - If min_ingredients exists → recipes MUST have ≥ that number  
 - If dietary_restrictions exist → full compliance required
+- If equipment_required exists → actually prepare a substantive recipe component with each appliance in the directions
 - If equipment_only exists → use only that equipment
 - If leftover_friendly is true → include safe storage duration and reheating or thawing guidance
 

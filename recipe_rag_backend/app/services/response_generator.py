@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, CHEWING_RULES, MEAL_PORTION_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, FOOD_GUIDANCE_RULES, REQUEST_MEANING_RULES
 from app.services.chewing_validation import audit_chewing_assessment
 from app.services.storage_guidance import requests_reheating, storage_summary
+from app.services.equipment_validation import normalize_equipment
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,15 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                 lines.append("Open a recipe card for the ingredients and complete preparation steps. Frozen ingredients may still require cooking or reheating.")
                 return "\n".join(lines)
             
+            required_equipment = normalize_equipment(constraints.get("equipment_required"))
+            if required_equipment:
+                equipment_text = " and ".join(required_equipment)
+                noun = "recipe" if recipe_count == 1 else "recipes"
+                lines = [f"I found {recipe_count} {noun} that use your {equipment_text}:"]
+                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.append("Open a recipe card for ingredients and the complete preparation steps.")
+                return "\n".join(lines)
+
             constraint_text = ", ".join(constraint_mentions) if constraint_mentions else ""
             
             # Recipe info without cancer-focused language

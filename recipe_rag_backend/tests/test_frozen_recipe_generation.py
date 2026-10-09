@@ -194,12 +194,13 @@ class FrozenRecipeGenerationTests(unittest.TestCase):
         self.assertEqual(verifier.batch_verify_recipes(recipes, {}, aicr_service), [])
         verifier._fallback_individual_verification.assert_called_once()
 
-    def test_breakfast_context_is_chat_local_and_resettable(self):
+    def test_new_breakfast_request_drops_frozen_requirement_unless_explicit_followup(self):
         analyzer = IntentAnalyzer()
         breakfast = "best breakfast that i can eat"
         analyzer.initialize(Mock(predict=Mock(side_effect=lambda prompt: json.dumps(analyzer._get_fallback_intent_data(breakfast)))))
         history = [{"role": "user", "content": QUERY}]
-        self.assertEqual(analyzer.understand_query_intent_with_context(breakfast, history)["constraints"]["ingredient_storage"], "frozen_only")
+        self.assertIsNone(analyzer.understand_query_intent_with_context(breakfast, history)["constraints"]["ingredient_storage"])
+        self.assertEqual(analyzer.understand_query_intent_with_context("More breakfast recipes using those ingredients", history)["constraints"]["ingredient_storage"], "frozen_only")
         self.assertIsNone(analyzer.understand_query_intent(breakfast)["constraints"]["ingredient_storage"])
         self.assertIsNone(analyzer.understand_query_intent_with_context("Start over: " + breakfast, history)["constraints"]["ingredient_storage"])
 

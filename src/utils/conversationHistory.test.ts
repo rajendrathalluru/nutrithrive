@@ -31,3 +31,18 @@ test('each chat supplies only its own messages and recipe references', () => {
   expect(buildConversationHistory(secondChat)).toEqual([{ role: 'user', content: 'Chinese dinner' }]);
   expect(buildConversationHistory([])).toEqual([]);
 });
+
+test('preserves backend request boundaries without inventing them for older messages', () => {
+  const messages: Message[] = [
+    { id: '1', role: 'assistant', content: 'Old recipe', timestamp: new Date() },
+    { id: '2', role: 'assistant', content: 'New bowl', timestamp: new Date(), recipes: [recipe],
+      backendData: { intent_analysis: { context_action: 'new_request' } } },
+    { id: '3', role: 'assistant', content: 'More bowls', timestamp: new Date(),
+      backendData: { intent_analysis: { context_action: 'continue_request' } } },
+  ];
+  const history = buildConversationHistory(messages);
+  expect(history[0].context_action).toBeUndefined();
+  expect(history[1].context_action).toBe('new_request');
+  expect(history[1].recipes?.[0].ingredients).toEqual(recipe.ingredients);
+  expect(history[2].context_action).toBe('continue_request');
+});
