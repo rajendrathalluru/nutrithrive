@@ -55,11 +55,21 @@ export interface NutriThriveChatbotProps {
   onBackToHome?: () => void;
 }
 
+export interface RecipeConversationContext {
+  version: 1;
+  query_type: 'recipe_question' | 'recipe_adaptation';
+  operation: 'modify' | 'simplify' | 'texture' | 'question';
+  selected_recipe_ids: string[];
+  request: string;
+  waiting_for?: 'recipe' | 'texture' | null;
+}
+
 export interface ChatMessage {
   role: string;
   content: string;
   recipes?: Array<Record<string, any>>;
   context_action?: 'new_request' | 'continue_request';
+  recipe_context?: RecipeConversationContext;
 }
 
 export interface QueryRequest {

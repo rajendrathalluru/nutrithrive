@@ -26,3 +26,17 @@ test('preserves source annotations from the API through same-chat recipe referen
     related_recipes: [{ name: 'Bean Salad', recipe_id: 'salad-1', recipe_link: 'https://recipes.heart.org/en/recipes/example' }],
   });
 });
+
+test('sends clarification state on the next conversational API request', async () => {
+  global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ source_documents: [], response: 'Updated recipe' }) });
+  const context = { version: 1, query_type: 'recipe_adaptation', operation: 'texture',
+    request: 'Change the texture', selected_recipe_ids: ['millet-1'], waiting_for: 'texture' };
+  const history = buildConversationHistory([{
+    id: 'clarification', role: 'assistant', content: 'What texture would you like?', timestamp: new Date(),
+    backendData: { intent_analysis: { recipe_context: context } },
+  }]);
+  await BackendService.getInstance().searchRecipes('Softer and creamier', history);
+  const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+  expect(body.conversation_history[0].recipe_context).toEqual(context);
+  expect(body.query).toBe('Softer and creamier');
+});

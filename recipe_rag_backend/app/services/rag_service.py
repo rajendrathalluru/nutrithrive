@@ -15,11 +15,11 @@ from app.services.recipe_enhancer import RecipeEnhancer
 from app.services.search_engine import SearchEngine
 from app.services.response_generator import ResponseGenerator
 from app.services.safety_service import safety_service
-from app.services.conversation_scope import scope_recipe_history
+from app.services.conversation_scope import scope_recipe_history, matching_recipe_title
 from app.services.equipment_validation import equipment_usage_evidence
 from app.services.digestive_comfort import digestive_tolerance_cautions
 from app.services.preparation_validation import audit_preparation_effort
-from app.services.recipe_follow_up import resolve_simplification
+from app.services.recipe_follow_up import resolve_recipe_follow_up, is_more_recipes_request
 
 logger = logging.getLogger(__name__)
 MAX_RECIPES_PER_RESPONSE = 3
@@ -226,7 +226,7 @@ class RecipeRAGService:
         ])
         if not baseline:
             return []
-        if (intent_data.get("adaptation_request", {}).get("operation") == "simplify"
+        if (intent_data.get("query_type") == "recipe_adaptation"
                 or intent_data.get("constraints", {}).get("digestive_comfort") == "gentle"
                 or intent_data.get("constraints", {}).get("preparation_effort") == "low"):
             return baseline
@@ -292,16 +292,7 @@ class RecipeRAGService:
         return normalized_query
 
     def _is_more_recipes_query(self, query: str) -> bool:
-        normalized = re.sub(r"\s+", " ", query.lower()).strip()
-        patterns = [
-            r"\bmore recipes?\b",
-            r"\bmore options?\b",
-            r"\banother recipes?\b",
-            r"\bother recipes?\b",
-            r"\bshow (?:me )?(?:more|others?)\b",
-            r"\bwhat else\b"
-        ]
-        return any(re.search(pattern, normalized) for pattern in patterns)
+        return is_more_recipes_request(query)
 
     def _get_previous_recipe_request(
         self,
@@ -476,7 +467,7 @@ class RecipeRAGService:
                 logger.info(f"Creating vector store with {len(split_docs)} document chunks")
                 self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
 
-                self.intent_analyzer.initialize(self.llm)
+                self.intent_analyzer.initialize(self.llm, recipe_names=self.data_loader.recipe_lookup)
                 self.recipe_verifier.initialize(self.llm)
                 self.recipe_enhancer.initialize(self.llm, aicr_service)
                 self.search_engine.initialize(self.vector_store, self.llm)
@@ -561,14 +552,17 @@ class RecipeRAGService:
                 return self._build_phi_redirect_response(query, mode, conversation_history)
 
             recipe_history, _ = scope_recipe_history(
-                query, self.intent_analyzer._sanitize_conversation_history(conversation_history or [])
+                query, self.intent_analyzer._sanitize_conversation_history(conversation_history or []),
+                self.data_loader.recipe_lookup,
             )
             conversation_recipes = self._get_conversation_recipes(recipe_history)
             references_previous_recipe = bool(conversation_recipes) and bool(re.search(
                 r"\b(it|them|those|these|that|first|second|third|one|ones)\b", query, re.IGNORECASE
             ))
-            simplification_request = resolve_simplification(query, recipe_history) is not None
-            if self._is_small_talk_query(query) and not references_previous_recipe and not simplification_request:
+            recipe_follow_up = resolve_recipe_follow_up(query, recipe_history) is not None
+            catalog_recipe_name = matching_recipe_title(query, self.data_loader.recipe_lookup)
+            if (self._is_small_talk_query(query, allow_heuristic=not conversation_recipes)
+                    and not references_previous_recipe and not recipe_follow_up and not catalog_recipe_name):
                 logger.info("Detected small-talk query, returning conversational response")
                 return self._build_small_talk_response(query, mode, conversation_history)
 
@@ -625,19 +619,21 @@ class RecipeRAGService:
                     "conversation_context_used": context_used,
                 }
             is_recipe_adaptation = query_type == "recipe_adaptation"
+            lookup_name = catalog_recipe_name if intent_data.get("context_action") == "new_request" else None
+            lookup_record = self.data_loader.get_recipe_record(lookup_name) if lookup_name else None
             logger.info(f"Intent analysis: {time.time() - start_time:.2f}s")
             effective_query = intent_data.get("search_strategy", {}).get("enhanced_query") or recipe_request_query
             
             # Step 2: Multi-query search
-            docs = [] if is_recipe_adaptation else self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
+            docs = [] if is_recipe_adaptation or lookup_record else self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
             logger.info(f"Search complete: {time.time() - start_time:.2f}s, found {len(docs)} docs")
             
             # Step 3: Reranking
-            reranked_docs = [] if is_recipe_adaptation else self.search_engine.rerank_with_constraint_filtering(docs, effective_query, intent_data, top_k=settings.SEARCH_K)
+            reranked_docs = [] if is_recipe_adaptation or lookup_record else self.search_engine.rerank_with_constraint_filtering(docs, effective_query, intent_data, top_k=settings.SEARCH_K)
             logger.info(f"Reranking complete: {time.time() - start_time:.2f}s, {len(reranked_docs)} docs")
             
             # Step 4: Extract recipe details
-            candidate_recipes = []
+            candidate_recipes = [self._build_recipe_data_from_record(lookup_record)] if lookup_record else []
             for doc in reranked_docs:
                 try:
                     candidate_recipes.append(self._build_recipe_data_from_doc(doc))
@@ -656,7 +652,7 @@ class RecipeRAGService:
             logger.info(f"Batch verification complete: {time.time() - start_time:.2f}s")
 
             verified_recipes = self._get_verified_matches(candidate_recipes, intent_data)
-            if not verified_recipes and not is_recipe_adaptation:
+            if not verified_recipes and not is_recipe_adaptation and not lookup_record:
                 seen_ids = {self._get_recipe_identity(recipe) for recipe in candidate_recipes}
                 additional = self._get_database_search_candidates(
                     normalized_recipe_request, intent_data, seen_ids, settings.SEARCH_K,
@@ -724,6 +720,8 @@ class RecipeRAGService:
                     }
             
             recipe_limit = min(MAX_RECIPES_PER_RESPONSE, len(referenced_recipes)) if is_recipe_adaptation else MAX_RECIPES_PER_RESPONSE
+            if lookup_record:
+                recipe_limit = 1
             source_docs = self._enhance_verified_recipes(source_docs[:recipe_limit], intent_data)
             source_docs = self._deduplicate_recipes(source_docs)
             source_docs = self._apply_deterministic_constraints(source_docs, intent_data)
@@ -749,6 +747,12 @@ class RecipeRAGService:
                 }
             
             # Step 8: Generate response
+            if is_recipe_adaptation and intent_data.get("recipe_context"):
+                intent_data["recipe_context"] = {
+                    **intent_data["recipe_context"],
+                    "selected_recipe_ids": [recipe["recipe_id"] for recipe in source_docs],
+                    "waiting_for": None,
+                }
             response_text = self.response_generator.generate_personalized_response(effective_query, source_docs, intent_data)
             
             total_time = time.time() - start_time
@@ -965,7 +969,7 @@ class RecipeRAGService:
             "previous_messages_considered": len(conversation_history) if conversation_history else 0
         }
 
-    def _is_small_talk_query(self, query: str) -> bool:
+    def _is_small_talk_query(self, query: str, allow_heuristic: bool = True) -> bool:
         normalized = re.sub(r"\s+", " ", query.lower()).strip()
         normalized = re.sub(r"[^\w\s]", "", normalized)
 
@@ -1074,6 +1078,9 @@ class RecipeRAGService:
 
         if any(re.fullmatch(pattern, normalized) for pattern in conversational_patterns):
             return True
+
+        if not allow_heuristic:
+            return False
 
         # Short noun-phrase prompts are often recipe lookups rather than small talk.
         if len(normalized.split()) >= 2:

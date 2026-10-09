@@ -7,6 +7,17 @@ export const buildConversationHistory = (messages: Message[]): ChatMessage[] =>
     if (message.role === 'assistant' && (contextAction === 'new_request' || contextAction === 'continue_request')) {
       history.context_action = contextAction;
     }
+    const recipeContext = message.backendData?.intent_analysis?.recipe_context;
+    if (message.role === 'assistant' && recipeContext?.version === 1 && Array.isArray(recipeContext.selected_recipe_ids)) {
+      history.recipe_context = {
+        version: 1,
+        query_type: recipeContext.query_type,
+        operation: recipeContext.operation,
+        request: recipeContext.request,
+        selected_recipe_ids: [...recipeContext.selected_recipe_ids],
+        waiting_for: recipeContext.waiting_for,
+      };
+    }
     if (message.role === 'assistant' && message.recipes?.length) {
       history.content += `\nPreviously shown recipes: ${message.recipes.map(recipe => recipe.title).join(' | ')}`;
       history.recipes = message.recipes.map(recipe => ({

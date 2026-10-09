@@ -13,7 +13,7 @@ from app.services.serving_temperature import audit_serving_temperature
 from app.services.required_ingredients import missing_required_ingredients
 from app.services.equipment_validation import audit_equipment
 from app.services.digestive_comfort import audit_digestive_comfort
-from app.services.recipe_follow_up import unchanged_simplification
+from app.services.recipe_follow_up import unchanged_adaptation, audit_texture_adaptation
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,13 @@ For other requests ingredient_storage_check may be null.
         }
         constraints = intent_data.get("constraints", {})
         preparation_contract = ""
+        if intent_data.get("adaptation_request"):
+            preparation_contract += """For adaptation_request, compare the candidate with the selected original recipe.
+Pass only if the actual ingredients and directions implement the requested change while preserving the dish
+and active user requirements. Cite concrete before/after differences, not just a renamed title or proposed tip.
+For texture edits check all components, including crunchy toppings. A different recipe is not an adaptation.
+An adapted recipe that fulfills the request is relevance='match'; 'adaptable' means it still needs changes.
+"""
         if intent_data.get("adaptation_request", {}).get("operation") == "simplify":
             preparation_contract += """For the adaptation_request check, compare the candidate's
 ingredients and instructions with the selected original. Evidence must name concrete before/after changes
@@ -274,10 +281,11 @@ Example shape (replace all example values with your assessment, never copy examp
             elif check["status"] != "pass":
                 violations.append(f"{key}: {check['evidence']}")
         verification["constraint_checks"] = checks
-        if unchanged_simplification(recipe, intent_data):
-            violations.append("Recipe ingredients and preparation are unchanged; simplification requires a meaningful change")
+        if unchanged_adaptation(recipe, intent_data):
+            violations.append("Recipe ingredients and preparation are unchanged; the requested adaptation needs an actual change")
             if verification.get("relevance") == "match":
                 verification["relevance"] = "adaptable"
+        violations.extend(audit_texture_adaptation(recipe, intent_data))
         digestive_problems = audit_digestive_comfort(recipe, intent_data.get("constraints", {}))
         if digestive_problems:
             violations.extend(digestive_problems)

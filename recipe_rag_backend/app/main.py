@@ -32,12 +32,14 @@ startup_in_progress = False
 # ============= NEW: Conversation Context Models =============
 from pydantic import BaseModel
 from pydantic import field_validator
+from app.services.recipe_follow_up import RecipeConversationContext
 
 class ChatMessage(BaseModel):
     role: str
     content: str
     recipes: Optional[List[Dict[str, Any]]] = None
     context_action: Optional[Literal["new_request", "continue_request"]] = None
+    recipe_context: Optional[RecipeConversationContext] = None
 
     @field_validator("role")
     @classmethod

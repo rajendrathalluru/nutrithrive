@@ -1,4 +1,4 @@
-from app.services.recipe_follow_up import SIMPLIFICATION_RULES
+from app.services.recipe_follow_up import SIMPLIFICATION_RULES, ADAPTATION_RULES
 
 
 REQUEST_MEANING_RULES = """Interpret the request without silently strengthening it.
@@ -282,6 +282,8 @@ Summaries must identify portioning and supplied storage guidance without adding 
 def active_recipe_rules(intent_data: dict) -> str:
     constraints = intent_data.get("constraints", {})
     rules = [REQUEST_MEANING_RULES]
+    if intent_data.get("adaptation_request"):
+        rules.append(ADAPTATION_RULES)
     if intent_data.get("adaptation_request", {}).get("operation") == "simplify":
         rules.append(SIMPLIFICATION_RULES)
     if constraints.get("digestive_comfort") == "gentle":

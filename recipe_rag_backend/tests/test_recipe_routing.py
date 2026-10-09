@@ -77,6 +77,81 @@ class RecipeRoutingTests(unittest.TestCase):
         self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
         self.service._get_database_search_candidates.assert_not_called()
 
+    def test_named_recipe_does_not_inherit_previous_35_minute_limit(self):
+        title = "Sheet Pan Roasted Vegetables and Beans"
+        record = recipe_record(title)
+        self.service.data_loader.recipe_lookup = {title.lower(): {"Name": title}}
+        self.service._build_recipe_data_from_record = Mock(return_value=record)
+        analyzer = IntentAnalyzer()
+        model = Mock(predict=Mock(side_effect=AssertionError("Literal recipe lookup should not infer constraints")))
+        analyzer.initialize(model, recipe_names=[title])
+        self.service.intent_analyzer = analyzer
+        self.service.search_engine.multi_query_search.return_value = [record, recipe_record("Unrelated Bowl")]
+        result = self.ask(title, [
+            {"role": "user", "content": "Show recipes in at most 35 minutes"},
+            {"role": "assistant", "content": "I couldn't verify a recipe under 35 minutes"},
+        ])
+        self.assertEqual(result["source"], "database_exact")
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], [title])
+        self.assertIsNone(result["intent_analysis"]["constraints"]["time_max_minutes"])
+        self.assertEqual(result["intent_analysis"]["user_request_context"], [title])
+        self.assertEqual(result["intent_analysis"]["context_action"], "new_request")
+        self.assertFalse(result["conversation_context_used"])
+        for call in self.service.recipe_verifier.batch_verify_recipes.call_args_list:
+            self.assertIsNone(call.args[1]["constraints"]["time_max_minutes"])
+        model.predict.assert_not_called()
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+        self.service.search_engine.multi_query_search.assert_not_called()
+        self.service._get_database_search_candidates.assert_not_called()
+
+    def test_literal_lookup_does_not_bypass_recipe_verification(self):
+        title = "Sheet Pan Roasted Vegetables and Beans"
+        self.service.data_loader.recipe_lookup = {title.lower(): {"Name": title}}
+        rejected = recipe_record(title, "adaptable")
+        self.service._build_recipe_data_from_record = Mock(return_value=rejected)
+        analyzer = IntentAnalyzer()
+        analyzer.initialize(Mock(), recipe_names=[title])
+        self.service.intent_analyzer = analyzer
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [recipe_record(title, generated=True)]
+        result = self.ask(title)
+        self.assertEqual(result["source"], "llm_generated")
+        self.assertEqual(result["matches_found"], 1)
+        references = self.service.recipe_enhancer.generate_fallback_recipes.call_args.kwargs["grounding_recipes"]
+        self.assertEqual(references[0]["name"], title)
+        self.service._get_database_search_candidates.assert_not_called()
+
+    def test_one_word_catalog_title_is_not_small_talk(self):
+        title = "Muesli"
+        self.service.data_loader.recipe_lookup = {title.lower(): {"Name": title}}
+        self.service._build_recipe_data_from_record = Mock(return_value=recipe_record(title))
+        self.service._is_small_talk_query = RecipeRAGService._is_small_talk_query.__get__(self.service)
+        analyzer = IntentAnalyzer()
+        analyzer.initialize(Mock(), recipe_names=[title])
+        self.service.intent_analyzer = analyzer
+        result = self.ask(title, [{"role": "user", "content": "Show recipes in at most 35 minutes"}])
+        self.assertEqual(result["source"], "database_exact")
+        self.assertEqual(result["source_documents"][0]["name"], title)
+        self.assertIsNone(result["intent_analysis"]["constraints"]["time_max_minutes"])
+
+    def test_simplify_after_catalog_lookup_does_not_restore_old_time_limit(self):
+        title = "Sheet Pan Roasted Vegetables and Beans"
+        self.service.data_loader.recipe_lookup = {title.lower(): {"Name": title}}
+        analyzer = IntentAnalyzer()
+        parsed = analyzer._get_fallback_intent_data("Simplify " + title)
+        analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))), recipe_names=[title])
+        self.service.intent_analyzer = analyzer
+        result = self.ask("Can you simplify this recipe even more?", [
+            {"role": "user", "content": "Show recipes in at most 35 minutes"},
+            {"role": "assistant", "content": "No verified recipes in 35 minutes"},
+            {"role": "user", "content": title},
+            {"role": "assistant", "content": "Here is your recipe", "recipes": [recipe_record(title)]},
+        ])
+        self.assertEqual(result["intent_analysis"]["query_type"], "recipe_adaptation")
+        self.assertIsNone(result["intent_analysis"]["constraints"]["time_max_minutes"])
+        self.assertNotIn("35 minutes", analyzer.llm.predict.call_args.args[0])
+        self.assertEqual(result["intent_analysis"]["user_request_context"], [title, "Can you simplify this recipe even more?"])
+        self.service.search_engine.multi_query_search.assert_not_called()
+
     def test_csv_rescue_precedes_generation(self):
         self.service._get_database_search_candidates.return_value = [recipe_record("Garden Vegetable Stir-Fried Sorghum")]
         result = self.ask()
