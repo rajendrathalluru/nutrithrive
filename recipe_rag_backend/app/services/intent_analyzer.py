@@ -10,7 +10,7 @@ from app.services.serving_temperature import explicit_serving_temperature, is_te
 from app.services.pantry_validation import explicit_canned_requirement, explicit_ingredient_storage
 from app.services.storage_guidance import requests_reheating
 from app.services.conversation_scope import scope_recipe_history, matching_recipe_title, recipe_titles_from_history
-from app.services.required_ingredients import explicit_ingredient_combination
+from app.services.required_ingredients import explicit_ingredient_combination, inventory_ingredient_requirements
 from app.services.equipment_validation import explicit_equipment_constraints, normalize_equipment
 from app.services.recipe_prompt_rules import EQUIPMENT_RULES
 from app.services.recipe_prompt_rules import DIGESTIVE_COMFORT_RULES, LOW_EXERTION_RULES
@@ -278,6 +278,9 @@ Populate resolved_query with a self-contained request, and search_strategy with 
 terms, not the unchanged pronouns of a follow-up. ingredients_available is a pool of possible main
 ingredients; ingredients_must_use lists individually mandatory ingredients, not every suggested alternative.
 A direct request for a recipe "with X, Y and Z" requires X, Y AND Z: put each in ingredients_must_use.
+"I have X and Y. Generate a recipe using these ingredients" also requires BOTH X and Y, not either one.
+Resolve these/those against the user's stated inventory, including across sentences. Do not omit an item.
+Chicken broth/stock or chicken-flavored seasoning does not fulfill a request to use chicken meat.
 Use ingredients_available for explicitly offered alternatives or a flexible pantry inventory, not to weaken
 an explicit ingredient combination. The user need not add the word "all" to a direct ingredient request.
 For example, a request to use pre-cooked ingredients must preserve their already-cooked starting state
@@ -472,8 +475,16 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         else:
             constraints.update(equipment_constraints)
         available = constraints.get("ingredients_available", [])
+        available = available if isinstance(available, list) else []
+        constraints["ingredients_available"] = available
+        required = constraints.get("ingredients_must_use") or []
+        constraints["ingredients_must_use"] = [required] if isinstance(required, str) else required
         if any(explicit_ingredient_combination(request, available) for request in ingredient_requests):
             constraints["ingredients_must_use"] = self._merge_unique(constraints["ingredients_must_use"], available)
+        selected, removed = inventory_ingredient_requirements(ingredient_requests, available)
+        constraints["ingredients_must_use"] = self._merge_unique(
+            [ingredient for ingredient in constraints["ingredients_must_use"] if ingredient not in removed], selected,
+        )
         for request in requirement_requests:
             if re.search(r"\b(?:start over|new search|forget (?:the )?previous)\b", request, re.I):
                 constraints["ingredient_storage"] = None

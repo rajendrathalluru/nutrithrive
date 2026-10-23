@@ -5,6 +5,7 @@ from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, CHEWING_R
 from app.services.chewing_validation import audit_chewing_assessment
 from app.services.storage_guidance import requests_reheating, storage_summary
 from app.services.equipment_validation import normalize_equipment
+from app.services.required_ingredients import missing_required_ingredients
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,16 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                 lines = [f"I found {recipe_count} {noun} that use your {equipment_text}:"]
                 lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
                 lines.append("Open a recipe card for ingredients and the complete preparation steps.")
+                return "\n".join(lines)
+
+            required_ingredients = constraints.get("ingredients_must_use") or []
+            if required_ingredients:
+                if any(missing_required_ingredients(recipe, required_ingredients) for recipe in source_docs):
+                    return "I couldn't confirm that these recipes include all your required ingredients."
+                ingredient_text = ", ".join(required_ingredients[:-1]) + " and " + required_ingredients[-1] if len(required_ingredients) > 1 else required_ingredients[0]
+                lines = [f"Here {'is' if recipe_count == 1 else 'are'} {recipe_count} {'recipe' if recipe_count == 1 else 'recipes'} using {ingredient_text}:"]
+                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.append("Open a recipe card for the ingredients and preparation steps.")
                 return "\n".join(lines)
 
             constraint_text = ", ".join(constraint_mentions) if constraint_mentions else ""

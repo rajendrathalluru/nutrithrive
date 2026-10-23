@@ -7,6 +7,12 @@ user goals when selecting ingredients or asking for more, even if the resolved q
 Later explicit changes supersede earlier requirements; do not combine conflicting old and new requests.
 Questions about a previously shown recipe do not add new restrictions to recipe discovery.
 'Using' an ingredient or ingredient form does not mean 'only' that form unless the user says so.
+When a user lists ingredients and asks to use these ingredients, include every selected ingredient.
+Explicit alternatives ('either', 'any of', 'X or Y') remain choices; a bare inventory is not automatically all-required.
+Chicken meat is not chicken broth/stock, seasoning, or a plant-based substitute. A required ingredient must be
+used in the actual recipe, not an optional topping, possible substitution, title, or tip. If adapting a pork
+recipe to chicken, change the ingredient list, name, directions and relevant doneness guidance coherently;
+do not describe the unmodified pork recipe as using chicken. Supporting ingredients remain allowed unless excluded.
 Pre-cooked ingredients are already cooked BEFORE this recipe starts: use purchased cooked components
 or cooked leftovers the user has specified. Cooking raw meat, dry pasta, or dry grains in this recipe
 does not satisfy a request to start with pre-cooked ingredients. Reheating and assembly are allowed;

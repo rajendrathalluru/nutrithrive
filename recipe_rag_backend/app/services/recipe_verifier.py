@@ -25,6 +25,8 @@ A specific named dish or required ingredient must actually match; an unrelated d
 ingredients_available is an ingredient pool: the recipe must use at least one as a main ingredient,
 not merely suggest it in tips or garnish. ingredients_must_use requires EVERY listed item in the actual
 recipe. Name the matched ingredients in the check evidence; do not approve an unrelated healthy recipe.
+For required chicken, broth/stock, flavoring, an optional chicken substitution or vegan imitation is not chicken meat.
+An alternative such as 'chicken or tofu' does not guarantee chicken; adapt the recipe to make the choice explicit.
 Return relevance as 'match' when suitable as written, 'adaptable' when it offers a useful recipe
 foundation but needs changes to satisfy the request, or 'unrelated' when it offers no useful foundation.
 Judge the actual ingredients and instructions, not a hypothetical substitution in the description or notes.

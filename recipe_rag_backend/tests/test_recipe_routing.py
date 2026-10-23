@@ -77,6 +77,68 @@ class RecipeRoutingTests(unittest.TestCase):
         self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
         self.service._get_database_search_candidates.assert_not_called()
 
+    def configure_broccoli_chicken_request(self):
+        query = "I have broccoli and chicken. Generate a recipe using these ingredients"
+        analyzer = IntentAnalyzer()
+        parsed = analyzer._get_fallback_intent_data(query)
+        parsed["constraints"]["ingredients_available"] = ["broccoli", "chicken"]
+        analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(parsed))))
+        self.service.intent_analyzer = analyzer
+        pork = {**recipe_record("Cashew Stir Fry with Broccoli and Pork"),
+                "ingredients": ["3 cups broccoli", "8 oz pork loin", "1/2 cup chicken broth or vegetable broth"],
+                "instructions": ["Stir-fry the pork and broccoli, then add the broth."]}
+        chicken = {**recipe_record("Chicken and Broccoli Stir Fry", generated=True),
+                   "ingredients": ["3 cups broccoli", "8 oz chicken breast", "1 tbsp oil"],
+                   "instructions": ["Cook the chicken to 165 F. Cook the broccoli until tender and combine."]}
+        self.service.search_engine.multi_query_search.return_value = [pork]
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [chicken]
+        self.service.response_generator = ResponseGenerator()
+        self.service.response_generator.initialize(Mock(predict=Mock(side_effect=AssertionError("Ingredient summary should not invent facts"))))
+        return query, pork, chicken
+
+    def test_inventory_request_does_not_serve_pork_even_when_verifier_says_pass(self):
+        query, pork, chicken = self.configure_broccoli_chicken_request()
+        original = copy.deepcopy(pork)
+        result = self.ask(query)
+        self.assertEqual(result["intent_analysis"]["constraints"]["ingredients_must_use"], ["broccoli", "chicken"])
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], [chicken["name"]])
+        self.assertEqual(result["source_documents"][0]["source_label"], "AI Generated")
+        self.assertIn("broccoli and chicken", result["response"])
+        self.assertNotIn("Pork", result["response"])
+        self.assertNotIn("storage", result["response"].lower())
+        references = self.service.recipe_enhancer.generate_fallback_recipes.call_args.kwargs["grounding_recipes"]
+        self.assertEqual(references[0]["name"], pork["name"])
+        self.assertEqual(pork, original)
+
+    def test_inventory_request_prefers_genuine_database_match_over_generation(self):
+        query, pork, chicken = self.configure_broccoli_chicken_request()
+        database_chicken = {**chicken, "generated_by_llm": False, "database_record_found": True,
+                            "source_name": "AICR", "recipe_link": "https://www.aicr.org/cancer-prevention/recipes/example/"}
+        self.service.search_engine.multi_query_search.return_value = [pork, database_chicken]
+        result = self.ask(query)
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], [chicken["name"]])
+        self.assertEqual(result["source_documents"][0]["source_label"], "Sourced from AICR")
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+
+    def test_generated_candidate_cannot_satisfy_chicken_with_broth_either(self):
+        query, pork, chicken = self.configure_broccoli_chicken_request()
+        bad_generation = {**pork, "name": "Chicken and Broccoli Bowl", "generated_by_llm": True,
+                          "database_record_found": False}
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [[bad_generation], [chicken]]
+        result = self.ask(query)
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], [chicken["name"]])
+        self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 2)
+        for call in self.service.recipe_enhancer.generate_fallback_recipes.call_args_list:
+            self.assertEqual(call.args[1]["constraints"]["ingredients_must_use"], ["broccoli", "chicken"])
+
+    def test_optional_enhancement_cannot_remove_a_required_ingredient(self):
+        query, _, chicken = self.configure_broccoli_chicken_request()
+        def remove_chicken(recipes, intent):
+            return [{**recipe, "ingredients": ["3 cups broccoli", "1 cup chicken broth"]} for recipe in recipes]
+        self.service.recipe_enhancer.batch_enhance_recipes.side_effect = remove_chicken
+        result = self.ask(query)
+        self.assertEqual(result["source_documents"][0]["ingredients"], chicken["ingredients"])
+
     def test_named_recipe_does_not_inherit_previous_35_minute_limit(self):
         title = "Sheet Pan Roasted Vegetables and Beans"
         record = recipe_record(title)

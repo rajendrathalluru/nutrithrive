@@ -20,6 +20,7 @@ from app.services.equipment_validation import equipment_usage_evidence
 from app.services.digestive_comfort import digestive_tolerance_cautions
 from app.services.preparation_validation import audit_preparation_effort
 from app.services.recipe_follow_up import resolve_recipe_follow_up, is_more_recipes_request
+from app.services.required_ingredients import missing_required_ingredients
 
 logger = logging.getLogger(__name__)
 MAX_RECIPES_PER_RESPONSE = 3
@@ -103,6 +104,7 @@ class RecipeRAGService:
         terms = {term for term in terms if len(term) > 2}
         meal_types = intent_data.get("preferences", {}).get("meal_types", [])
         equipment = intent_data.get("constraints", {}).get("equipment_required", [])
+        required_ingredients = intent_data.get("constraints", {}).get("ingredients_must_use") or []
         low_exertion = intent_data.get("constraints", {}).get("preparation_effort") == "low"
         ranked = []
         for _, row in self.data_loader.df.iterrows():
@@ -133,9 +135,12 @@ class RecipeRAGService:
                 "instructions": str(record.get("Directions", "")).splitlines(),
             })) if low_exertion else 0
             if score or equipment_matches:
-                ranked.append((-effort_conflicts, equipment_matches, score, record))
-        ranked.sort(key=lambda item: item[:3], reverse=True)
-        return [self._build_recipe_data_from_record(record) for _, _, _, record in ranked[:limit]]
+                ingredient_matches = len(required_ingredients) - len(missing_required_ingredients(
+                    {"ingredients": str(record.get("Ingredients", "")).splitlines()}, required_ingredients,
+                ))
+                ranked.append((ingredient_matches, -effort_conflicts, equipment_matches, score, record))
+        ranked.sort(key=lambda item: item[:4], reverse=True)
+        return [self._build_recipe_data_from_record(record) for _, _, _, _, record in ranked[:limit]]
 
     def _verify_candidates(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
@@ -247,6 +252,10 @@ class RecipeRAGService:
         recipes: List[Dict[str, Any]],
         intent_data: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
+        required = intent_data.get("constraints", {}).get("ingredients_must_use") or []
+        if isinstance(required, str):
+            required = [required]
+        recipes = [recipe for recipe in recipes if not missing_required_ingredients(recipe, required)]
         if not intent_data.get("constraints", {}).get("leftover_friendly"):
             return recipes
 
