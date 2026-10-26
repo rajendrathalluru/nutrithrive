@@ -1,4 +1,5 @@
 import logging
+from app.services.model_errors import raise_if_model_unavailable
 import json
 import re
 import hashlib
@@ -58,6 +59,7 @@ class RecipeEnhancer:
                 try:
                     prepared_recipes[index] = future.result()
                 except Exception as e:
+                    raise_if_model_unavailable(e)
                     logger.error(f"Error preparing recipe {recipes[index].get('name')}: {e}")
                     prepared_recipes[index] = recipes[index]
 
@@ -150,6 +152,7 @@ class RecipeEnhancer:
                     enhanced_recipe = future.result()
                     enhanced_recipes.append(enhanced_recipe)
                 except Exception as e:
+                    raise_if_model_unavailable(e)
                     original_recipe = future_to_recipe[future]
                     logger.error(f"Error enhancing recipe {original_recipe.get('name')}: {e}")
                     enhanced_recipes.append(original_recipe)
@@ -344,6 +347,7 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
             logger.info(f"Enhanced '{enhanced_recipe.get('name')}' with AICR compliance")
             
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.error(f"Error in combined enhancement: {e}")
         
         self.enhancement_cache[cache_key] = enhanced_recipe
@@ -552,6 +556,30 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
 {chr(10).join(explicit_rules) if constraints.get('ingredient_storage') in {'canned_only', 'frozen_only'} else ''}
 """
 
+            if timed_request:
+                generation_prompt = f"""Create exactly ONE complete recipe for this timed request, not general meal advice.
+USER REQUEST: {query}
+ACTIVE REQUIREMENTS: {json.dumps(intent_data)}
+{time_limit_generation_guidance(constraints)}
+{active_recipe_rules(intent_data)}
+{self._build_grounding_context(grounding_recipes)}
+{failure_context}
+NUTRITION AND FOOD SAFETY POLICY:
+{aicr_context}
+{chr(10).join(explicit_rules)}
+
+Choose a practical dish with enough time for ALL preparation. Do not just copy a reference's cooking time.
+Include the time to open packages, wash/cut food, set up equipment, heat, cook, rest, and serve where needed.
+Use purchased ready-to-eat components only when their form is explicit and compatible with the request.
+Each instruction must include its numeric estimated duration, even a short mixing or serving step.
+Keep sequential step durations within total_time and use safe cooking endpoints, not a rushed timer alone.
+Return only a valid JSON array with one object containing:
+name, type, ingredients (quantified strings), instructions (complete strings with durations),
+total_time (e.g. '20 minutes', numeric units), calories and protein_grams (numeric estimates),
+description, nutrition_benefits, storage_instructions. Do not include extra tips or variations.
+The finished recipe undergoes independent timing, user-requirement, and guideline verification.
+"""
+
             repair_target = next((
                 recipe for recipe in failed_recipes
                 if recipe.get("generated_by_llm") and recipe.get("ingredients") and recipe.get("instructions")
@@ -621,6 +649,7 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
             logger.error(f"JSON parsing error: {e}")
             return []
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.error(f"Error generating recipes: {e}")
             return []
 
@@ -675,6 +704,7 @@ Do not infer new protein targets, medical conditions, digestive benefits, or a n
 NUTRITION AND FOOD SAFETY GUIDANCE:
 {guidelines}
 {feedback}
+{time_limit_generation_guidance(intent_data.get('constraints', {}))}
 
 Return a valid JSON array with exactly {len(request['references'])} complete adapted recipe(s), one per selected reference.
 Each object needs description, name (retain recognizable dish identity), type, ingredients (array of quantified STRINGS,
@@ -873,6 +903,7 @@ The output will undergo the same independent verification as every other recipe.
                     enhanced_recipe = future.result()
                     enhanced_recipes.append(enhanced_recipe)
                 except Exception as e:
+                    raise_if_model_unavailable(e)
                     original_recipe = future_to_recipe[future]
                     logger.error(f"Error enhancing recipe {original_recipe.get('name')}: {e}")
                     enhanced_recipes.append(original_recipe)

@@ -196,10 +196,22 @@ Design the preparation to fit this budget; do not merely relabel a slower recipe
 For a very short budget prefer simple assembly or blending with explicitly ready-to-eat ingredients.
 Specify purchased prewashed/precut/ready-cooked forms when needed; do not hide preparation in the ingredient list.
 Count opening, measuring, washing, cutting, equipment setup, cooking, waiting, and serving in total_time.
-State an estimated total_time with numeric units and realistic timings for ALL preparation steps.
+State an estimated total_time with numeric units. EVERY instruction, including setup and serving,
+must contain its own numeric estimated duration; the backend rejects generated timed recipes with untimed steps.
 Use seconds for brief steps. Sequential timings must fit the total; state any actual overlap explicitly.
+Prefer straightforward sequential steps and leave a small realistic margin instead of targeting the maximum.
 Do not round a time up to the excluded boundary. Do not shorten necessary cooking for food safety.
 Keep all other requirements. If no realistic recipe fits, return an empty array rather than a false match."""
+
+
+def time_candidate_rank(recipe: Dict[str, Any], constraints: Dict[str, Any]) -> int:
+    limit = constraints.get("time_max_minutes")
+    if not isinstance(limit, (int, float)) or isinstance(limit, bool) or not math.isfinite(limit) or limit < 0:
+        return 0
+    declared = declared_time_check(recipe)
+    if not declared:
+        return 1
+    return 0 if _exceeds_limit(declared["total_minutes"], constraints) else 2
 
 
 def _audit_time(recipe: Dict[str, Any], constraints: Dict[str, Any], check: Any) -> List[str]:
@@ -233,7 +245,6 @@ def _audit_time(recipe: Dict[str, Any], constraints: Dict[str, Any], check: Any)
             elif any(duration > total for duration in _duration_minutes(quote)):
                 problems.append("Total-time estimate contradicts its cited duration")
     step_durations = []
-    parallel_steps = False
     for index, line in enumerate(recipe.get("instructions", [])):
         text = str(line)
         if re.search(r"\b(?:leftovers?|refrigerat|freez|store|keeps?)", text, re.I) and not re.search(
@@ -241,17 +252,34 @@ def _audit_time(recipe: Dict[str, Any], constraints: Dict[str, Any], check: Any)
         ):
             continue
         durations = _duration_minutes(text)
+        if (recipe.get("generated_by_llm") or recipe.get("instructions_generated")) and not durations:
+            problems.append(f"Generated instruction {index} has no explicit preparation duration: {line}")
         if any(_exceeds_limit(duration, constraints) for duration in durations):
             problems.append(f"Instruction {index} alone exceeds the requested time: {line}")
-        if durations and not re.search(r"\btotal\b", text, re.I):
-            step_durations.append(max(durations))
-        parallel_steps = parallel_steps or bool(re.search(
+        parallel_step = bool(re.search(
             r"\b(?:meanwhile|simultaneously|at the same time)\b|"
             r"\bwhile\b[^.!?]{0,45}\b(?:cooks|bakes|roasts|simmers|chills|rests|is cooking|is baking)\b", text, re.I
         ))
+        if durations and not re.match(r"^\s*(?:estimated\s+)?total(?:\s+elapsed)?\s+time\b", text, re.I):
+            duration_matches = list(DURATION.finditer(text))
+            timed_durations = [
+                duration * 2 if re.match(r"\s+(?:per|each|on each) side\b", text[match.end():], re.I) else duration
+                for duration, match in zip(durations, duration_matches)
+            ]
+            step_duration = max(timed_durations)
+            if len(durations) > 1 and not parallel_step and all(
+                re.search(r"\b(?:then|another|additional|more)\b", text[previous.end():current.end()], re.I)
+                or text[previous.end():current.start()].strip().lower() in {"", "and"}
+                for previous, current in zip(duration_matches, duration_matches[1:])
+            ):
+                step_duration = sum(timed_durations)
+            if parallel_step and step_durations:
+                step_durations[-1] = max(step_durations[-1], step_duration)
+            else:
+                step_durations.append(step_duration)
         if re.search(r"\bovernight\b", text, re.I) and not durations:
             problems.append("Overnight preparation has no verified duration")
-    lower_bound = max(step_durations, default=0) if parallel_steps else sum(step_durations)
+    lower_bound = sum(step_durations)
     if lower_bound > total or _exceeds_limit(lower_bound, constraints):
         problems.append("Elapsed time contradicts the timed preparation steps")
     for match in re.finditer(r"\btotal(?:\s+time)?\s*[:=]?\s*(\d[^|\n]*)", str(recipe.get("source_notes", "")), re.I):

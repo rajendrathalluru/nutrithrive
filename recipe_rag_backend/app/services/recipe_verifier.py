@@ -1,4 +1,5 @@
 import logging
+from app.services.model_errors import raise_if_model_unavailable
 import json
 import time
 import hashlib
@@ -14,6 +15,7 @@ from app.services.required_ingredients import missing_required_ingredients
 from app.services.equipment_validation import audit_equipment
 from app.services.digestive_comfort import audit_digestive_comfort
 from app.services.recipe_follow_up import unchanged_adaptation, audit_texture_adaptation
+from app.services.aicr_guidelines_service import aicr_service as configured_guidelines
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,29 @@ For other requests ingredient_storage_check may be null.
         constraint_str = json.dumps(intent_data, sort_keys=True)
         return hashlib.md5(constraint_str.encode()).hexdigest()[:16]
 
+    def _requires_guideline_review(self, recipe: Dict[str, Any]) -> bool:
+        return any(recipe.get(key) for key in (
+            "generated_by_llm", "ingredients_generated", "instructions_generated",
+            "guidance_generated", "dynamically_adapted",
+        ))
+
+    def _guideline_contract(self, intent_data: Dict[str, Any]) -> str:
+        policy = configured_guidelines.get_verification_policy(intent_data)
+        return f"""CONFIGURED APPLICATION NUTRITION POLICY:
+{json.dumps(policy)}
+For recipes with requires_guideline_review=true, return guideline_checks with EACH key:
+food_safety, nutrition, symptom_suitability. Each needs status (pass/fail/unknown) and concise evidence.
+Independently review the actual ingredients, instructions, storage, tips, and adaptations against ALL
+applicable rules in the corresponding policy section. Do not trust the generator's compliance claims.
+Food safety includes required cooking endpoints and safe storage; a shorter time limit never overrides it.
+Nutrition targets are contextual guidance, not a mandatory 20-30g protein minimum for every snack or side.
+Assess the recipe as part of a diet, not as an entire daily diet; never require every listed food or strategy.
+Review symptom rules only for the user's stated needs. If none apply, pass with evidence explaining that.
+Do not invent diagnoses, care-team instructions, nutrient measurements, or official AICR/AHA/ACS certification.
+If a material conflict or unresolved safety issue exists, mark fail or unknown and include it in constraint_violations.
+Passing a time check cannot override a failed guideline check. For unmodified source recipes, guideline_checks may be null.
+"""
+
     def _required_checks(self, intent_data: Dict[str, Any]) -> Dict[str, Any]:
         checks = {}
         recipe_request = intent_data.get("recipe_request")
@@ -123,6 +148,10 @@ For other requests ingredient_storage_check may be null.
             },
             "constraint_violations": [],
             "reasoning": "Brief evidence-based explanation",
+        }
+        example["guideline_checks"] = {
+            category: {"status": "pass", "evidence": "Specific recipe evidence for this policy section"}
+            for category in ("food_safety", "nutrition", "symptom_suitability")
         }
         constraints = intent_data.get("constraints", {})
         preparation_contract = ""
@@ -283,6 +312,16 @@ Example shape (replace all example values with your assessment, never copy examp
             elif check["status"] != "pass":
                 violations.append(f"{key}: {check['evidence']}")
         verification["constraint_checks"] = checks
+        if self._requires_guideline_review(recipe):
+            guideline_checks = verification.get("guideline_checks")
+            if not isinstance(guideline_checks, dict):
+                guideline_checks = {}
+            for category in ("food_safety", "nutrition", "symptom_suitability"):
+                check = guideline_checks.get(category)
+                if not isinstance(check, dict) or not isinstance(check.get("evidence"), str) or not check["evidence"].strip():
+                    violations.append(f"Missing guideline assessment: {category}")
+                elif check.get("status") != "pass":
+                    violations.append(f"Guideline {category}: {check['evidence']}")
         if unchanged_adaptation(recipe, intent_data):
             violations.append("Recipe ingredients and preparation are unchanged; the requested adaptation needs an actual change")
             if verification.get("relevance") == "match":
@@ -420,6 +459,7 @@ The backend will retain existing failures and independently validate this eviden
                     if existing.get(field) in (None, "") and isinstance(recovered.get(field), list):
                         existing[field] = recovered[field]
         except Exception as error:
+            raise_if_model_unavailable(error)
             logger.warning("Missing assessment completion failed: %s", type(error).__name__)
         return verification
     
@@ -459,6 +499,7 @@ The backend will retain existing failures and independently validate this eviden
             for i, recipe in enumerate(recipes):
                 recipes_for_verification.append({
                     "id": i,
+                    "requires_guideline_review": self._requires_guideline_review(recipe),
                     "name": recipe.get("name", "Unknown"),
                     "type": recipe.get("type", "Unknown"),
                     "description": recipe.get("description", ""),
@@ -512,6 +553,7 @@ The backend will retain existing failures and independently validate this eviden
                         "reasoning": verification.get("reasoning", ""),
                         "constraint_violations": verification.get("constraint_violations", []),
                         "constraint_checks": verification.get("constraint_checks", {}),
+                        "guideline_checks": verification.get("guideline_checks"),
                         "meets_preferences": verification["passes_verification"]
                     }
                     
@@ -522,6 +564,8 @@ The backend will retain existing failures and independently validate this eviden
                         
                         if not aicr_compliance["overall_compliant"]:
                             recipe["verification_details"]["passes_verification"] = False
+                            recipe["verification_details"]["meets_preferences"] = False
+                            recipe["verification_details"]["verification_score"] = 0
                             recipe["verification_details"]["constraint_violations"].extend(
                                 aicr_compliance["warnings"]
                             )
@@ -541,6 +585,7 @@ The backend will retain existing failures and independently validate this eviden
             return recipes
             
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.error(f"Error in batch verification: {e}")
             logger.warning("Batch verification failed, falling back to individual verification")
             return self._fallback_individual_verification(recipes, intent_data, aicr_service)
@@ -566,6 +611,7 @@ Verify EACH recipe (by id) against the request and ALL active requirements.
 - ANY constraint violation = FAIL for that recipe
 
 {self.RELEVANCE_RULES}
+{self._guideline_contract(intent_data)}
 {active_recipe_rules(intent_data)}
 {self.STORAGE_VERIFICATION_RULES if intent_data.get('constraints', {}).get('ingredient_storage') in {'pantry_based', 'shelf_stable_only'} else ''}
 
@@ -601,6 +647,9 @@ Verify ALL {len(recipes_for_verification)} recipes.
                 recipe["aicr_compliance"] = aicr_compliance
                 if not aicr_compliance["overall_compliant"]:
                     recipe["verification_details"]["passes_verification"] = False
+                    recipe["verification_details"]["meets_preferences"] = False
+                    recipe["verification_details"]["verification_score"] = 0
+                    recipe["verification_details"]["constraint_violations"].extend(aicr_compliance.get("warnings", []))
         return recipes
 
     def verify_recipe_against_constraints(self, recipe_data: Dict[str, Any], intent_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -670,6 +719,7 @@ Verify ALL {len(recipes_for_verification)} recipes.
             return verification_result
             
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.error(f"Error in verification: {e}")
             return {
                 "passes_verification": False,
@@ -707,6 +757,9 @@ Verify ALL {len(recipes_for_verification)} recipes.
     def _build_individual_verification_prompt(self, recipe_data: Dict[str, Any], intent_data: Dict[str, Any]) -> str:
         """Build individual verification prompt"""
         return f"""You are a STRICT recipe verification system. Verify if this recipe meets the user's requirements.
+
+requires_guideline_review: {str(self._requires_guideline_review(recipe_data)).lower()}
+{self._guideline_contract(intent_data)}
 
 RECIPE:
 {json.dumps({
@@ -792,6 +845,7 @@ Return ONLY one valid JSON assessment object.
                     
                     verified_recipes.append(recipe)
                 except Exception as e:
+                    raise_if_model_unavailable(e)
                     recipe = future_to_recipe[future]
                     logger.error(f"Error verifying recipe {recipe.get('name')}: {e}")
                     recipe["verification_details"] = {

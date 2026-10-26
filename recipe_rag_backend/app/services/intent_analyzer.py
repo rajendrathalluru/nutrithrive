@@ -1,4 +1,5 @@
 import logging
+from app.services.model_errors import raise_if_model_unavailable
 import json
 import re
 from copy import deepcopy
@@ -52,6 +53,7 @@ class IntentAnalyzer:
             return intent_data
             
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.error(f"Error understanding query intent: {e}")
             return self._post_process_intent(query, self._get_fallback_intent_data(query))
     
@@ -221,6 +223,7 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
             return intent_data
             
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.error(f"Error in context-aware intent analysis: {e}")
             fallback_intent = self._get_fallback_intent_data(query)
             fallback_intent["context_resolution_failed"] = True

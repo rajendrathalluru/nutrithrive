@@ -268,7 +268,9 @@ class AICRGuidelinesService:
         food_safety = guidelines["food_safety"]["rules"]
         sections.append(f"- {food_safety['cook_thoroughly']['requirement']}")
         sections.append(f"  Reason: {food_safety['cook_thoroughly']['reasoning']}")
-        sections.append(f"- Avoid: {', '.join(food_safety['avoid_high_risk']['items'][:5])}")
+        sections.append(f"- Cooking endpoints: {food_safety['cook_thoroughly']['internal_temps']}")
+        sections.append(f"- Avoid: {', '.join(food_safety['avoid_high_risk']['items'])}")
+        sections.append(f"- Storage: {food_safety['proper_storage']}")
         sections.append("")
         
         # Always include protein (critical for cancer patients)
@@ -309,6 +311,24 @@ class AICRGuidelinesService:
         
         return "\n".join(sections)
     
+    def get_verification_policy(self, intent_data: Dict[str, Any]) -> Dict[str, Any]:
+        guidelines = self.get_guidelines()
+        focus_areas = self.extract_focus_areas_from_intent(intent_data)
+        return {
+            "metadata": guidelines["metadata"],
+            "food_safety": guidelines["food_safety"]["rules"],
+            "nutrition": {
+                "priorities": guidelines["nutrition_priorities"],
+                "foods_to_emphasize": guidelines["foods_to_emphasize"],
+                "foods_to_limit": guidelines["foods_to_limit"],
+                "general_principles": guidelines["general_principles"],
+            },
+            "symptom_suitability": {
+                area: guidelines["symptom_management"][area]
+                for area in focus_areas if area in guidelines["symptom_management"]
+            },
+        }
+
     def validate_recipe_compliance(self, recipe: Dict[str, Any]) -> Dict[str, Any]:
         """
         Validate a recipe against AICR guidelines.
@@ -331,6 +351,7 @@ class AICRGuidelinesService:
         
         ingredients = recipe.get("ingredients", [])
         if not ingredients:
+            compliance_report["overall_compliant"] = False
             compliance_report["warnings"].append("No ingredients to validate")
             compliance_report["score"] = 50
             return compliance_report

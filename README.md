@@ -39,7 +39,11 @@ Appliance requests distinguish required use (`equipment_required`) from exclusiv
 
 Upset-stomach/nausea food requests activate `digestive_comfort="gentle"`, grounded in actual user turns rather than assistant descriptions. This is a conservative food-selection preference, not a diagnosis or medical clearance. Shared generation/verification rules assess seasoning, preparation and individual-tolerance uncertainty; a bounded independent audit catches common hot seasonings and deep-frying even when the model falsely approves them. Among otherwise verified matches, selection prefers the fewest known higher-fiber/gas-forming ingredient cautions rather than padding to three. This relative preference is not an absolute ban or proof of tolerance; it does not universally prohibit tomatoes, dairy, legumes or all spices. Source recipes requiring changes remain adaptation references. Summaries acknowledge variable tolerance and advise contacting the care team for severe/persistent symptoms or inability to keep fluids down. The rule basis is [MedlinePlus nausea/vomiting guidance](https://medlineplus.gov/nauseaandvomiting.html) and [NCI easy-to-digest food guidance](https://www.cancer.gov/about-cancer/treatment/side-effects/nutrition/easy-to-digest); clinical review remains necessary for research deployment.
 
-For digestive-comfort and low-exertion searches, verified recipes bypass optional generic enhancement so later protein/fiber tips cannot dilute the request. Missing core recipes and requested adaptations still use the existing generation/verification pipeline. Fallback generation produces one complete candidate at a time for these requests, within the existing retry limits; it does not weaken acceptance checks or manufacture three matches.
+For digestive-comfort, low-exertion, and time-limited searches, verified recipes bypass optional generic enhancement so later tips cannot dilute the request or add uncounted preparation. Missing core recipes and requested adaptations still use the existing generation/verification pipeline. Fallback generation produces one complete candidate at a time for these requests, within the existing retry limits; it does not weaken acceptance checks or manufacture three matches.
+
+Time-limited CSV rescue prioritizes documented total elapsed times that fit the inclusive/exclusive boundary, after required-ingredient and equipment compatibility. This is ranking, not automatic acceptance: candidates still undergo full verification. When no database recipe qualifies, database-guided and then AI-only generation receive the same elapsed-time budget. Every generated instruction needs a numeric duration, including setup and serving. Independent checks reject missing timing, over-limit steps, per-side durations, and sequential work hidden behind an unrelated parallel step. Estimates are not guarantees of an individual user's cooking pace; the semantic verifier also assesses hidden preparation and realism.
+
+AI-generated recipes, completed source recipes, and generated guidance require explicit evidence-bearing `guideline_checks` for food safety, nutrition, and applicable symptom guidance in both batch and individual verification. The verifier receives the configured policy independently of the generation prompt. Missing, failed, or unknown checks block acceptance and are supplied to bounded repair; passing timing cannot bypass them. The ingredient-based compliance precheck remains a separate layer. These are automated checks against the application's AICR-derived policy, not certification or exhaustive compliance with all current AICR/AHA/ACS publications. AHA/ACS recipe-source attribution does not imply separate clinical policy engines. The configured policy requires investigator/dietitian review before research use.
 
 Cooking with body weakness/fatigue activates `preparation_effort="low"`, distinct from low hand strength, seated preparation, short total time and no heat. Verification includes preparation hidden in ingredient lines, sustained manual work and heavy cookware transfers. The bounded audit identifies three or more unaccounted ingredient-preparation tasks; it is a conservative workload heuristic, not a clinical accessibility threshold. Purchased pre-cut forms, brief heating and passive waiting are not automatically rejected. General “easy recipes” requests do not acquire this restriction. Both preferences persist through explicit follow-ups and clear for independent requests or explicit withdrawals. The skillet, soup and salad examples are regression fixtures; recipe discovery and database → database-guided AI → AI-only ordering remain unchanged. See [Macmillan's practical eating guidance](https://www.macmillan.org.uk/cancer-information-and-support/impacts-of-cancer/eating-problems/tips-for-managing-eating-problems) for prepared-food options when too tired to cook; the application does not infer cancer or a cause of weakness.
 
@@ -147,6 +151,7 @@ Required:
 
 Recommended:
 
+- `LLM_MODEL` (defaults to `gpt-4o-mini`; no automatic model substitution)
 - `DATA_FILE_PATH`
 - `API_HOST`
 - `API_PORT`
@@ -157,11 +162,16 @@ Example:
 
 ```env
 OPENAI_API_KEY=your_openai_api_key_here
+LLM_MODEL=gpt-4o-mini
 DATA_FILE_PATH=app/data/Recipe.csv
 API_HOST=0.0.0.0
 PORT=8000
 CORS_ORIGINS=http://localhost:3000,http://localhost:8000
 ```
+
+Azure/container environment values take precedence over the local `.env`. Set `LLM_MODEL=gpt-4o-mini` when deploying this change and restart/redeploy; an explicit older model setting still overrides the default. Startup makes a small model availability probe before building the recipe index. Provider errors during required analysis/generation/verification return a service-unavailable message, not a misleading no-matching-recipes result; invalid model JSON still uses the existing bounded recovery. No prompts, API keys, or raw provider diagnostics are included in that user-facing error.
+
+The approved replacement retains the existing Chat Completions integration ([GPT-4o mini documentation](https://developers.openai.com/api/docs/models/gpt-4o-mini)). Review model availability periodically: the [OpenAI deprecation schedule](https://developers.openai.com/api/docs/deprecations) lists GPT-4o mini's shutdown for January 14, 2027. Future model migration needs separate compatibility and regression checks rather than a silent automatic upgrade.
 
 ### Frontend
 

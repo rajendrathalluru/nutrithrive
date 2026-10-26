@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from guideline_fixtures import passing_guideline_checks
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -472,6 +473,7 @@ class RecipeRoutingTests(unittest.TestCase):
         verifier.initialize(Mock(predict=Mock(return_value=json.dumps([{
             "id": 0, "relevance": "match", "passes_verification": True,
             "constraint_violations": [],
+            "guideline_checks": passing_guideline_checks(),
             "constraint_checks": {
                 "recipe_request": {"status": "pass", "evidence": "Model claims the pantry preparation matches."},
                 "constraints.ingredient_storage": {"status": "pass", "evidence": "Uses pantry ingredients."},

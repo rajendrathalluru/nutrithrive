@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from guideline_fixtures import passing_guideline_checks
 from unittest.mock import Mock, patch
 
 from app.services.data_loader import DataLoader
@@ -173,7 +174,7 @@ class EquipmentVerificationTests(unittest.TestCase):
         recipe = {"name": "Mediterranean Bean Salad", "ingredients": ["1 can beans"],
                   "instructions": ["Mix beans and dressing. Serve cold."]}
         verifier = RecipeVerifier()
-        assessment = {"id": 0, "relevance": "match", "constraint_violations": [], "constraint_checks": {
+        assessment = {"id": 0, "relevance": "match", "constraint_violations": [], "guideline_checks": passing_guideline_checks(), "constraint_checks": {
             key: {"status": "pass", "evidence": "Cook beans in an air fryer."} for key in verifier._required_checks(intent)
         }}
         self.assertIn("constraints.equipment_required[0]", assessment["constraint_checks"])
@@ -208,7 +209,7 @@ class EquipmentVerificationTests(unittest.TestCase):
         service.recipe_enhancer.batch_enhance_recipes = Mock(side_effect=lambda recipes, intent: recipes)
         service.recipe_enhancer.generate_fallback_recipes = Mock(return_value=[generated])
         service.response_generator.generate_personalized_response = Mock(return_value="Open the air-fryer recipe.")
-        assessment = {"id": 0, "relevance": "match", "constraint_violations": [], "constraint_checks": {
+        assessment = {"id": 0, "relevance": "match", "constraint_violations": [], "guideline_checks": passing_guideline_checks(), "constraint_checks": {
             key: {"status": "pass", "evidence": "Air-fryer preparation."}
             for key in service.recipe_verifier._required_checks({**intent, "recipe_request": QUERY})
         }}

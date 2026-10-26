@@ -3,7 +3,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -16,7 +16,7 @@ class Settings:
     CORS_ORIGINS_RAW: str = os.getenv("CORS_ORIGINS", "http://localhost:3000")
     
     EMBEDDING_MODEL: str = "text-embedding-ada-002"
-    LLM_MODEL: str = "gpt-3.5-turbo"
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.5
     LLM_MAX_TOKENS: int = 1500
     

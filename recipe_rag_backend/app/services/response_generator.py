@@ -1,4 +1,5 @@
 import logging
+from app.services.model_errors import raise_if_model_unavailable
 import json
 from typing import List, Dict, Any
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, CHEWING_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, FOOD_GUIDANCE_RULES, REQUEST_MEANING_RULES, active_recipe_rules
@@ -46,7 +47,8 @@ Keep the response under 150 words. Link only to supplied sources when using thei
             response = self.llm.predict(prompt).strip()
             if response:
                 return response
-        except Exception:
+        except Exception as error:
+            raise_if_model_unavailable(error)
             logger.exception("Unable to answer food guidance question")
         return "I couldn't answer that food question reliably right now. Please try again."
 
@@ -72,7 +74,8 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
 """
         try:
             return self.llm.predict(prompt).strip()
-        except Exception:
+        except Exception as error:
+            raise_if_model_unavailable(error)
             logger.exception("Unable to answer recipe follow-up")
             return "I couldn't answer that recipe question right now. Please try again."
     
@@ -258,6 +261,7 @@ Avoid medical terminology or health condition references.
             return response.strip()[:1200]
             
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.error(f"Error generating response: {e}")
             highlighted_names = ", ".join([d['name'] for d in source_docs[:3]])
             return (

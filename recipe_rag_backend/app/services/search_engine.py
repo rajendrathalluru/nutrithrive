@@ -1,4 +1,5 @@
 import logging
+from app.services.model_errors import raise_if_model_unavailable
 import re
 import json
 from typing import List, Dict, Any
@@ -59,6 +60,7 @@ class SearchEngine:
                         seen_content.add(content_hash)
                         
             except Exception as e:
+                raise_if_model_unavailable(e)
                 logger.error(f"Error in search '{search_query}': {e}")
                 continue
         
@@ -191,6 +193,7 @@ Return {top_k} best indices as JSON:
             return reranked_docs
             
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.error(f"Error in reranking: {e}")
             if intent_data.get("constraints", {}).get("leftover_friendly"):
                 return sorted(
@@ -277,6 +280,7 @@ Return {top_k} best indices as JSON:
                 details["insufficient_data"] = True
                     
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.warning(f"Error extracting recipe details: {e}")
             details["extraction_error"] = True
         
@@ -299,6 +303,7 @@ Return {top_k} best indices as JSON:
             value = doc.metadata.get(key, default)
             return value if value is not None and value != "" else default
         except Exception as e:
+            raise_if_model_unavailable(e)
             logger.warning(f"Error getting metadata '{key}': {e}")
             return default
 
@@ -316,6 +321,7 @@ Return {top_k} best indices as JSON:
                 docs = self.vector_store.similarity_search(query, k=fallback_k)
                 logger.info(f"Fallback search found {len(docs)} documents")
             except Exception as e:
+                raise_if_model_unavailable(e)
                 logger.error(f"Error in fallback search: {e}")
         
         return docs

@@ -2,6 +2,7 @@ import copy
 import csv
 import json
 import unittest
+from guideline_fixtures import passing_guideline_checks
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -33,6 +34,7 @@ def model_pass(recipe, intent=INTENT):
     evidence = [citation("instructions", index, step) for index, step in enumerate(instructions)]
     return {
         "id": recipe.get("id", 0), "relevance": "match", "constraint_violations": [],
+        "guideline_checks": passing_guideline_checks(),
         "constraint_checks": {
             key: {"status": "pass", "evidence": "Model claims the recipe is suitable."}
             for key in RecipeVerifier()._required_checks(intent)

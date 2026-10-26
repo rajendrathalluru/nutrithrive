@@ -1,13 +1,14 @@
 import copy
 import json
 import unittest
+from guideline_fixtures import passing_guideline_checks
 from pathlib import Path
 from unittest.mock import Mock
 
 from app.services.aicr_guidelines_service import aicr_service
 from app.services.data_loader import DataLoader
 from app.services.intent_analyzer import IntentAnalyzer
-from app.services.preparation_validation import declared_time_check
+from app.services.preparation_validation import declared_time_check, time_candidate_rank
 from app.services.rag_service import RecipeRAGService
 from app.services.recipe_enhancer import RecipeEnhancer
 from app.services.recipe_verifier import RecipeVerifier
@@ -41,6 +42,7 @@ class TimeLimitedRecipeTests(unittest.TestCase):
     def assessment(self, intent):
         return {
             "id": 0, "relevance": "match", "constraint_violations": [],
+            "guideline_checks": passing_guideline_checks(),
             "constraint_checks": {
                 key: {"status": "pass", "evidence": "The stated total and complete steps fit the request."}
                 for key in RecipeVerifier()._required_checks(intent)
@@ -59,6 +61,95 @@ class TimeLimitedRecipeTests(unittest.TestCase):
             intent = self.intent(query)
             self.assertEqual(intent["constraints"]["time_max_minutes"], 5)
             self.assertTrue(intent["constraints"]["time_limit_exclusive"])
+
+    def test_reported_thirty_minute_limit_and_other_budgets(self):
+        for minutes in (5, 15, 30, 45, 60):
+            with self.subTest(minutes=minutes):
+                inclusive = self.intent(f"show recipes that take {minutes} minutes or less")
+                exclusive = self.intent(f"show recipes that take less than {minutes} minutes")
+                self.assertEqual(inclusive["constraints"]["time_max_minutes"], minutes)
+                self.assertTrue(self.verify(timed_recipe(minutes), inclusive)["verification_details"]["passes_verification"])
+                self.assertFalse(self.verify(timed_recipe(minutes), exclusive)["verification_details"]["passes_verification"])
+
+    def test_database_rescue_prioritizes_documented_total_times(self):
+        service = RecipeRAGService()
+        service.data_loader.load_data(Path(__file__).parents[1] / "app/data/Recipe.csv")
+        query = "show recipes that take 30 minutes or less"
+        intent = self.intent(query)
+        candidates = service._get_database_search_candidates(query, intent, set(), 8)
+        self.assertEqual(len(candidates), 8)
+        self.assertTrue(all(time_candidate_rank(recipe, intent["constraints"]) == 2 for recipe in candidates))
+        excluded = candidates[0]["recipe_id"]
+        next_candidates = service._get_database_search_candidates(query, intent, {excluded}, 8)
+        self.assertNotIn(excluded, [recipe["recipe_id"] for recipe in next_candidates])
+
+    def test_time_ranking_respects_exclusive_boundaries_without_accepting_recipes(self):
+        for query, expected in (("30 minutes or less", 2), ("under 30 minutes", 0)):
+            self.assertEqual(time_candidate_rank(timed_recipe(30), self.intent(query)["constraints"]), expected)
+        self.assertEqual(time_candidate_rank({}, self.intent()["constraints"]), 1)
+        self.assertEqual(time_candidate_rank(timed_recipe(30), {}), 0)
+
+    def test_generated_steps_need_timings_without_requiring_new_source_metadata(self):
+        recipe = timed_recipe(10)
+        recipe["instructions"].insert(0, "Gather ingredients and wash the bowl.")
+        intent = self.intent("30 minutes or less")
+        self.assertFalse(self.verify(recipe, intent)["verification_details"]["passes_verification"])
+        recipe["generated_by_llm"] = False
+        self.assertTrue(self.verify(recipe, intent)["verification_details"]["passes_verification"])
+
+    def test_parallel_steps_do_not_erase_later_sequential_time(self):
+        recipe = timed_recipe(30)
+        recipe["instructions"] = [
+            "Prepare the vegetables for 10 minutes.", "Cook rice for 20 minutes.",
+            "Meanwhile, mix the dressing for 5 minutes.", "Assemble and serve for 5 minutes.",
+        ]
+        self.assertFalse(self.verify(recipe, self.intent("30 minutes or less"))["verification_details"]["passes_verification"])
+
+    def test_per_side_and_sequential_times_within_one_step_are_counted(self):
+        for step in ("Cook for 16 minutes on each side.", "Cook for 20 minutes, then rest for 15 minutes.",
+                     "Cook for 15 minutes per side, then rest for 2 minutes.",
+                     "Chill for 1 hour and 5 minutes."):
+            recipe = timed_recipe(30)
+            recipe["instructions"] = [step]
+            self.assertFalse(self.verify(recipe, self.intent("30 minutes or less"))["verification_details"]["passes_verification"])
+
+    def test_time_pass_cannot_override_failed_or_missing_guideline_review(self):
+        for category in ("food_safety", "nutrition", "symptom_suitability"):
+            for check in (None, {"status": "unknown", "evidence": "Preparation cannot be established."},
+                          {"status": "fail", "evidence": "Conflicts with configured policy."}, {"status": "pass"}):
+                assessment = self.assessment(self.intent())
+                assessment["guideline_checks"][category] = check
+                result = self.verify(timed_recipe(), assessment=assessment)["verification_details"]
+                self.assertFalse(result["passes_verification"])
+                self.assertTrue(any("guideline" in violation.lower() for violation in result["constraint_violations"]))
+
+    def test_individual_verification_enforces_the_same_guideline_review(self):
+        verifier = RecipeVerifier()
+        assessment = self.assessment(self.intent())
+        assessment.pop("guideline_checks")
+        verifier.initialize(Mock(predict=Mock(return_value=json.dumps(assessment))))
+        result = verifier.verify_recipe_against_constraints(timed_recipe(), self.intent())
+        self.assertFalse(result["passes_verification"])
+
+    def test_full_policy_reaches_verification_and_generation(self):
+        intent = self.intent("30 minutes or less")
+        policy = aicr_service.get_verification_policy(intent)
+        self.assertIn("proper_storage", policy["food_safety"])
+        self.assertIn("internal_temps", policy["food_safety"]["cook_thoroughly"])
+        self.assertEqual(policy["symptom_suitability"], {})
+        verifier = RecipeVerifier()
+        for prompt in (verifier._build_batch_verification_prompt([], intent),
+                       verifier._build_individual_verification_prompt(timed_recipe(), intent)):
+            self.assertIn("guideline_checks", prompt)
+            self.assertIn("proper_storage", prompt)
+            self.assertIn("not a mandatory 20-30g", prompt)
+            self.assertIn("official AICR/AHA/ACS certification", prompt)
+        enhancer = RecipeEnhancer()
+        model = Mock(predict=Mock(return_value=json.dumps([timed_recipe()])))
+        enhancer.initialize(model, aicr_service)
+        enhancer.generate_fallback_recipes("30 minutes or less", intent, [])
+        self.assertIn("165", model.predict.call_args.args[0])
+        self.assertIn("raw sprouts", model.predict.call_args.args[0])
 
     def test_explicit_total_provides_real_citation_when_model_omits_time_check(self):
         recipe = self.verify(timed_recipe())
@@ -237,13 +328,27 @@ HELPFUL_TIPS:
         return service
 
     def test_pipeline_returns_verified_ai_recipe_when_no_database_match_exists(self):
-        for query in QUERIES:
+        for query in (*QUERIES, "show recipes that take 30 minutes or less"):
             service = self.routing_service(query, [], [[timed_recipe()]])
             result = service.ask_question(query)
             self.assertEqual(result["matches_found"], 1)
             self.assertEqual(result["source_documents"][0]["source_label"], "AI Generated")
             self.assertEqual(result["source_documents"][0]["generation_basis"], "ai_only")
             self.assertIn("approximately 3 minutes total", result["response"])
+
+    def test_failed_guideline_check_reaches_repair_and_is_reverified(self):
+        query = "show recipes that take 30 minutes or less"
+        service = self.routing_service(query, [], [[timed_recipe()], [timed_recipe()]])
+        accepted = self.assessment(self.intent(query))
+        accepted["constraint_checks"]["recipe_request"] = {"status": "pass", "evidence": "Complete three-minute preparation."}
+        rejected = copy.deepcopy(accepted)
+        rejected["guideline_checks"]["food_safety"] = {"status": "fail", "evidence": "Unsafe storage advice needs correction."}
+        service.recipe_verifier.llm.predict.side_effect = [json.dumps([rejected]), json.dumps([accepted])]
+        service._enhance_verified_recipes = Mock(side_effect=lambda recipes, intent: recipes)
+        result = service.ask_question(query)
+        self.assertEqual(result["matches_found"], 1)
+        self.assertIn("Unsafe storage advice", service.recipe_enhancer.llm.predict.call_args.args[0])
+        self.assertEqual(result["source_documents"][0]["verification_details"]["guideline_checks"]["food_safety"]["status"], "pass")
 
     def test_pipeline_repairs_excluded_boundary_using_database_context(self):
         loader = DataLoader()

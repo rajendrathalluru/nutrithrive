@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from guideline_fixtures import passing_guideline_checks
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -44,6 +45,7 @@ class PreparationAccessibilityTests(unittest.TestCase):
     def assessment(self, recipe, intent):
         assessment = {
             "id": 0, "relevance": "match", "constraint_violations": [],
+            "guideline_checks": passing_guideline_checks(),
             "constraint_checks": {key: {"status": "pass", "evidence": "Model claims every requirement is satisfied."}
                                   for key in RecipeVerifier()._required_checks(intent)},
         }

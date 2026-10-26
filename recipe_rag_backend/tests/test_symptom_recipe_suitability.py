@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from guideline_fixtures import passing_guideline_checks
 from unittest.mock import Mock, patch
 
 from app.services.conversation_scope import starts_new_request
@@ -87,7 +88,7 @@ class SymptomSuitabilityTests(unittest.TestCase):
         return {"name": name, "ingredients": record["Ingredients"].splitlines(), "instructions": record["Directions"].splitlines()}
 
     def assessment(self, verifier, intent):
-        return {"relevance": "match", "constraint_violations": [], "constraint_checks": {
+        return {"relevance": "match", "constraint_violations": [], "guideline_checks": passing_guideline_checks(), "constraint_checks": {
             key: {"status": "pass", "evidence": "A nutritious, easy recipe."} for key in verifier._required_checks(intent)
         }}
 

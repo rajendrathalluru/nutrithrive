@@ -18,9 +18,10 @@ from app.services.safety_service import safety_service
 from app.services.conversation_scope import scope_recipe_history, matching_recipe_title
 from app.services.equipment_validation import equipment_usage_evidence
 from app.services.digestive_comfort import digestive_tolerance_cautions
-from app.services.preparation_validation import audit_preparation_effort
+from app.services.preparation_validation import audit_preparation_effort, time_candidate_rank
 from app.services.recipe_follow_up import resolve_recipe_follow_up, is_more_recipes_request
 from app.services.required_ingredients import missing_required_ingredients
+from app.services.model_errors import RecipeModelUnavailable
 
 logger = logging.getLogger(__name__)
 MAX_RECIPES_PER_RESPONSE = 3
@@ -106,6 +107,7 @@ class RecipeRAGService:
         equipment = intent_data.get("constraints", {}).get("equipment_required", [])
         required_ingredients = intent_data.get("constraints", {}).get("ingredients_must_use") or []
         low_exertion = intent_data.get("constraints", {}).get("preparation_effort") == "low"
+        constraints = intent_data.get("constraints", {})
         ranked = []
         for _, row in self.data_loader.df.iterrows():
             record = row.to_dict()
@@ -134,13 +136,17 @@ class RecipeRAGService:
                 "ingredients": str(record.get("Ingredients", "")).splitlines(),
                 "instructions": str(record.get("Directions", "")).splitlines(),
             })) if low_exertion else 0
-            if score or equipment_matches:
+            timing_rank = (
+                time_candidate_rank(self._build_recipe_data_from_record(record), constraints)
+                if constraints.get("time_max_minutes") is not None else 0
+            )
+            if score or equipment_matches or timing_rank == 2:
                 ingredient_matches = len(required_ingredients) - len(missing_required_ingredients(
                     {"ingredients": str(record.get("Ingredients", "")).splitlines()}, required_ingredients,
                 ))
-                ranked.append((ingredient_matches, -effort_conflicts, equipment_matches, score, record))
-        ranked.sort(key=lambda item: item[:4], reverse=True)
-        return [self._build_recipe_data_from_record(record) for _, _, _, _, record in ranked[:limit]]
+                ranked.append((ingredient_matches, -effort_conflicts, equipment_matches, timing_rank, score, record))
+        ranked.sort(key=lambda item: item[:5], reverse=True)
+        return [self._build_recipe_data_from_record(item[-1]) for item in ranked[:limit]]
 
     def _verify_candidates(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
@@ -233,7 +239,8 @@ class RecipeRAGService:
             return []
         if (intent_data.get("query_type") == "recipe_adaptation"
                 or intent_data.get("constraints", {}).get("digestive_comfort") == "gentle"
-                or intent_data.get("constraints", {}).get("preparation_effort") == "low"):
+                or intent_data.get("constraints", {}).get("preparation_effort") == "low"
+                or intent_data.get("constraints", {}).get("time_max_minutes") is not None):
             return baseline
         originals = {self._get_recipe_identity(recipe): recipe for recipe in baseline}
         try:
@@ -463,6 +470,7 @@ class RecipeRAGService:
                     max_tokens=settings.LLM_MAX_TOKENS,
                     openai_api_key=settings.OPENAI_API_KEY
                 )
+                self.llm.predict("Reply with OK only.")
                 
                 self.data_loader.load_data()
                 documents = self.data_loader.prepare_documents()
@@ -793,6 +801,13 @@ class RecipeRAGService:
                 "previous_messages_considered": len(recipe_history) if context_used else 0
             }
             
+        except RecipeModelUnavailable:
+            logger.error("Recipe model unavailable (configured model: %s)", settings.LLM_MODEL)
+            return {
+                "query": query,
+                "response": "The recipe service is temporarily unavailable, so I couldn't complete recipe verification. Please try again later.",
+                "source": "error", "matches_found": 0, "mode": mode, "source_documents": [],
+            }
         except Exception as e:
             logger.error(f"Error processing query: {e}")
             import traceback

@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from guideline_fixtures import passing_guideline_checks
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -27,6 +28,7 @@ class PreparationValidationTests(unittest.TestCase):
         required = RecipeVerifier()._required_checks({"constraints": constraints})
         return {
             "id": 0, "relevance": "match", "constraint_violations": [],
+            "guideline_checks": passing_guideline_checks(),
             "constraint_checks": {key: {"status": "pass", "evidence": "Model claims this matches."} for key in required},
             "preparation_check": {"conflicting_steps": [], "unresolved_dependencies": [], "conflicting_guidance": []},
             "frozen_ingredient_check": {"non_frozen_ingredients": [], "unspecified_forms": [], "conflicting_guidance": []},

@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from guideline_fixtures import passing_guideline_checks
 from unittest.mock import Mock
 
 from app.services.aicr_guidelines_service import aicr_service
@@ -48,6 +49,7 @@ class CannedOnlyTests(unittest.TestCase):
     def assessment(self, intent=None):
         return {
             "id": 0, "relevance": "match", "constraint_violations": [],
+            "guideline_checks": passing_guideline_checks(),
             "constraint_checks": {key: {"status": "pass", "evidence": "Model claims canned ingredients."}
                                   for key in RecipeVerifier()._required_checks(intent or self.intent())},
             "canned_ingredient_check": {"non_canned_ingredients": [], "unspecified_forms": [], "conflicting_guidance": []},
