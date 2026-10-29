@@ -1,0 +1,39 @@
+.access-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+  background: radial-gradient(ellipse at 10% 15%, #e8eddf 0, transparent 55%), #fafbf7;
+  color: #293c30;
+}
+.access-card { width: 100%; max-width: 460px; padding: 40px; background: #fffefa; border: 1px solid #dde4d7; border-radius: 24px; box-shadow: 0 24px 80px #28482c0a; }
+.access-brand { display: flex; align-items: center; gap: 9px; font-size: 25px; font-weight: 600; letter-spacing: -1px; }
+.access-brand span span { color: #80916c; }
+.access-symbol { display: grid; place-items: center; width: 50px; height: 50px; border-radius: 16px; margin: 36px 0 22px; background: #eef2e7; color: #536d45; }
+.access-eyebrow { font-size: 11px !important; text-transform: uppercase; letter-spacing: 1.6px; color: #526b47 !important; }
+.access-card h1 { margin: 10px 0 14px; font-size: clamp(26px, 6vw, 31px); font-weight: 500; line-height: 1.2; letter-spacing: -1px; }
+.access-card p { color: #647063; font-size: 15px; line-height: 1.65; }
+.access-card form { margin-top: 28px; }
+.access-card label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 9px; }
+.access-input-wrap { display: flex; border: 1px solid #b5c2ac; border-radius: 12px; background: white; overflow: hidden; }
+.access-input-wrap:focus-within { outline: 2px solid #526e43; outline-offset: 3px; }
+.access-input-wrap input { width: 100%; min-width: 0; padding: 14px; border: 0; outline: none; font: inherit; font-size: 16px; background: transparent; }
+.access-reveal { display: grid; place-items: center; width: 48px; flex-shrink: 0; border: 0; background: transparent; color: #617254; cursor: pointer; }
+.access-submit { margin-top: 18px; padding: 15px 18px; display: flex; justify-content: center; align-items: center; gap: 12px; width: 100%; min-height: 50px; border: 0; border-radius: 12px; color: white; background: #38543e; cursor: pointer; font-weight: 500; }
+.access-submit:disabled { opacity: .6; cursor: default; }
+.access-card button:focus-visible, .access-signout:focus-visible { outline: 2px solid #526e43; outline-offset: 3px; }
+.access-card .access-error { color: #a0392d; font-size: 13px; margin-top: 12px; }
+.access-card .access-help { text-align: center; font-size: 13px; margin-top: 22px; }
+.access-card .access-footer { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e6e9df; font-size: 12px; text-align: center; }
+.access-signout { background: transparent; color: #38543e; border: 1px solid #d7dfd0; border-radius: 10px; padding: 8px 12px; min-height: 40px; cursor: pointer; font: inherit; font-size: 13px; white-space: nowrap; }
+.access-signout svg { display: none; }
+.access-header-actions { display: flex; align-items: center; gap: 10px; }
+@media (max-width: 520px) {
+  .access-page { padding: 20px 16px; }
+  .access-card { padding: 28px 24px; }
+  .access-header-actions { gap: 6px; }
+  .access-signout { padding: 8px; display: grid; place-items: center; width: 40px; flex-shrink: 0; }
+  .access-signout svg { display: block; }
+  .access-signout span, .thrive-chat .tw-header-with-access p, .thrive-home .home-header-authenticated .home-header-cta { display: none; }
+}

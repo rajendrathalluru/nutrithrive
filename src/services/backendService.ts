@@ -1,25 +1,13 @@
 import { BackendHealth, ChatMessage, Recipe } from '../types';
 import { cleanBackendText, formatIngredients, formatInstructions } from '../utils/textCleaner';
+import { apiFetch, getBackendBaseUrl } from './apiClient';
 
 export class BackendService {
   private static instance: BackendService;
   private readonly baseUrl: string;
 
   private constructor() {
-    const configuredUrl = window.__APP_CONFIG__?.REACT_APP_BACKEND_URL?.trim()
-      || process.env.REACT_APP_BACKEND_URL?.trim();
-
-    if (configuredUrl) {
-      this.baseUrl = configuredUrl.replace(/\/+$/, '');
-      return;
-    }
-
-    if (typeof window !== 'undefined') {
-      this.baseUrl = window.location.origin.replace(/\/+$/, '');
-      return;
-    }
-
-    this.baseUrl = 'http://localhost:8000';
+    this.baseUrl = getBackendBaseUrl();
   }
 
   public static getInstance(): BackendService {
@@ -31,7 +19,7 @@ export class BackendService {
 
   async getHealth(): Promise<BackendHealth> {
     try {
-      const response = await fetch(`${this.baseUrl}/health`);
+      const response = await apiFetch(`${this.baseUrl}/health`);
       if (!response.ok) {
         return {
           status: 'offline',
@@ -73,7 +61,7 @@ export class BackendService {
     let response: Response;
 
     try {
-      response = await fetch(`${this.baseUrl}/ask`, {
+      response = await apiFetch(`${this.baseUrl}/ask`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -109,7 +97,7 @@ export class BackendService {
     let response: Response;
 
     try {
-      response = await fetch(`${this.baseUrl}/transcribe`, {
+      response = await apiFetch(`${this.baseUrl}/transcribe`, {
         method: 'POST',
         body: formData,
       });
@@ -132,7 +120,7 @@ export class BackendService {
     let response: Response;
 
     try {
-      response = await fetch(`${this.baseUrl}/realtime/session`, {
+      response = await apiFetch(`${this.baseUrl}/realtime/session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/sdp',

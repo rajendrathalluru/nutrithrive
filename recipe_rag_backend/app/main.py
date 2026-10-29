@@ -19,6 +19,7 @@ from app.models.schemas import (
     HealthCheck
 )
 from app.core.config import settings
+from app.core.access_control import AccessControl, AccessControlMiddleware
 from app.services.rag_service import rag_service
 from app.services.safety_service import safety_service
 import openai
@@ -73,10 +74,13 @@ frontend_build_dir = Path(__file__).resolve().parents[1] / "frontend-build"
 frontend_static_dir = frontend_build_dir / "static"
 frontend_index_file = frontend_build_dir / "index.html"
 
+access_control = AccessControl(settings)
+app.add_middleware(AccessControlMiddleware, access=access_control)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=False,
+    allow_origins=[origin for origin in settings.cors_origins if origin != "*"],
+    allow_origin_regex=".*" if "*" in settings.cors_origins else None,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -567,7 +571,9 @@ async def transcribe_audio_stream(websocket: WebSocket):
 @app.get("/{full_path:path}")
 async def frontend_app(full_path: str):
     """Serve React build assets and client-side routes from the same domain."""
-    requested_file = frontend_build_dir / full_path
+    requested_file = (frontend_build_dir / full_path).resolve()
+    if not requested_file.is_relative_to(frontend_build_dir.resolve()):
+        raise HTTPException(status_code=404, detail="Not found")
 
     if requested_file.is_file():
         return FileResponse(requested_file)

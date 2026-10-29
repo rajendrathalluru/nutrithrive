@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import './App.css';
 import LandingPage from './components/LandingPage';
 import NutriThriveChatbot from './components/NutriThriveChatbot';
+import { useAccessLogout } from './components/AccessGate';
 
 const getCurrentView = (): 'landing' | 'chatbot' =>
   window.location.pathname.replace(/\/+$/, '') === '/chat' ? 'chatbot' : 'landing';
 
 function App() {
+  const onLogout = useAccessLogout();
   const [currentView, setCurrentView] = useState(getCurrentView);
 
   useEffect(() => {
@@ -31,9 +33,9 @@ function App() {
   return (
     <div className="App">
       {currentView === 'landing' ? (
-        <LandingPage onGetStarted={handleNavigateToChatbot} />
+        <LandingPage onGetStarted={handleNavigateToChatbot} onLogout={onLogout} />
       ) : (
-        <NutriThriveChatbot onBackToHome={handleBackToHome} />
+        <NutriThriveChatbot onBackToHome={handleBackToHome} onLogout={onLogout} />
       )}
     </div>
   );

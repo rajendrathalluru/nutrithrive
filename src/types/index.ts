@@ -53,6 +53,7 @@ export interface Chat {
 
 export interface NutriThriveChatbotProps {
   onBackToHome?: () => void;
+  onLogout?: () => void;
 }
 
 export interface RecipeConversationContext {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { PanelLeft, Leaf } from 'lucide-react';
+import { PanelLeft, Leaf, LogOut } from 'lucide-react';
 import { BackendHealth, Chat, Message, NutriThriveChatbotProps } from '../types';
 import {BackendService} from '../services/backendService';
 import Sidebar from './Sidebar';
@@ -9,7 +9,7 @@ import { buildConversationHistory } from '../utils/conversationHistory';
 import { useChatViewport } from '../hooks/useChatViewport';
 import './ChatWorkspace.css';
 
-const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome }) => {
+const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome, onLogout }) => {
   const shellRef = useChatViewport();
   const [chats, setChats] = useState<Chat[]>([
     {
@@ -244,7 +244,7 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
       />
 
       <main className="tw-main">
-        <header className="tw-header">
+        <header className={`tw-header${onLogout ? ' tw-header-with-access' : ''}`}>
           <div className="tw-header-title">
             <button type="button" onClick={() => setSidebarOpen(!sidebarOpen)} className="tw-icon-button" aria-label="Toggle conversations" aria-expanded={sidebarOpen} aria-controls="conversation-sidebar">
               <PanelLeft size={20} aria-hidden="true" />
@@ -254,9 +254,12 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome })
               <p>Good food, with you in mind</p>
             </div>
           </div>
-          <div className={`tw-health tw-health-${backendHealth.status}`} role="status" title={backendStatusMessage}>
-            <span className="tw-health-dot" />
-            {backendReady ? 'Connected' : backendHealth.status === 'starting' ? 'Warming up' : 'Offline'}
+          <div className="access-header-actions">
+            <div className={`tw-health tw-health-${backendHealth.status}`} role="status" title={backendStatusMessage}>
+              <span className="tw-health-dot" />
+              {backendReady ? 'Connected' : backendHealth.status === 'starting' ? 'Warming up' : 'Offline'}
+            </div>
+            {onLogout && <button type="button" className="access-signout" aria-label="Sign out" title="Sign out" onClick={onLogout}><LogOut size={18} aria-hidden="true" /><span>Sign out</span></button>}
           </div>
         </header>
         <AssistantChatThread

@@ -137,6 +137,33 @@ CI=true npm test -- --watchAll=false --runInBand
 
 ## Environment variables
 
+### Optional shared-password access
+
+Thrivewell can show a branded, password-only welcome screen before the homepage or chat. The backend enforces access on all recipe, voice, cache, system, and API-documentation endpoints, including transcription WebSockets. Only the login shell, its public assets, authentication endpoints, and the minimal `/health/live` process-liveness probe are public. The existing `/health` engine-readiness endpoint requires a session when the gate is enabled.
+
+To enable it in **Azure App Service → Settings → Environment variables** (or backend `.env` locally), set:
+
+```env
+APP_ACCESS_ENABLED=true
+APP_ACCESS_PASSWORD=<your unique shared password, 12–256 characters>
+APP_SESSION_SECRET=<a separate random secret of at least 32 characters>
+APP_SESSION_HOURS=8
+APP_COOKIE_SECURE=true
+CORS_ORIGINS=https://thrivewell.azurewebsites.net
+```
+
+Generate a session secret with `openssl rand -hex 32`. Keep both secrets in backend settings or Azure Key Vault references, never in Git, `REACT_APP_*` variables, frontend files, chat messages, or Docker build arguments. Use a strong, randomly generated password and share only the password with invited users, not the session secret. The enabled gate refuses to start with missing/invalid secrets. Access is **disabled by default**, so deploy the code and explicitly enable it; no password has been preset.
+
+Save the Azure settings and restart **all instances**. Enable Azure's **HTTPS Only** setting. If using an unauthenticated Azure/container health probe, set its path to `/health/live`; it indicates the web process is alive, not that the recipe model has finished warming up. The authenticated UI continues polling `/health` for recipe readiness.
+
+To change access, update `APP_ACCESS_PASSWORD` and restart all instances. Existing session signatures become invalid, and users must enter the new password on their next request; open pages also check access every minute and on focus. Rotating `APP_SESSION_SECRET` invalidates all sessions too. Changes do not require rebuilding the frontend. The UI offers **Sign out** on both the homepage and chat. Sessions expire after 8 hours by default (configurable from 1 to 24 hours), survive refreshes, and use signed, host-only, HttpOnly, SameSite=Strict cookies. The password is never saved in browser storage. Signing out removes that browser's cookie and unmounts its in-memory conversations; it does not individually revoke a copied token. Rotate either server secret to invalidate all tokens.
+
+For HTTP-only **local development**, explicitly set `APP_COOKIE_SECURE=false`, use `CORS_ORIGINS=http://localhost:3000,http://localhost:8000`, and set frontend `REACT_APP_BACKEND_URL=http://localhost:8000` for split-server mode. Use `localhost` consistently on both sides, not a mixture of `localhost` and `127.0.0.1`. Production should use the same HTTPS origin for frontend and backend; cross-site frontend hosting is intentionally not enabled. Non-browser API clients need the login cookie and a trusted `Origin` header for mutating requests.
+
+Login attempts are limited to 10 per client IP per 15-minute window in each backend worker; successful login clears that IP's counter. This is a bounded in-memory safeguard, not a deployment-wide rate limiter. Configure Azure's edge/network controls for distributed brute-force protection and trust forwarded IP headers only from known proxies. Users behind a shared IP can share a limit. Cookies and origin checks follow [OWASP session](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html) and [CSRF prevention](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html) guidance.
+
+This is a shared invitation gate, **not individual accounts, participant identity verification, an audit trail, or a compliance certification**. Anyone with the shared password has the same existing application/API access, including cache administration. For identifiable research or health data, use institutional SSO/individual accounts, role-based authorization, auditing, and the institution's security review instead of relying on a shared password alone. Recipe retrieval, generation, verification, and follow-up logic are unchanged.
+
 ### Backend
 
 Copy the backend example file:

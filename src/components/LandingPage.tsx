@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, ArrowUpRight, Check, ChevronDown, Clock3, CookingPot, ExternalLink, Leaf, Menu, MessageCircle, Package, SlidersHorizontal, Sparkles, Sprout, X } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, ChevronDown, Clock3, CookingPot, ExternalLink, Leaf, LogOut, Menu, MessageCircle, Package, SlidersHorizontal, Sparkles, Sprout, X } from 'lucide-react';
 import homeMeal from '../assets/images/home-meal.jpg';
 import './LandingPage.css';
 
 interface LandingPageProps {
   onGetStarted?: () => void;
+  onLogout?: () => void;
 }
 
 const navigation = [
@@ -31,7 +32,7 @@ const questions = [
   { question: 'Does Thrivewell replace advice from my care team?', answer: 'No. Thrivewell offers recipe ideas, not diagnosis or medical treatment. Follow the dietary guidance from your care team. Keep prompts focused on food preferences and avoid sharing personal or identifying health information.' },
 ];
 
-const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
+const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogout }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -62,7 +63,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted }) => {
           <nav className="home-desktop-nav" aria-label="Main navigation">
             {navigation.map(item => <a key={item.href} href={item.href}>{item.label}</a>)}
           </nav>
-          <div className="home-header-actions">
+          <div className={`home-header-actions${onLogout ? ' home-header-authenticated' : ''}`}>
+            {onLogout && <button type="button" className="access-signout" aria-label="Sign out" title="Sign out" onClick={onLogout}><LogOut size={18} aria-hidden="true" /><span>Sign out</span></button>}
             <button type="button" className="home-button home-header-cta" onClick={startChat}>Get Started <ArrowUpRight size={16} aria-hidden="true" /></button>
             <button type="button" className="home-menu-toggle" ref={menuButtonRef} aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen} aria-controls="home-mobile-nav" onClick={() => setMenuOpen(open => !open)}>
               {menuOpen ? <X size={22} aria-hidden="true" /> : <Menu size={22} aria-hidden="true" />}
