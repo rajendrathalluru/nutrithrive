@@ -220,6 +220,7 @@ export class BackendService {
           dynamicallyAdapted: doc.dynamically_adapted || false,
           cookTime: doc.cookTime || undefined,
           servings: doc.servings || undefined,
+          budgetAssessment: doc.budget_assessment || undefined,
           difficulty: doc.difficulty || undefined,
           nutrition: {
             calories: doc.calories ? parseFloat(doc.calories) : 0,

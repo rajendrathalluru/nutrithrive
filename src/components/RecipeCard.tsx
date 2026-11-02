@@ -115,6 +115,27 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
         )}
 
         {/* Expand/Collapse Button */}
+        {recipe.budgetAssessment && (
+          <section className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" aria-label="Budget estimate">
+            <strong>{recipe.budgetAssessment.status === 'estimated_within_budget' ? 'Estimated within budget' : 'Budget not confirmed'}</strong>
+            {recipe.budgetAssessment.estimate && <p>
+              USD ${recipe.budgetAssessment.estimate} · {recipe.budgetAssessment.basis === 'per_serving' ? 'per serving' : recipe.budgetAssessment.basis === 'shopping' ? 'grocery purchases' : 'whole recipe'}
+              {recipe.budgetAssessment.planning_ceiling && ` · Planning ceiling $${recipe.budgetAssessment.planning_ceiling}`}
+            </p>}
+            <p className="mt-1 text-xs">U.S. reference prices, not a guaranteed checkout total. Checked {recipe.budgetAssessment.observed_on || 'date unavailable'}.</p>
+            <details className="mt-2">
+              <summary className="cursor-pointer">Cost breakdown and assumptions</summary>
+              <ul className="mt-2 space-y-2">
+                {recipe.budgetAssessment.line_items?.map((item, index) => <li key={index}>
+                  {item.ingredient}: ${item.used_cost} used; {item.packages_to_buy} package(s) to buy, ${item.purchase_cost}.
+                  {/^https:\/\//i.test(item.source_url) && <> <a className="underline" href={item.source_url} target="_blank" rel="noopener noreferrer">Price source</a></>}
+                </li>)}
+              </ul>
+              {recipe.budgetAssessment.assumptions?.map((assumption, index) => <p className="mt-2 text-xs" key={index}>{assumption}</p>)}
+              {recipe.budgetAssessment.issues?.map((issue, index) => <p className="mt-2 text-xs" key={index}>{issue}</p>)}
+            </details>
+          </section>
+        )}
         <button
           onClick={() => setExpanded(!expanded)}
           className="tw-recipe-toggle w-full bg-slate-900 text-white py-3 rounded-2xl hover:bg-slate-800 transition-colors font-medium"

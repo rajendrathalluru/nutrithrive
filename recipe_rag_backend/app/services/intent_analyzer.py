@@ -1,5 +1,6 @@
 import logging
 from app.services.model_errors import raise_if_model_unavailable
+from app.services.budget_service import apply_budget_intent, is_budget_clarification_reply
 import json
 import re
 from copy import deepcopy
@@ -178,6 +179,13 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
                 intent_data.update(query_type="recipe_search", context_action="continue_request", referenced_recipe_ids=[])
                 for field in ("recipe_context", "adaptation_request", "clarification_question"):
                     intent_data.pop(field, None)
+            if is_budget_clarification_reply(query, sanitized_history):
+                intent_data.update(query_type="recipe_search", context_action="continue_request", referenced_recipe_ids=[])
+                for field in ("recipe_context", "adaptation_request", "clarification_question"):
+                    intent_data.pop(field, None)
+                intent_data["resolved_query"] = "; ".join(
+                    [message["content"] for message in sanitized_history if message["role"] == "user"] + [query]
+                )
             if intent_data.get("context_action") == "new_request":
                 return self._understand_independent_request(query)
             intent_data["context_action"] = "continue_request"
@@ -418,6 +426,7 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         conversation_history: Optional[List[Dict[str, Any]]] = None,
         current_query: Optional[str] = None
     ) -> Dict[str, Any]:
+        apply_budget_intent(intent_data, current_query or query, conversation_history)
         constraints = intent_data.setdefault("constraints", {})
         preferences = intent_data.setdefault("preferences", {})
         cancer_specific = intent_data.setdefault("cancer_patient_specific", {})

@@ -613,6 +613,7 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
                     "type": recipe.get("type", "CUSTOM"),
                     "calories": recipe.get("calories", 0),
                     "protein_grams": recipe.get("protein_grams", 0),
+                    **({"servings": recipe.get("servings")} if intent_data.get("budget_request") else {}),
                     "ingredients": recipe.get("ingredients", []),
                     "instructions": recipe.get("instructions", []),
                     "description": recipe.get("description", "Custom generated recipe for optimal nutrition"),

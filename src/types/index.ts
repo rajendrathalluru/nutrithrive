@@ -35,6 +35,17 @@ export interface Recipe {
   dynamicallyAdapted?: boolean;
   cookTime?: string;
   servings?: number;
+  budgetAssessment?: {
+    status: 'estimated_within_budget' | 'uncertain' | 'over_budget';
+    currency: string;
+    basis: 'recipe' | 'per_serving' | 'shopping';
+    estimate?: string;
+    planning_ceiling?: string;
+    observed_on?: string;
+    assumptions?: string[];
+    issues?: string[];
+    line_items?: Array<{ ingredient: string; used_cost: string; purchase_cost: string; packages_to_buy: number; source_url: string }>;
+  };
   difficulty?: string;
   nutrition?: {
     calories: number;

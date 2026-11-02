@@ -16,6 +16,7 @@ from app.services.equipment_validation import audit_equipment
 from app.services.digestive_comfort import audit_digestive_comfort
 from app.services.recipe_follow_up import unchanged_adaptation, audit_texture_adaptation
 from app.services.aicr_guidelines_service import aicr_service as configured_guidelines
+from app.services.budget_service import budget_rules
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,8 @@ Passing a time check cannot override a failed guideline check. For unmodified so
             checks["adaptation_request"] = intent_data["adaptation_request"]
         for section in ("constraints", "preferences", "cancer_patient_specific"):
             for key, value in intent_data.get(section, {}).items():
+                if section == "constraints" and key == "budget_max" and intent_data.get("budget_request"):
+                    continue
                 if value is not None and value is not False and value not in ("", [], {}):
                     if section == "constraints" and key in {"ingredients_must_use", "equipment_required"} and isinstance(value, list):
                         for index, ingredient in enumerate(value):
@@ -155,6 +158,9 @@ Passing a time check cannot override a failed guideline check. For unmodified so
         }
         constraints = intent_data.get("constraints", {})
         preparation_contract = ""
+        if intent_data.get("budget_request"):
+            preparation_contract += budget_rules(intent_data)
+            example["budget_recipe_check"] = {"status": "pass", "evidence": "Every food addition is quantified; servings are realistic."}
         if intent_data.get("adaptation_request"):
             preparation_contract += """For adaptation_request, compare the candidate with the selected original recipe.
 Pass only if the actual ingredients and directions implement the requested change while preserving the dish
@@ -312,6 +318,10 @@ Example shape (replace all example values with your assessment, never copy examp
             elif check["status"] != "pass":
                 violations.append(f"{key}: {check['evidence']}")
         verification["constraint_checks"] = checks
+        if intent_data.get("budget_request"):
+            check = verification.get("budget_recipe_check")
+            if not isinstance(check, dict) or check.get("status") != "pass" or not str(check.get("evidence") or "").strip():
+                violations.append("Budget recipe completeness or serving-size assessment is missing or failed.")
         if self._requires_guideline_review(recipe):
             guideline_checks = verification.get("guideline_checks")
             if not isinstance(guideline_checks, dict):
@@ -478,6 +488,7 @@ The backend will retain existing failures and independently validate this eviden
             or constraints.get("time_max_minutes") is not None
             or constraints.get("serving_temperature")
             or constraints.get("avoid_steam") or constraints.get("avoid_splatter")
+            or intent_data.get("budget_request")
         )
         batch_size = 1 if detailed_checks else 3
         if batch_size == 1 and len(recipes) > 1:
@@ -500,6 +511,7 @@ The backend will retain existing failures and independently validate this eviden
                 recipes_for_verification.append({
                     "id": i,
                     "requires_guideline_review": self._requires_guideline_review(recipe),
+                    **({"servings": recipe.get("servings")} if intent_data.get("budget_request") else {}),
                     "name": recipe.get("name", "Unknown"),
                     "type": recipe.get("type", "Unknown"),
                     "description": recipe.get("description", ""),
@@ -763,6 +775,7 @@ requires_guideline_review: {str(self._requires_guideline_review(recipe_data)).lo
 
 RECIPE:
 {json.dumps({
+    **({"servings": recipe_data.get("servings")} if intent_data.get("budget_request") else {}),
     "name": recipe_data.get("name", "Unknown"),
     "type": recipe_data.get("type", "Unknown"),
     "description": recipe_data.get("description", ""),

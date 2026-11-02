@@ -286,6 +286,7 @@ Summaries must identify portioning and supplied storage guidance without adding 
 
 
 def active_recipe_rules(intent_data: dict) -> str:
+    from app.services.budget_service import budget_rules
     constraints = intent_data.get("constraints", {})
     rules = [REQUEST_MEANING_RULES]
     if intent_data.get("adaptation_request"):
@@ -315,4 +316,7 @@ def active_recipe_rules(intent_data: dict) -> str:
         rules.append(PREPARATION_RULES)
     if constraints.get("serving_temperature"):
         rules.append(SERVING_TEMPERATURE_RULES)
+    budget = budget_rules(intent_data)
+    if budget:
+        rules.append(budget)
     return "\n".join(rules)

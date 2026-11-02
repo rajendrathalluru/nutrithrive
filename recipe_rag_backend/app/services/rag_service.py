@@ -22,6 +22,7 @@ from app.services.preparation_validation import audit_preparation_effort, time_c
 from app.services.recipe_follow_up import resolve_recipe_follow_up, is_more_recipes_request
 from app.services.required_ingredients import missing_required_ingredients
 from app.services.model_errors import RecipeModelUnavailable
+from app.services.budget_service import budget_service, budget_clarification, budget_no_results, is_budget_clarification_reply
 
 logger = logging.getLogger(__name__)
 MAX_RECIPES_PER_RESPONSE = 3
@@ -108,6 +109,9 @@ class RecipeRAGService:
         required_ingredients = intent_data.get("constraints", {}).get("ingredients_must_use") or []
         low_exertion = intent_data.get("constraints", {}).get("preparation_effort") == "low"
         constraints = intent_data.get("constraints", {})
+        budget = intent_data.get("budget_request")
+        if budget:
+            terms = {term for term in terms if not term.isdigit()} - {"under", "less", "than", "dollars", "dollar", "usd", "budget", "whole", "total", "cost", "per", "serving", "groceries", "shopping"}
         ranked = []
         for _, row in self.data_loader.df.iterrows():
             record = row.to_dict()
@@ -140,19 +144,24 @@ class RecipeRAGService:
                 time_candidate_rank(self._build_recipe_data_from_record(record), constraints)
                 if constraints.get("time_max_minutes") is not None else 0
             )
-            if score or equipment_matches or timing_rank == 2:
+            if score or equipment_matches or timing_rank == 2 or budget:
                 ingredient_matches = len(required_ingredients) - len(missing_required_ingredients(
                     {"ingredients": str(record.get("Ingredients", "")).splitlines()}, required_ingredients,
                 ))
-                ranked.append((ingredient_matches, -effort_conflicts, equipment_matches, timing_rank, score, record))
-        ranked.sort(key=lambda item: item[:5], reverse=True)
+                prefix = (ingredient_matches, -effort_conflicts, equipment_matches, timing_rank, score)
+                if budget:
+                    assessment = budget_service.assess(self._build_recipe_data_from_record(record), budget)
+                    prefix += (int(assessment["status"] == "estimated_within_budget"), -assessment.get("ingredient_count", 1000))
+                ranked.append((*prefix, record))
+        ranked.sort(key=lambda item: item[:-1], reverse=True)
         return [self._build_recipe_data_from_record(item[-1]) for item in ranked[:limit]]
 
     def _verify_candidates(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
         if intent_data.get("constraints", {}).get("leftover_friendly"):
             prepared = [{**recipe, "storage_evidence": self._get_recipe_storage_evidence(recipe)} for recipe in prepared]
-        return self.recipe_verifier.batch_verify_recipes(prepared, intent_data, aicr_service)
+        verified = self.recipe_verifier.batch_verify_recipes(prepared, intent_data, aicr_service)
+        return budget_service.annotate(verified, intent_data)
 
     def _get_verified_matches(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         matches = [
@@ -164,7 +173,7 @@ class RecipeRAGService:
         if matches and intent_data.get("constraints", {}).get("digestive_comfort") == "gentle":
             least_cautions = min(len(digestive_tolerance_cautions(recipe)) for recipe in matches)
             matches = [recipe for recipe in matches if len(digestive_tolerance_cautions(recipe)) == least_cautions]
-        return matches
+        return budget_service.rank(matches) if intent_data.get("budget_request") else matches
 
     def _verify_new_generated_recipes(
         self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any], excluded_names: set[str]
@@ -240,6 +249,7 @@ class RecipeRAGService:
         if (intent_data.get("query_type") == "recipe_adaptation"
                 or intent_data.get("constraints", {}).get("digestive_comfort") == "gentle"
                 or intent_data.get("constraints", {}).get("preparation_effort") == "low"
+                or intent_data.get("budget_request")
                 or intent_data.get("constraints", {}).get("time_max_minutes") is not None):
             return baseline
         originals = {self._get_recipe_identity(recipe): recipe for recipe in baseline}
@@ -263,6 +273,9 @@ class RecipeRAGService:
         if isinstance(required, str):
             required = [required]
         recipes = [recipe for recipe in recipes if not missing_required_ingredients(recipe, required)]
+        if intent_data.get("budget_request"):
+            recipes = [recipe for recipe in budget_service.annotate(recipes, intent_data)
+                       if recipe["budget_assessment"]["status"] == "estimated_within_budget"]
         if not intent_data.get("constraints", {}).get("leftover_friendly"):
             return recipes
 
@@ -578,7 +591,8 @@ class RecipeRAGService:
             ))
             recipe_follow_up = resolve_recipe_follow_up(query, recipe_history) is not None
             catalog_recipe_name = matching_recipe_title(query, self.data_loader.recipe_lookup)
-            if (self._is_small_talk_query(query, allow_heuristic=not conversation_recipes)
+            if (not is_budget_clarification_reply(query, recipe_history)
+                    and self._is_small_talk_query(query, allow_heuristic=not conversation_recipes)
                     and not references_previous_recipe and not recipe_follow_up and not catalog_recipe_name):
                 logger.info("Detected small-talk query, returning conversational response")
                 return self._build_small_talk_response(query, mode, conversation_history)
@@ -609,6 +623,16 @@ class RecipeRAGService:
             intent_data = {**intent_data, "recipe_request": self._normalize_recipe_request(recipe_request_query)}
             context_used = bool(recipe_history) and intent_data.get("context_action") != "new_request"
             query_type = intent_data.get("query_type")
+            if intent_data.get("budget_request") and query_type != "recipe_question":
+                clarification = budget_clarification(intent_data)
+                if clarification:
+                    intent_data["query_type"] = "clarification"
+                    return self._build_context_reply(query, mode, intent_data, clarification)
+                intent_data["budget_price_options"] = budget_service.options()
+                if not intent_data["budget_price_options"]:
+                    return self._build_context_reply(query, mode, intent_data,
+                        "I can't check this budget because current reference prices are unavailable. "
+                        "I won't invent prices or relax your dietary requirements. The price catalog needs updating.")
             reference_ids = intent_data.get("referenced_recipe_ids") or []
             referenced_recipes = [recipe for recipe in conversation_recipes if recipe["recipe_id"] in reference_ids]
             if query_type == "clarification" or (
@@ -727,7 +751,8 @@ class RecipeRAGService:
                             f"I couldn't find additional recipes matching your earlier request, \"{recipe_request_query}\", right now. "
                             "I kept your requirements and excluded recipes already shown."
                             if is_more_request else
-                            self.response_generator.generate_helpful_no_results_message(effective_query, intent_data)
+                            (budget_no_results(intent_data) if intent_data.get("budget_request") else
+                             self.response_generator.generate_helpful_no_results_message(effective_query, intent_data))
                         ),
                         "source": "no_results",
                         "matches_found": 0,
@@ -754,7 +779,8 @@ class RecipeRAGService:
                     "response": (
                         "I couldn't verify any additional recipes that meet your requirements right now. Please try again."
                         if is_more_request else
-                        "I couldn't verify a recipe that meets your requirements right now. Please try again."
+                        (budget_no_results(intent_data) if intent_data.get("budget_request") else
+                         "I couldn't verify a recipe that meets your requirements right now. Please try again.")
                     ),
                     "source": "no_results",
                     "matches_found": 0,

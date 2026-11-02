@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "currency": "USD",
+  "region": "U.S. online retail reference; not a local store quote",
+  "observed_on": "2026-11-01",
+  "planning_allowance": "0.20",
+  "notes": "Public online listing snapshots, not live checkout prices. Listings can use different default stores. The 20% allowance is a planning policy, not a statistical confidence interval. Refresh within 90 days. Unknown ingredients are not free.",
+  "items": [
+    {
+      "name": "canola oil",
+      "aliases": ["canola oil"],
+      "unit": "ml", "package_quantity": "1419.529419", "package_price": "3.97",
+      "source_url": "https://www.walmart.com/ip/10450988",
+      "product": "Great Value Canola Oil, 48 fl oz"
+    },
+    {
+      "name": "garlic powder",
+      "aliases": ["garlic powder"],
+      "unit": "g", "package_quantity": "96.388378625", "package_price": "1.08",
+      "source_url": "https://www.walmart.com/ip/676979470",
+      "product": "Great Value Garlic Powder, 3.4 oz"
+    },
+    {
+      "name": "plain nonfat greek yogurt",
+      "aliases": ["plain nonfat greek yogurt", "pasteurized plain nonfat greek yogurt"],
+      "unit": "g", "package_quantity": "907.18474", "package_price": "3.28",
+      "source_url": "https://www.walmart.com/ip/26559565",
+      "product": "Great Value Plain Nonfat Greek Yogurt, 32 oz"
+    },
+    {
+      "name": "uncooked long grain white rice",
+      "aliases": ["uncooked long grain white rice", "dry long grain white rice", "uncooked white rice", "dry white rice"],
+      "unit": "g", "package_quantity": "907.18474", "package_price": "1.82",
+      "source_url": "https://www.walmart.com/ip/10315394",
+      "product": "Great Value Long Grain Enriched Rice, 32 oz"
+    },
+    {
+      "name": "no-salt-added canned black beans",
+      "aliases": ["no-salt-added canned black beans", "canned no-salt-added black beans", "no salt added canned black beans", "no-salt-added black beans"],
+      "unit": "g", "package_quantity": "425.242846875", "package_price": "0.92",
+      "source_url": "https://www.walmart.com/ip/39778876",
+      "product": "Great Value No Salt Added Canned Black Beans, 15 oz; package weight includes liquid"
+    },
+    {
+      "name": "no-salt-added canned diced tomatoes",
+      "aliases": ["no-salt-added canned diced tomatoes", "canned no-salt-added diced tomatoes", "no salt added canned diced tomatoes", "no-salt-added diced tomatoes"],
+      "unit": "g", "package_quantity": "411.0680853125", "package_price": "0.96",
+      "source_url": "https://www.walmart.com/ip/10416052",
+      "product": "Great Value No Salt Added Diced Tomatoes, 14.5 oz; package weight includes liquid"
+    },
+    {
+      "name": "frozen mixed vegetables",
+      "aliases": ["frozen mixed vegetables"],
+      "unit": "g", "package_quantity": "340.1942775", "package_price": "0.98",
+      "source_url": "https://www.walmart.com/c/best-sellers/frozen-mixed-veggies-great-value",
+      "product": "Great Value Mixed Vegetables, 12 oz Steamable Bag (Frozen)"
+    },
+    {
+      "name": "dry old fashioned oats",
+      "aliases": ["dry old fashioned oats", "dry old-fashioned oats", "uncooked old fashioned oats", "uncooked old-fashioned oats"],
+      "unit": "g", "package_quantity": "1190.67997125", "package_price": "4.18",
+      "source_url": "https://www.walmart.com/browse/food/old-fashioned-oats/great-value/976759_976783_7830606_7652308/YnJhbmQ6R3JlYXQgVmFsdWUie",
+      "product": "Great Value 100% Whole Grain Old Fashioned Oats, 42 oz"
+    }
+  ]
+}

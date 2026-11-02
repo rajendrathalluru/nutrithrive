@@ -4,6 +4,21 @@ import { buildConversationHistory } from '../utils/conversationHistory';
 const originalFetch = global.fetch;
 afterEach(() => { global.fetch = originalFetch; });
 
+test('maps budget estimates but sends only recipe facts back in conversation history', async () => {
+  const assessment = { status: 'estimated_within_budget', currency: 'USD', basis: 'per_serving', estimate: '0.70' };
+  global.fetch = jest.fn().mockResolvedValue({
+    ok: true, json: async () => ({ source_documents: [{
+      name: 'Bean Bowl', recipe_id: 'beans', servings: 2, budget_assessment: assessment,
+      ingredients: ['1 (15 oz) can beans'], instructions: ['Heat and serve.'], source: 'llm_generated',
+    }] }),
+  });
+  const { recipes } = await BackendService.getInstance().searchRecipes('Meals under $5 per serving');
+  expect(recipes[0].budgetAssessment).toEqual(assessment);
+  const history = buildConversationHistory([{ id: 'budget', role: 'assistant', content: 'Bean Bowl', timestamp: new Date(), recipes }]);
+  expect(history[0].recipes?.[0]).toHaveProperty('servings', 2);
+  expect(history[0].recipes?.[0]).not.toHaveProperty('budget_assessment');
+});
+
 test('preserves source annotations from the API through same-chat recipe references', async () => {
   const notes = '*Use another herb.\n**Use canned beans.';
   global.fetch = jest.fn().mockResolvedValue({

@@ -10,6 +10,37 @@ const recipe: Recipe = {
   instructions: ['Cook rice and add sauce and garnishes.'],
 };
 
+test('only shows budget details when provided by the backend', () => {
+  const { rerender } = render(<RecipeCard recipe={recipe} />);
+  expect(screen.queryByRole('region', { name: 'Budget estimate' })).not.toBeInTheDocument();
+  rerender(<RecipeCard recipe={{ ...recipe, budgetAssessment: {
+    status: 'estimated_within_budget', currency: 'USD', basis: 'recipe', estimate: '1.40',
+    planning_ceiling: '1.68', observed_on: '2026-11-01',
+    assumptions: ['Before tax and delivery fees.'],
+    line_items: [{ ingredient: 'Dry rice', used_cost: '0.40', packages_to_buy: 1,
+      purchase_cost: '4.00', source_url: 'https://example.com/rice' }],
+  } }} />);
+  const budget = screen.getByRole('region', { name: 'Budget estimate' });
+  expect(budget).toHaveTextContent('Estimated within budget');
+  expect(budget).toHaveTextContent('USD $1.40 · whole recipe');
+  expect(budget).toHaveTextContent('Planning ceiling $1.68');
+  expect(budget).toHaveTextContent('not a guaranteed checkout total');
+  fireEvent.click(within(budget).getByText('Cost breakdown and assumptions'));
+  expect(budget).toHaveTextContent('Dry rice: $0.40 used; 1 package(s) to buy, $4.00.');
+  expect(within(budget).getByRole('link', { name: 'Price source' })).toHaveAttribute('href', 'https://example.com/rice');
+});
+
+test('does not turn an uncertain estimate into a budget claim or unsafe link', () => {
+  render(<RecipeCard recipe={{ ...recipe, budgetAssessment: {
+    status: 'uncertain', currency: 'USD', basis: 'shopping', issues: ['Unpriced ingredient.'],
+    line_items: [{ ingredient: 'Rice', used_cost: '1.00', packages_to_buy: 1,
+      purchase_cost: '4.00', source_url: 'javascript:alert(1)' }],
+  } }} />);
+  expect(screen.getByText('Budget not confirmed')).toBeInTheDocument();
+  expect(screen.queryByText('Estimated within budget')).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'Price source' })).not.toBeInTheDocument();
+});
+
 test.each(['database_exact', 'llm_generated'])('renders accessible nested ingredient bullets for %s', source => {
   render(<RecipeCard recipe={{ ...recipe, source }} />);
   expect(screen.queryByRole('list', { name: 'Ingredients' })).not.toBeInTheDocument();

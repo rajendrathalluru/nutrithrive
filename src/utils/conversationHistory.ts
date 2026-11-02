@@ -39,6 +39,7 @@ export const buildConversationHistory = (messages: Message[]): ChatMessage[] =>
           recipe_link: reference.sourceUrl, source_name: reference.sourceName,
         })),
         total_time: recipe.totalTime,
+        ...(recipe.budgetAssessment ? { servings: recipe.servings } : {}),
         storage_instructions: recipe.storageGuidance,
         calories: recipe.calories,
         nutrition: recipe.nutrition,

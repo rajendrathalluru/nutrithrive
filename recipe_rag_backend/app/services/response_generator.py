@@ -1,5 +1,6 @@
 import logging
 from app.services.model_errors import raise_if_model_unavailable
+from app.services.budget_service import budget_no_results
 import json
 from typing import List, Dict, Any
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, CHEWING_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, FOOD_GUIDANCE_RULES, REQUEST_MEANING_RULES, active_recipe_rules
@@ -85,6 +86,22 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
         """
         if not source_docs:
             return "I couldn't find recipes matching your needs."
+        if intent_data.get("budget_request"):
+            basis = {"recipe": "whole recipe", "per_serving": "per serving", "shopping": "groceries before tax/fees"}[intent_data["budget_request"]["basis"]]
+            lines = [f"Here are {len(source_docs)} recipe options with estimated costs within your budget ({basis}):"]
+            for recipe in source_docs:
+                estimate = recipe.get("budget_assessment", {})
+                if estimate.get("status") != "estimated_within_budget":
+                    return budget_no_results(intent_data)
+                lines.append(f"• {recipe['name']}: USD ${estimate['estimate']}; planning ceiling ${estimate['planning_ceiling']}.")
+            allowance = float(source_docs[0]["budget_assessment"]["planning_allowance"]) * 100
+            lines.append(f"These are U.S. reference estimates with a {allowance:g}% planning allowance, not guaranteed store prices. "
+                         "Open a card for ingredient costs, package purchases and assumptions.")
+            cautions = self._preparation_cautions(intent_data.get("constraints", {}))
+            lines.extend(cautions)
+            if not cautions and (intent_data.get("cancer_patient_specific", {}).get("symptoms") or intent_data.get("constraints", {}).get("health_conditions")):
+                lines.append("Food tolerance and needs vary; follow your care team's dietary guidance.")
+            return "\n".join(lines)
         
         try:
             recipe_count = len(source_docs)
@@ -97,17 +114,7 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                 lines = [f"Here {'is' if recipe_count == 1 else 'are'} {recipe_count} {focus} {noun} to consider:"]
                 lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
                 lines.append("Open a card for the ingredients, starting ingredient forms, and preparation steps.")
-                if gentle:
-                    lines.append(
-                        "Food tolerance varies; I can't confirm what is medically safe for the cause of an upset stomach. "
-                        "Try a small portion of foods you normally tolerate and follow your care team's advice. "
-                        "If symptoms are severe or persistent, or you can't keep fluids down, contact your care team."
-                    )
-                if low_exertion:
-                    lines.append(
-                        "Choose only preparation you can comfortably manage. Don't push through cooking if you feel weak or unsteady; "
-                        "rest or ask for help rather than handle hot or heavy cookware. Discuss new or worsening weakness with your care team."
-                    )
+                lines.extend(self._preparation_cautions(constraints))
                 return "\n".join(lines)
             if intent_data.get("adaptation_request"):
                 noun = "version" if recipe_count == 1 else "versions"
@@ -268,6 +275,21 @@ Avoid medical terminology or health condition references.
                 f"I found {len(source_docs)} recipe{'s' if len(source_docs) != 1 else ''} "
                 f"that match your request. Highlights include {highlighted_names}."
             )
+
+    def _preparation_cautions(self, constraints: Dict[str, Any]) -> List[str]:
+        lines = []
+        if constraints.get("digestive_comfort") == "gentle":
+            lines.append(
+                "Food tolerance varies; I can't confirm what is medically safe for the cause of an upset stomach. "
+                "Try a small portion of foods you normally tolerate and follow your care team's advice. "
+                "If symptoms are severe or persistent, or you can't keep fluids down, contact your care team."
+            )
+        if constraints.get("preparation_effort") == "low":
+            lines.append(
+                "Choose only preparation you can comfortably manage. Don't push through cooking if you feel weak or unsteady; "
+                "rest or ask for help rather than handle hot or heavy cookware. Discuss new or worsening weakness with your care team."
+            )
+        return lines
 
     def _generate_low_chewing_response(self, source_docs: List[Dict], constraints: Dict[str, Any]) -> str:
         lines = [f"I found {len(source_docs)} recipe{'s' if len(source_docs) != 1 else ''} for your low-chewing request:"]

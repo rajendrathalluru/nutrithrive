@@ -19,6 +19,7 @@ class Settings:
     APP_BUILD_REVISION: str = os.getenv("APP_BUILD_REVISION", "unknown")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     DATA_FILE_PATH: str = os.getenv("DATA_FILE_PATH", "app/data/Recipe.csv")
+    BUDGET_PRICE_CATALOG: str = os.getenv("BUDGET_PRICE_CATALOG", "app/data/ingredient_prices.json")
     API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
     API_PORT: int = int(os.getenv("PORT", os.getenv("API_PORT", "8000")))
     CORS_ORIGINS_RAW: str = os.getenv("CORS_ORIGINS", "http://localhost:3000")
