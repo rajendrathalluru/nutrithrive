@@ -1,6 +1,7 @@
 import { BackendHealth, ChatMessage, Recipe } from '../types';
 import { cleanBackendText, formatIngredients, formatInstructions } from '../utils/textCleaner';
 import { apiFetch, getBackendBaseUrl } from './apiClient';
+import { readRecipeStream } from './recipeStream';
 
 export class BackendService {
   private static instance: BackendService;
@@ -56,7 +57,8 @@ export class BackendService {
 
   async searchRecipes(
     query: string,
-    conversationHistory: ChatMessage[] = []
+    conversationHistory: ChatMessage[] = [],
+    onProgress?: (message: string) => void
   ): Promise<{ recipes: Recipe[], backendData: any }> {
     let response: Response;
 
@@ -65,6 +67,7 @@ export class BackendService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(onProgress ? { Accept: 'text/event-stream' } : {}),
         },
         body: JSON.stringify({
           query: query,
@@ -83,7 +86,9 @@ export class BackendService {
       throw new Error(errorDetail || `Backend error: ${response.status} ${response.statusText}`);
     }
 
-    const backendData = await response.json();
+    const backendData = onProgress && response.headers?.get('content-type')?.includes('text/event-stream')
+      ? await readRecipeStream(response, onProgress)
+      : await response.json();
     const recipes = this.transformBackendResponse(backendData);
 
     return { recipes, backendData };

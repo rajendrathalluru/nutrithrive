@@ -4,6 +4,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   isLoading?: boolean;
+  progressMessage?: string;
   recipes?: Recipe[];
   backendData?: any;
 }

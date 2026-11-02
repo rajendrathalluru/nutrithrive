@@ -496,12 +496,21 @@ Identical scoped follow-up requests also use a working context cache. Keys inclu
 
 Environment controls (require restart):
 - `RECIPE_IO_WORKERS=3`: concurrency for retrieval and verification, clamped to 1–3. Set to `1` for serial scheduling or when provider rate limits require it.
+- `RECIPE_REQUEST_WORKERS=2`: maximum concurrent `/ask` pipelines per process, clamped to 1–4. Both JSON and streaming requests use this limit. Set to `1` to serialize requests without blocking health checks or progress delivery. This multiplies per-stage concurrency, so size it for provider quotas and server capacity.
 - `RECIPE_CACHE_TTL_SECONDS=300`: lifetime of the new exact-response caches. Set to `0` to disable them.
 - `RECIPE_CACHE_MAX_ENTRIES=128`: capacity of each new cache, clamped to 1–512 entries.
 
 `/cache/stats` now returns the existing combined cache statistics, including separate context and batch-response hit/miss counts. Existing access protection remains unchanged. The new cache settings do not disable the pre-existing independent-intent, individual-verification, or enhancement caches.
 
 No generation attempts, enhancement steps, safety checks, model prompts, or output-token limits were removed. These changes reduce serial waits and repeated work; they do not guarantee a production response time. Provider latency and rate limits still matter. Offline regression tests exercise preserved results, concurrent scheduling, expiry, invalidation, mutation isolation, and current-safety-check rejection after cache hits. Measure isolated warm-request latency after deployment before claiming a specific improvement; synthetic timing tests are not Azure benchmarks.
+
+### Live chat progress
+
+The chat opts into progress on the existing authenticated `POST /ask` endpoint using `Accept: text/event-stream`. Normal clients still receive the same JSON response. Safety interception and readiness checks precede recipe execution. The synchronous pipeline runs in a bounded worker pool, leaving the API event loop responsive; existing independent retrieval and verification parallelism is retained. No prompts, candidate limits, verification requirements, enhancement behavior, or fallback ordering are removed.
+
+Progress events contain only fixed stage names/messages, emitted when actual work starts (not timers or fabricated percentages). Retrieval, generation, verification, final checks, and response preparation remain ordered. Stage labels may repeat during repair or fallback. Heartbeat comments keep the connection active without claiming new progress. Only a schema-validated terminal `result` event carries the original final response and recipe cards; interim candidates are never streamed. Loading messages are excluded from conversation history and progress updates are bound to their originating chat/message.
+
+The frontend also accepts ordinary JSON from an older backend or a safety redirect. A failed/interrupted stream is not automatically replayed, avoiding duplicate paid generation. Disconnects suppress results and stop work at the next reported stage; an already-running provider call cannot be forcibly cancelled, and its worker slot stays occupied until it returns. The stream uses `Cache-Control: no-store` and `X-Accel-Buffering: no`; verify that any additional Azure proxy/CDN does not buffer streaming responses. Rebuild/redeploy both frontend and backend to enable the UI. This improves responsiveness and removes API event-loop blocking, but does not promise a particular single-request inference latency.
 
 ## Local development notes
 

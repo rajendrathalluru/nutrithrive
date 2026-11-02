@@ -73,7 +73,7 @@ test('sends the unchanged prompt and preserves structured recipe context in foll
   await screen.findByText('Here is a bean soup.');
   expect(searchRecipes).toHaveBeenNthCalledWith(1, 'Show vegetarian soups', [
     expect.objectContaining({ role: 'assistant', content: expect.stringContaining('personalized recipes') }),
-  ]);
+  ], expect.any(Function));
   expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
   expect(screen.getByRole('link', { name: 'Source: AHA' })).toHaveAttribute('href', recipe.sourceUrl);
   fireEvent.click(screen.getByRole('button', { name: 'View Full Recipe' }));
@@ -94,7 +94,7 @@ test('sends the unchanged prompt and preserves structured recipe context in foll
     recipes: [{ recipe_id: 'soup-1', name: 'Bean Soup', recipe_link: recipe.sourceUrl, ingredients: recipe.ingredients }],
   });
   expect(history[2].content).toContain('Previously shown recipes: Bean Soup');
-  await waitFor(() => expect(screen.queryByText('Searching for recipes...')).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByText('Sending your request…')).not.toBeInTheDocument());
 });
 
 test.each(['AHA', 'AICR', 'ACS'])('keeps the database source link for %s', async sourceName => {
@@ -121,9 +121,14 @@ test('keeps chats independent, including responses arriving after a chat switch'
   searchRecipes.mockImplementationOnce(() => new Promise(resolve => { resolveSearch = resolve; }));
   await readyChat();
   send('First conversation');
-  expect(screen.getByText('Searching for recipes...')).toBeInTheDocument();
+  expect(screen.getByText('Sending your request…')).toBeInTheDocument();
+  act(() => searchRecipes.mock.calls[0][2]('Checking recipes against your requirements and guidelines…'));
+  expect(screen.getByText('Checking recipes against your requirements and guidelines…')).toBeInTheDocument();
+  expect(screen.queryByText('Bean Soup')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
+  act(() => searchRecipes.mock.calls[0][2]('Preparing your response…'));
+  expect(screen.queryByText('Preparing your response…')).not.toBeInTheDocument();
   await act(async () => { resolveSearch({ recipes: [recipe], backendData: { response: 'First chat answer.' } }); });
   expect(screen.queryByText('First chat answer.')).not.toBeInTheDocument();
   expect(screen.queryByText('Bean Soup')).not.toBeInTheDocument();
@@ -338,7 +343,7 @@ test('live voice transcription fills the same draft and submits through the exis
   });
   fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
   await screen.findByText('Here is a bean soup.');
-  expect(searchRecipes).toHaveBeenCalledWith('Please suggest vegetarian soups', expect.any(Array));
+  expect(searchRecipes).toHaveBeenCalledWith('Please suggest vegetarian soups', expect.any(Array), expect.any(Function));
   unmount();
   expect(microphone.stop).toHaveBeenCalled();
   expect(channel.close).toHaveBeenCalledTimes(1);

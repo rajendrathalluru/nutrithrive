@@ -134,7 +134,8 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome, o
       role: 'assistant',
       content: '',
       timestamp: new Date(),
-      isLoading: true
+      isLoading: true,
+      progressMessage: 'Sending your request…'
     };
     
     setChats(prev => prev.map(chat => 
@@ -150,7 +151,11 @@ const NutriThriveChatbot: React.FC<NutriThriveChatbotProps> = ({ onBackToHome, o
       // Pass conversation history to backend
       const { recipes, backendData } = await backendService.searchRecipes(
         messageText,
-        historyForBackend
+        historyForBackend,
+        progressMessage => setChats(prev => prev.map(chat => chat.id === currentChatId
+          ? { ...chat, messages: chat.messages.map(message => message.id === loadingMessage.id && message.isLoading
+            ? { ...message, progressMessage } : message) }
+          : chat))
       );
       setBackendHealth((previous) => ({
         ...previous,

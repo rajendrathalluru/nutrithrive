@@ -5,7 +5,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import logging
@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.core.access_control import AccessControl, AccessControlMiddleware
 from app.services.rag_service import rag_service
 from app.services.safety_service import safety_service
+from app.services.recipe_progress import run_recipe_work, stream_recipe_work
 import openai
 import requests
 
@@ -269,7 +270,7 @@ async def search_recipes(request: RecipeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/ask", response_model=RecipeResponse)
-async def ask_question(request: ConversationQueryRequest):  # UPDATED: Use new request model
+async def ask_question(request: ConversationQueryRequest, http_request: Request = None):
     """
     Main endpoint for intelligent recipe queries with full dynamic adaptation.
     
@@ -314,15 +315,21 @@ async def ask_question(request: ConversationQueryRequest):  # UPDATED: Use new r
         )
         
         # Get the full response from RAG service with conversation context
-        response_data = rag_service.ask_question(
-            query=request.query, 
-            mode=request.mode,
-            conversation_history=conv_history  # NEW: Pass conversation history
-        )
-        
-        context_used = bool(conv_history) and response_data.get("intent_analysis", {}).get("context_action") != "new_request"
-        response_data.setdefault("conversation_context_used", context_used)
-        response_data.setdefault("previous_messages_considered", len(conv_history) if context_used else 0)
+        def work():
+            result = rag_service.ask_question(
+                query=request.query, mode=request.mode, conversation_history=conv_history
+            )
+            context_used = bool(conv_history) and result.get("intent_analysis", {}).get("context_action") != "new_request"
+            result.setdefault("conversation_context_used", context_used)
+            result.setdefault("previous_messages_considered", len(conv_history) if context_used else 0)
+            return result
+
+        if http_request is not None and "text/event-stream" in http_request.headers.get("accept", ""):
+            return StreamingResponse(
+                stream_recipe_work(work), media_type="text/event-stream",
+                headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+            )
+        response_data = await run_recipe_work(work)
         
         # Log what we're returning
         logger.info(f"Returning {response_data.get('matches_found', 0)} recipes")

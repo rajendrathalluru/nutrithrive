@@ -23,6 +23,7 @@ from app.services.recipe_follow_up import resolve_recipe_follow_up, is_more_reci
 from app.services.required_ingredients import missing_required_ingredients
 from app.services.model_errors import RecipeModelUnavailable
 from app.services.budget_service import budget_service, budget_clarification, budget_no_results, is_budget_clarification_reply
+from app.services.recipe_progress import report_progress, RecipeRequestCancelled
 
 logger = logging.getLogger(__name__)
 MAX_RECIPES_PER_RESPONSE = 3
@@ -157,6 +158,8 @@ class RecipeRAGService:
         return [self._build_recipe_data_from_record(item[-1]) for item in ranked[:limit]]
 
     def _verify_candidates(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        if recipes:
+            report_progress("verifying")
         prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
         if intent_data.get("constraints", {}).get("leftover_friendly"):
             prepared = [{**recipe, "storage_evidence": self._get_recipe_storage_evidence(recipe)} for recipe in prepared]
@@ -197,6 +200,7 @@ class RecipeRAGService:
                     f"Create complete recipes with ingredients and step-by-step instructions for: {query}"
                 )
                 logger.info("Recipe generation stage=%s attempt=%s", stage_name, attempt + 1)
+                report_progress("generating")
                 candidates = self.recipe_enhancer.generate_fallback_recipes(
                     generation_query, intent_data, stage_failures, grounding_recipes=references
                 )
@@ -207,6 +211,7 @@ class RecipeRAGService:
                     return matches
                 stage_failures = [*assessed, *stage_failures]
 
+            report_progress("generating")
             candidates = self.recipe_enhancer.generate_structured_fallback_recipe(
                 query, intent_data, grounding_recipes=references
             )
@@ -253,6 +258,7 @@ class RecipeRAGService:
                 or intent_data.get("constraints", {}).get("time_max_minutes") is not None):
             return baseline
         originals = {self._get_recipe_identity(recipe): recipe for recipe in baseline}
+        report_progress("enhancing")
         try:
             enhanced = self.recipe_enhancer.batch_enhance_recipes(deepcopy(baseline), deepcopy(intent_data))
             changed = [recipe for recipe in enhanced if self._get_recipe_identity(recipe) in originals
@@ -613,6 +619,7 @@ class RecipeRAGService:
                 ]
 
             # Step 1: Enhanced intent understanding with conversation context
+            report_progress("understanding")
             intent_data = self.intent_analyzer.understand_query_intent_with_context(query, intent_history)
             if intent_data.get("context_resolution_failed"):
                 return self._build_context_reply(
@@ -666,10 +673,14 @@ class RecipeRAGService:
             effective_query = intent_data.get("search_strategy", {}).get("enhanced_query") or recipe_request_query
             
             # Step 2: Multi-query search
+            if not is_recipe_adaptation and not lookup_record:
+                report_progress("searching")
             docs = [] if is_recipe_adaptation or lookup_record else self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
             logger.info(f"Search complete: {time.time() - start_time:.2f}s, found {len(docs)} docs")
             
             # Step 3: Reranking
+            if docs:
+                report_progress("ranking")
             reranked_docs = [] if is_recipe_adaptation or lookup_record else self.search_engine.rerank_with_constraint_filtering(docs, effective_query, intent_data, top_k=settings.SEARCH_K)
             logger.info(f"Reranking complete: {time.time() - start_time:.2f}s, {len(reranked_docs)} docs")
             
@@ -694,6 +705,7 @@ class RecipeRAGService:
 
             verified_recipes = self._get_verified_matches(candidate_recipes, intent_data)
             if not verified_recipes and not is_recipe_adaptation and not lookup_record:
+                report_progress("searching_more")
                 seen_ids = {self._get_recipe_identity(recipe) for recipe in candidate_recipes}
                 additional = self._get_database_search_candidates(
                     normalized_recipe_request, intent_data, seen_ids, settings.SEARCH_K,
@@ -765,6 +777,7 @@ class RecipeRAGService:
             if lookup_record:
                 recipe_limit = 1
             source_docs = self._enhance_verified_recipes(source_docs[:recipe_limit], intent_data)
+            report_progress("finalizing")
             source_docs = self._deduplicate_recipes(source_docs)
             source_docs = self._apply_deterministic_constraints(source_docs, intent_data)
             source_docs = self._annotate_recipe_source_tiers(source_docs)
@@ -796,6 +809,7 @@ class RecipeRAGService:
                     "selected_recipe_ids": [recipe["recipe_id"] for recipe in source_docs],
                     "waiting_for": None,
                 }
+            report_progress("summarizing")
             response_text = self.response_generator.generate_personalized_response(effective_query, source_docs, intent_data)
             
             total_time = time.time() - start_time
@@ -827,6 +841,8 @@ class RecipeRAGService:
                 "previous_messages_considered": len(recipe_history) if context_used else 0
             }
             
+        except RecipeRequestCancelled:
+            raise
         except RecipeModelUnavailable:
             logger.error("Recipe model unavailable (configured model: %s)", settings.LLM_MODEL)
             return {

@@ -33,7 +33,7 @@ const Message: React.FC<MessageProps> = ({ message }) => {
           {message.isLoading ? (
             <div className="tw-loading" role="status">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Searching for recipes...</span>
+              <span>{message.progressMessage || 'Waiting for the recipe service…'}</span>
             </div>
           ) : (
             <p className="whitespace-pre-wrap leading-7 text-[15px]">{cleanedContent}</p>
@@ -81,7 +81,7 @@ const Message: React.FC<MessageProps> = ({ message }) => {
           </details>
         )}
         
-        {message.recipes && message.recipes.length > 0 && (
+        {!message.isLoading && message.recipes && message.recipes.length > 0 && (
           <div className="tw-recipes mt-5">
             <div className="mb-3 px-1">
               <h3 className="font-semibold text-slate-900">
