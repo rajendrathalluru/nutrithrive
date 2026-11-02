@@ -57,6 +57,10 @@ class BudgetTests(unittest.TestCase):
         request = {"currency": "USD", "limit": "5", "basis": "recipe", "exclusive": True, **changes}
         return self.service.assess(candidate or recipe(), request)
 
+    def legacy_basis_question(self, limit):
+        return (f"Is your USD ${limit} limit for the quantities used in the whole recipe, per serving, "
+                "or for buying the groceries before tax and delivery fees? I use U.S. reference prices, not guaranteed local prices.")
+
     def test_money_extraction_does_not_confuse_time_or_ingredient_count(self):
         for query in ["under $5", "under 5 dollars", "under five dollars", "under US$5"]:
             with self.subTest(query=query):
@@ -67,12 +71,18 @@ class BudgetTests(unittest.TestCase):
         self.assertFalse(self.intent("at most $5")["budget_request"]["exclusive"])
         self.assertEqual(self.intent("under $5 with oil that costs $10")["budget_request"]["limit"], "5")
 
-    def test_ambiguous_budget_asks_cost_basis_and_followup_resolves_it(self):
+    def test_unspecified_budget_basis_defaults_to_recipe_and_explicit_basis_wins(self):
         first = "Show meals under $5"
-        self.assertIn("per serving", budget_clarification(self.intent(first)))
+        self.assertFalse(budget_clarification(self.intent(first)))
+        self.assertEqual(self.intent(first)["budget_request"]["basis"], "recipe")
+        self.assertTrue(self.intent(first)["budget_request"]["basis_assumed"])
         followup = self.intent("Whole recipe", [{"role": "user", "content": first}])
         self.assertEqual(followup["budget_request"]["basis"], "recipe")
+        self.assertNotIn("basis_assumed", followup["budget_request"])
         self.assertFalse(budget_clarification(followup))
+        for phrase, expected in [("per serving", "per_serving"), ("for groceries", "shopping")]:
+            self.assertEqual(self.intent(first + " " + phrase)["budget_request"]["basis"], expected)
+            self.assertEqual(self.intent(phrase, [{"role": "user", "content": first}])["budget_request"]["basis"], expected)
         self.assertIn("maximum food budget", budget_clarification(self.intent("affordable meals")))
 
     def test_serving_count_supports_words_digits_and_later_changes_not_dollars(self):
@@ -116,7 +126,7 @@ class BudgetTests(unittest.TestCase):
                 model_intent.update(query_type="general", context_action="new_request")
                 analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(model_intent))))
                 history = [{"role": "user", "content": first},
-                           {"role": "assistant", "content": budget_clarification(self.intent(first))}]
+                           {"role": "assistant", "content": self.legacy_basis_question("5") if field == "basis" else budget_clarification(self.intent(first))}]
                 intent = analyzer.understand_query_intent_with_context(reply, history)
                 self.assertEqual(intent["query_type"], "recipe_search")
                 self.assertEqual(intent["context_action"], "continue_request")
@@ -382,8 +392,8 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(candidate["recipe_link"], "https://example.com/recipe")
             self.assertEqual(candidate["budget_assessment"]["status"], "estimated_within_budget")
 
-    def test_ambiguous_budget_and_missing_catalog_do_not_trigger_generation(self):
-        for intent, missing in [(self.intent("meals under $5"), False), (self.intent(), True)]:
+    def test_missing_budget_amount_and_missing_catalog_do_not_trigger_generation(self):
+        for intent, missing in [(self.intent("affordable meals"), False), (self.intent(), True)]:
             if missing:
                 self.path.unlink()
             pipeline = self.configure_pipeline(intent, [], [])
@@ -395,7 +405,7 @@ class BudgetTests(unittest.TestCase):
     def test_reported_ten_dollar_whole_recipe_followup_returns_a_priced_recipe(self):
         first = "can you help me to prepare a meal under 10 dollars"
         history = [{"role": "user", "content": first},
-                   {"role": "assistant", "content": budget_clarification(self.intent(first))}]
+                   {"role": "assistant", "content": self.legacy_basis_question("10")}]
         intent = self.intent("for the whole recipe", history)
         intent["recipe_request"] = first + "; for the whole recipe"
         intent["budget_price_options"] = self.service.options()
@@ -419,7 +429,7 @@ class BudgetTests(unittest.TestCase):
         analyzer.initialize(Mock(predict=Mock(return_value=json.dumps(model_intent))))
         initial = analyzer.understand_query_intent_with_context(first, [])
         history = [{"role": "user", "content": first},
-                   {"role": "assistant", "content": budget_clarification(initial)}]
+                   {"role": "assistant", "content": self.legacy_basis_question("10")}]
         intent = analyzer.understand_query_intent_with_context(reply, history)
         self.assertEqual(intent["budget_request"]["servings"], 2)
         self.assertEqual(intent["budget_request"]["basis"], "recipe")
@@ -445,6 +455,23 @@ class BudgetTests(unittest.TestCase):
         self.assertIn('"requested_servings": 2', prompt)
         self.assertIn('"estimate": "1.40"', prompt)
         self.assertIn("Missing prices are NOT missing recipe ingredients", prompt)
+
+    def test_dollar_requests_return_cards_without_a_cost_basis_followup(self):
+        for query in ["Can you help me to prepare a recipe for my dinner which is around 10 dollars",
+                      "Show meals under 5 dollars", "Prepare dinner under $10 for two people"]:
+            with self.subTest(query=query):
+                intent = self.intent(query)
+                pipeline = self.configure_pipeline(intent, [], [recipe(generated=True)])
+                result = self.ask(pipeline, query)
+                self.assertEqual(result["matches_found"], 1, result)
+                self.assertEqual(result["source_documents"][0]["budget_assessment"]["basis"], "recipe")
+                self.assertIn("I've treated your budget", result["response"])
+                self.assertNotIn("Is your USD", result["response"])
+                pipeline.recipe_enhancer.generate_fallback_recipes.assert_called_once()
+        explicit = self.intent("dinner under $10 per serving")
+        result = self.ask(self.configure_pipeline(explicit, [recipe()], []), "dinner under $10 per serving")
+        self.assertNotIn("I've treated your budget", result["response"])
+        self.assertEqual(result["source_documents"][0]["budget_assessment"]["basis"], "per_serving")
 
     def test_budget_semantic_checks_stay_strict_even_when_price_passes(self):
         intent = self.intent()

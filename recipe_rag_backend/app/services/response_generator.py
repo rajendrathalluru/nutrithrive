@@ -89,6 +89,8 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
         if intent_data.get("budget_request"):
             basis = {"recipe": "whole recipe", "per_serving": "per serving", "shopping": "groceries before tax/fees"}[intent_data["budget_request"]["basis"]]
             lines = [f"Here are {len(source_docs)} recipe options with estimated costs within your budget ({basis}):"]
+            if intent_data["budget_request"].get("basis_assumed"):
+                lines.insert(0, "I've treated your budget as the ingredient quantities used in the whole recipe, not the cost of buying full grocery packages.")
             for recipe in source_docs:
                 estimate = recipe.get("budget_assessment", {})
                 if estimate.get("status") != "estimated_within_budget":

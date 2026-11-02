@@ -288,7 +288,10 @@ Return ONLY one valid JSON object with this structure, replacing defaults only w
 
 Use numbers for numeric limits, arrays of strings for list fields, and null or empty arrays when unspecified.
 Extract hard requirements into constraints, including dietary restrictions, allergens, ingredient limits,
-equipment, budget, and preparation time. Preserve additional explicit requirements in
+equipment, budget, and preparation time. For a stated money limit without a cost basis, assume the
+whole recipe and proceed with recipe_search; do not ask whether it means per serving or groceries.
+Respect an explicitly requested per-serving or grocery-shopping basis. Do not invent a serving count.
+Preserve additional explicit requirements in
 search_strategy.must_match_criteria rather than silently dropping them.
 Populate resolved_query with a self-contained request, and search_strategy with meaningful retrieval
 terms, not the unchanged pronouns of a follow-up. ingredients_available is a pool of possible main
