@@ -206,7 +206,9 @@ class BudgetService:
         catalog = self.catalog()
         if not catalog:
             return []
-        return [{key: item[key] for key in ("name", "aliases", "unit", "package_quantity", "package_price")}
+        return [{**{key: item[key] for key in ("name", "aliases", "unit", "package_quantity", "package_price")},
+                 "ingredient_format": f"<quantity> {item['unit']} {item['name']}",
+                 "package_description": item.get("product", "")}
                 for item in catalog["items"]]
 
     def parse_ingredient(self, line, catalog):
@@ -216,8 +218,10 @@ class BudgetService:
         text = re.sub(r"\s+", " ", text).strip()
         if re.search(r"\bor\b|\*|\d\s*[-–]\s*\d", text):
             return None
+        text = re.sub(rf"^({QUANTITY})\s+(cans?|bags?|packages?)\s*\(({QUANTITY})\s*[- ]?(oz|ounces?|g|ml)\)\s+",
+                      r"\1 (\3 \4) \2 ", text)
         pack = re.fullmatch(rf"({QUANTITY})\s*\(?({QUANTITY})\s*[- ]?(oz|ounce|ounces|g|ml)\)?\s*(?:cans?|bags?|packages?)\s+(.*)", text)
-        measured = re.fullmatch(rf"({QUANTITY})\s+(grams?|kg|g|ounces?|oz|lbs?|pounds?|ml|l|cups?|tbsp|tsp|tablespoons?|teaspoons?)\.?\s+(.*)", text)
+        measured = re.fullmatch(rf"({QUANTITY})\s+(count|grams?|kg|g|ounces?|oz|lbs?|pounds?|ml|l|cups?|tbsp|tsp|tablespoons?|teaspoons?)\.?\s+(.*)", text)
         if pack:
             quantity = amount(pack[1]) * amount(pack[2])
             unit, name = pack[3], pack[4]

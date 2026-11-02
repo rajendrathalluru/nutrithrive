@@ -422,7 +422,7 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
             preferences = intent_data.get("preferences", {})
             constraints = intent_data.get("constraints", {})
             timed_request = constraints.get("time_max_minutes") is not None and intent_data.get("query_type") != "recipe_adaptation"
-            focused_generation = (timed_request or constraints.get("ingredient_storage") in {"canned_only", "frozen_only"}
+            focused_generation = (timed_request or intent_data.get("budget_request") or constraints.get("ingredient_storage") in {"canned_only", "frozen_only"}
                                   or constraints.get("digestive_comfort") == "gentle" or constraints.get("preparation_effort") == "low")
             recipe_count = "exactly ONE complete recipe" if focused_generation else "2-3 recipes"
             generation_limit = 1 if focused_generation else 3
@@ -589,6 +589,11 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
                 generation_prompt = self._build_repair_prompt(query, intent_data, repair_target, aicr_context)
             if intent_data.get("adaptation_request"):
                 generation_prompt = self._build_adaptation_prompt(intent_data, aicr_context, repair_target)
+            if intent_data.get("budget_request"):
+                generation_prompt = self._build_budget_generation_prompt(
+                    query, intent_data, aicr_context, grounding_recipes, failed_recipes,
+                    generation_prompt if intent_data.get("adaptation_request") else "",
+                )
 
             response = self.llm.predict(generation_prompt)
             
@@ -719,6 +724,52 @@ Give actual liquid quantities and cooking endpoints; do not copy unexplained foo
 Return only JSON.
 """
 
+    def _build_budget_generation_prompt(self, query, intent_data, guidelines, grounding_recipes, failed_recipes, adaptation_prompt=""):
+        count = min(3, len(grounding_recipes or [])) if adaptation_prompt else 1
+        options = intent_data.get("budget_price_options", [])
+        requirements = {key: value for key, value in intent_data.items() if key != "budget_price_options"}
+        failures = [{"name": recipe.get("name"), "ingredients": recipe.get("ingredients"),
+                     "violations": recipe.get("verification_details", {}).get("constraint_violations", []),
+                     "budget_issues": recipe.get("budget_assessment", {}).get("issues", [])}
+                    for recipe in failed_recipes[:2]]
+        return f"""Create exactly {count} complete, practical recipe(s) for this budget request, one per selected reference when editing.
+USER REQUEST: {query}
+ACTIVE REQUIREMENTS (data): {json.dumps(requirements)}
+AVAILABLE REFERENCE-PRICED INGREDIENTS (data): {json.dumps(options)}
+REJECTED CANDIDATES TO REPAIR (data): {json.dumps(failures)}
+{self._build_grounding_context(grounding_recipes)}
+
+Build a complete meal from compatible items in the price list. This is price coverage, not permission to ignore
+allergies, patient needs, required ingredients, food safety, or the selected recipe when adapting one.
+If those requirements cannot be met using priced items, return [] rather than invent a price or substitute a required food.
+Use each item's EXACT name and its unit in every ingredient string: '<positive quantity> <unit> <name>'.
+Use g for solid ingredients and ml for liquids according to the supplied unit, not cups/spoons of solids.
+Do not convert a cooked weight to a dry weight. Canned food package weights include liquid: specify the net
+amount BEFORE draining, then explain draining in the instructions. Explicit sized-can notation is also supported:
+'1 (15 oz) can no-salt-added canned black beans', only when that ingredient/form appears in the price list.
+Use the package size in package_description; do not assume every can has the same size.
+Tap water may be listed separately if the user's requirements allow it. Do not add unpriced salt, pepper, herbs,
+spices, honey, fruit, oil, garnishes, sides or substitutions, even as optional additions or in helpful tips.
+Choose realistic meal servings and quantities; do not shrink portions or inflate yield to satisfy the dollar limit.
+For shopping budgets, account for whole packages needed; for whole-recipe budgets, use the quantities consumed.
+Aim comfortably below the limit to leave room for the backend's planning allowance. Never claim a verified cost:
+the backend performs the arithmetic. A low estimate cannot override another requirement.
+
+{active_recipe_rules(intent_data)}
+NUTRITION AND FOOD SAFETY POLICY:
+{guidelines}
+{time_limit_generation_guidance(intent_data.get('constraints', {}))}
+{adaptation_prompt}
+
+Return only a JSON array of {count} object(s) with these fields:
+name, type, servings (positive integer), ingredients (quantified strings in the exact format above),
+instructions (complete steps using ONLY the listed ingredients), total_time (elapsed time with units),
+calories and protein_grams (numeric per-serving estimates), description, nutrition_benefits, storage_instructions.
+Keep the full preparation and safe cooking endpoints. Preserve all requested preparation/timing restrictions.
+Do not include extra tips or adaptations that introduce unlisted ingredients. The complete recipe will undergo
+the same independent user-requirement, nutritional-guideline, food-safety and budget checks before being returned.
+"""
+
     def _build_repair_prompt(
         self, query: str, intent_data: Dict[str, Any], recipe: Dict[str, Any], guidelines: str
     ) -> str:
@@ -786,6 +837,8 @@ The output will undergo the same independent verification as every other recipe.
         intent_data: Dict[str, Any],
         grounding_recipes: List[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
+        if intent_data.get("budget_request"):
+            return self.generate_fallback_recipes(query, intent_data, [], grounding_recipes=grounding_recipes)
         recipe_name = "Custom Recipe"
         recipe = {
             "name": recipe_name,

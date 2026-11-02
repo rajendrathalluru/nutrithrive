@@ -148,6 +148,59 @@ class BudgetTests(unittest.TestCase):
         self.assertIsNotNone(self.service.parse_ingredient("½ tbsp canola oil", CATALOG))
         self.assertEqual(self.service.parse_ingredient("2 eggs", CATALOG)[1], 2)
 
+    def test_equivalent_sized_can_formats_keep_the_same_price_and_quantity(self):
+        original = self.service.parse_ingredient("1 (15 oz) can canned beans, drained and rinsed", CATALOG)
+        for line in ["1 can (15 oz) canned beans, drained and rinsed", "1 (15-ounce) can canned beans",
+                     "1 can (15 ounces) canned beans", "1 can (15-ounce) canned beans"]:
+            with self.subTest(line=line):
+                self.assertEqual(self.service.parse_ingredient(line, CATALOG), original)
+        self.assertIsNone(self.service.parse_ingredient("1 can canned beans", CATALOG))
+        self.assertIsNone(self.service.parse_ingredient("1 can (15 oz) canned beans or tofu", CATALOG))
+        self.assertEqual(self.service.parse_ingredient("2 count eggs", CATALOG)[1], 2)
+
+    def test_budget_generation_contract_keeps_guidelines_references_and_exact_priced_forms(self):
+        intent = self.intent()
+        intent["budget_price_options"] = self.service.options()
+        intent["constraints"]["allergens_to_avoid"] = ["peanuts"]
+        candidate = recipe(generated=True)
+        candidate["ingredients"] = ["100 g dry rice", "1 can (15 oz) canned beans"]
+        model = Mock(predict=Mock(return_value=json.dumps([candidate, recipe("Second Bowl", True)])))
+        enhancer = RecipeEnhancer()
+        enhancer.initialize(model, aicr_service)
+        reference = recipe("Reference Bowl")
+        rejected = {**recipe("Rejected Bowl", True), "budget_assessment": {"issues": ["Unpriced honey"]}}
+        generated = enhancer.generate_fallback_recipes("Meal under $5", intent, [rejected], grounding_recipes=[reference])
+        prompt = model.predict.call_args.args[0]
+        self.assertIn("Create exactly 1 complete", prompt)
+        self.assertIn("AVAILABLE REFERENCE-PRICED INGREDIENTS", prompt)
+        self.assertIn("<quantity> g dry rice", prompt)
+        self.assertIn("Reference Bowl", prompt)
+        self.assertIn("Unpriced honey", prompt)
+        self.assertIn("peanuts", prompt)
+        self.assertIn("NUTRITION AND FOOD SAFETY POLICY", prompt)
+        self.assertIn("Do not convert a cooked weight to a dry weight", prompt)
+        self.assertEqual(len(generated), 1)
+        self.assertEqual(generated[0]["generation_basis"], "database_guided")
+        self.assertEqual(self.assess(generated[0])["status"], "estimated_within_budget")
+
+    def test_budget_structured_fallback_keeps_numeric_servings_and_same_verification_path(self):
+        intent = self.intent()
+        intent["budget_price_options"] = self.service.options()
+        enhancer = RecipeEnhancer()
+        enhancer.initialize(Mock(predict=Mock(return_value=json.dumps([recipe(generated=True)]))), aicr_service)
+        generated = enhancer.generate_structured_fallback_recipe("Meal under $5", intent)
+        self.assertEqual(generated[0]["servings"], 2)
+        self.assertEqual(generated[0]["generation_basis"], "ai_only")
+        self.assertEqual(self.assess(generated[0], basis="per_serving")["status"], "estimated_within_budget")
+
+    def test_non_budget_generation_retains_its_existing_prompt_and_recipe_count(self):
+        enhancer = RecipeEnhancer()
+        model = Mock(predict=Mock(return_value=json.dumps([recipe("First Bowl", True), recipe("Second Bowl", True)])))
+        enhancer.initialize(model, aicr_service)
+        generated = enhancer.generate_fallback_recipes("Show meals", self.intent("Show meals"), [])
+        self.assertEqual(len(generated), 2)
+        self.assertNotIn("AVAILABLE REFERENCE-PRICED INGREDIENTS", model.predict.call_args.args[0])
+
     def test_pantry_credit_requires_explicit_quantity_and_does_not_change_used_cost(self):
         result = self.assess(basis="shopping", owned_ingredients=["200 g dry rice"])
         self.assertEqual(result["shopping_cost"], "1.00")
@@ -322,6 +375,25 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(result["source_documents"], [])
             pipeline.search_engine.multi_query_search.assert_not_called()
             pipeline.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+
+    def test_reported_ten_dollar_whole_recipe_followup_returns_a_priced_recipe(self):
+        first = "can you help me to prepare a meal under 10 dollars"
+        history = [{"role": "user", "content": first},
+                   {"role": "assistant", "content": budget_clarification(self.intent(first))}]
+        intent = self.intent("for the whole recipe", history)
+        intent["recipe_request"] = first + "; for the whole recipe"
+        intent["budget_price_options"] = self.service.options()
+        pipeline = self.configure_pipeline(intent, [], [])
+        pipeline.recipe_enhancer = RecipeEnhancer()
+        pipeline.recipe_enhancer.initialize(Mock(predict=Mock(return_value=json.dumps([recipe("Bean and Rice Dinner", True)]))), aicr_service)
+        pipeline.recipe_verifier = RecipeVerifier()
+        pipeline.recipe_verifier.initialize(Mock(predict=Mock(return_value=json.dumps([self.assessment(intent)]))))
+        result = self.ask(pipeline, "for the whole recipe")
+        self.assertEqual(result["matches_found"], 1, result)
+        self.assertEqual(result["source_documents"][0]["source"], "llm_generated")
+        self.assertEqual(result["source_documents"][0]["budget_assessment"]["basis"], "recipe")
+        self.assertEqual(result["source_documents"][0]["budget_assessment"]["status"], "estimated_within_budget")
+        self.assertTrue(result["source_documents"][0]["verification_details"]["passes_verification"])
 
     def test_budget_summary_is_calculated_not_invented_by_response_llm(self):
         intent = self.intent()
