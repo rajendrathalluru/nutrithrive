@@ -114,7 +114,8 @@ class VerificationLatencyTests(unittest.TestCase):
             "constraint_checks": {key: {"status": "pass", "evidence": "Mock assessment of actual recipe content."}
                                   for key in self.verifier._required_checks(self.intent)},
             "guideline_checks": passing_guideline_checks(),
-            "budget_recipe_check": {"status": "pass", "evidence": "Mock assessment of quantities and servings."},
+            "ingredient_completeness_check": {"status": "pass", "evidence": "Mock assessment of listed food quantities."},
+            "portion_adequacy_check": {"status": "pass", "evidence": "Mock assessment of realistic servings."},
         } for candidate in candidates])
 
     def verify(self, recipes=None):

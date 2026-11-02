@@ -15,6 +15,16 @@ MONEY = re.compile(
     re.I,
 )
 NUMBER_WORDS = {"two": "2", "three": "3", "five": "5", "ten": "10", "fifteen": "15", "twenty": "20"}
+SERVING_WORDS = dict(zip(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".split(),
+    range(21),
+))
+SERVING_NUMBER = r"(?:\d+|" + "|".join(SERVING_WORDS) + r")"
+SERVING_COUNT = re.compile(
+    rf"\b(?:(?:for|serves?|serving|feeds?)\s+(?P<count>{SERVING_NUMBER})\s+(?:people|persons?|servings?|adults?|portions?)"
+    rf"|(?P<yield>{SERVING_NUMBER})\s+(?:servings?|portions?)"
+    rf"|(?:serves?|feeds?)\s+(?P<standalone>{SERVING_NUMBER}))\b", re.I,
+)
 QUANTITY = r"(?:\d+\s+\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)"
 UNITS = {
     "count": ("count", "1"),
@@ -86,9 +96,10 @@ def apply_budget_intent(intent, query, history=None):
             request["basis"] = "shopping"
         elif re.search(r"\b(?:whole recipe|entire recipe|total recipe|ingredient cost|quantities used|recipe total)\b", text, re.I):
             request["basis"] = "recipe"
-        servings = re.search(r"\b(?:for|serves?)\s+(\d+)\s*(?:people|persons?|servings?|adults?)\b|\b(\d+)\s+servings?\b", text, re.I)
+        servings = list(SERVING_COUNT.finditer(text))
         if servings:
-            request["servings"] = int(servings[1] or servings[2])
+            value = next(value for value in servings[-1].groupdict().values() if value).lower()
+            request["servings"] = int(value) if value.isdigit() else SERVING_WORDS[value]
         if re.search(r"\b(?:including|include) (?:tax|fees|delivery)\b", text, re.I):
             request["checkout_fees_required"] = True
         if re.search(r"\b(?:before|excluding|exclude) (?:tax|fees|delivery)\b", text, re.I):
@@ -139,9 +150,14 @@ when compatible with ALL requirements. Do not guess cup-to-weight or raw-to-cook
 List EVERY ingredient used in the steps, including oils, spices, sauces and garnishes. Avoid optional extras and
 unpriced tips/substitutions; do not assume pantry foods are free. Tap water is excluded from grocery costs.
 Treat an unresolved price as unknown, not zero. Do not substitute a cheap ingredient for a required ingredient.
-For verification also return budget_recipe_check with status pass/fail/unknown and evidence: check that all
-ingredients used in instructions, tips and adaptations are listed with quantities, that all subrecipes are expanded,
-and that the declared servings are realistic for the recipe and satisfy any requested serving count.
+For verification return ingredient_completeness_check and portion_adequacy_check, each with status
+pass/fail/unknown and evidence. ingredient_completeness_check checks ONLY that every food used in steps,
+tips and adaptations is listed with quantities and all subrecipes are expanded (tap water may be excluded).
+portion_adequacy_check checks ONLY that the declared servings are realistic meal portions and match the
+requested serving count. Neither check assesses prices. Missing prices are NOT missing recipe ingredients.
+The backend_price_assessment is calculated independently from reference prices, not an LLM estimate.
+Do not reject any semantic check, including recipe_request or user_request_context, because prices are
+absent from the recipe text. The backend alone gates cost, missing price coverage and the planning allowance.
 Assess all non-price requirements normally; delegate the dollar limit, currency and arithmetic to the backend.
 """
 

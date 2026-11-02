@@ -484,6 +484,8 @@ To expand or refresh coverage, update the catalog with verified package price, n
 
 Offline regression coverage lives in `recipe_rag_backend/tests/test_budget_service.py`, with frontend mapping/history/card tests. These tests do not validate live LLM quality, local availability, or actual checkout prices. Run the backend suite with `PYTHONPATH=recipe_rag_backend recipe_rag_backend/.venv/bin/python -m unittest discover -s recipe_rag_backend/tests -q` and frontend tests with `CI=true npm test -- --watchAll=false --runInBand`.
 
+Budget verification separates two non-price LLM checks (complete ingredient accounting and realistic portions) from deterministic price calculation. Both batch and individual verification receive a fresh backend price assessment; the model must not reject a recipe merely because its text lacks prices. A passing semantic check cannot override missing prices, excessive cost, a mismatched serving count, or safety/dietary failures. Price changes invalidate budget-verification cache keys, and final pricing is still recalculated. Clarifications such as "For the whole recipe, serving two people" preserve dinner context and enforce a numeric yield of two.
+
 ## Latency improvements without removing recipe checks
 
 Independent retrieval queries and verification batches run with bounded concurrency (up to three workers per stage). Query order, deduplication, candidate counts, individual verification prompts, recipe ordering, enhancements, and database → guided AI → AI-only fallback order are unchanged. All candidates still undergo the same required checks; this is scheduling optimization, not relaxed validation or an early cutoff.

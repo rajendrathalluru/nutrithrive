@@ -16,7 +16,7 @@ from app.services.equipment_validation import audit_equipment
 from app.services.digestive_comfort import audit_digestive_comfort
 from app.services.recipe_follow_up import unchanged_adaptation, audit_texture_adaptation
 from app.services.aicr_guidelines_service import aicr_service as configured_guidelines
-from app.services.budget_service import budget_rules
+from app.services.budget_service import budget_rules, budget_service
 from app.core.config import settings
 from app.services.response_cache import ResponseCache, model_cache_key
 
@@ -164,7 +164,8 @@ Passing a time check cannot override a failed guideline check. For unmodified so
         preparation_contract = ""
         if intent_data.get("budget_request"):
             preparation_contract += budget_rules(intent_data)
-            example["budget_recipe_check"] = {"status": "pass", "evidence": "Every food addition is quantified; servings are realistic."}
+            example["ingredient_completeness_check"] = {"status": "pass", "evidence": "Every food addition is listed with a quantity; no hidden food additions or subrecipes."}
+            example["portion_adequacy_check"] = {"status": "pass", "evidence": "The listed quantities make realistic meal portions for the requested number of people."}
         if intent_data.get("adaptation_request"):
             preparation_contract += """For adaptation_request, compare the candidate with the selected original recipe.
 Pass only if the actual ingredients and directions implement the requested change while preserving the dish
@@ -323,9 +324,10 @@ Example shape (replace all example values with your assessment, never copy examp
                 violations.append(f"{key}: {check['evidence']}")
         verification["constraint_checks"] = checks
         if intent_data.get("budget_request"):
-            check = verification.get("budget_recipe_check")
-            if not isinstance(check, dict) or check.get("status") != "pass" or not str(check.get("evidence") or "").strip():
-                violations.append("Budget recipe completeness or serving-size assessment is missing or failed.")
+            for field in ("ingredient_completeness_check", "portion_adequacy_check"):
+                check = verification.get(field)
+                if not isinstance(check, dict) or check.get("status") != "pass" or not str(check.get("evidence") or "").strip():
+                    violations.append(f"Missing or failed non-price recipe assessment: {field}")
         if self._requires_guideline_review(recipe):
             guideline_checks = verification.get("guideline_checks")
             if not isinstance(guideline_checks, dict):
@@ -477,6 +479,15 @@ The backend will retain existing failures and independently validate this eviden
             logger.warning("Missing assessment completion failed: %s", type(error).__name__)
         return verification
     
+    def _budget_verification_context(self, recipe, intent_data):
+        if not intent_data.get("budget_request"):
+            return {}
+        return {
+            "servings": recipe.get("servings"),
+            "requested_servings": intent_data["budget_request"].get("servings"),
+            "backend_price_assessment": budget_service.assess(recipe, intent_data["budget_request"]),
+        }
+
     def batch_verify_recipes(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any], aicr_service) -> List[Dict[str, Any]]:
         """Batch verification with AICR validation"""
         if not recipes:
@@ -512,7 +523,7 @@ The backend will retain existing failures and independently validate this eviden
                 recipes_for_verification.append({
                     "id": i,
                     "requires_guideline_review": self._requires_guideline_review(recipe),
-                    **({"servings": recipe.get("servings")} if intent_data.get("budget_request") else {}),
+                    **self._budget_verification_context(recipe, intent_data),
                     "name": recipe.get("name", "Unknown"),
                     "type": recipe.get("type", "Unknown"),
                     "description": recipe.get("description", ""),
@@ -572,6 +583,9 @@ The backend will retain existing failures and independently validate this eviden
                         "constraint_violations": verification.get("constraint_violations", []),
                         "constraint_checks": verification.get("constraint_checks", {}),
                         "guideline_checks": verification.get("guideline_checks"),
+                        **({field: verification.get(field) for field in (
+                            "ingredient_completeness_check", "portion_adequacy_check"
+                        )} if intent_data.get("budget_request") else {}),
                         "meets_preferences": verification["passes_verification"]
                     }
                     
@@ -684,6 +698,8 @@ Verify ALL {len(recipes_for_verification)} recipes.
         constraints_hash = self._get_constraints_hash(intent_data)
         recipe_hash = hashlib.sha256(json.dumps(recipe_data, sort_keys=True).encode()).hexdigest()[:16]
         cache_key = f"{recipe_name}_{constraints_hash}_{recipe_hash}"
+        if intent_data.get("budget_request"):
+            cache_key = model_cache_key(self.llm, self._build_individual_verification_prompt(recipe_data, intent_data), intent_data)
         
         if cache_key in self.verification_cache:
             self.cache_hits += 1
@@ -786,7 +802,7 @@ requires_guideline_review: {str(self._requires_guideline_review(recipe_data)).lo
 
 RECIPE:
 {json.dumps({
-    **({"servings": recipe_data.get("servings")} if intent_data.get("budget_request") else {}),
+    **self._budget_verification_context(recipe_data, intent_data),
     "name": recipe_data.get("name", "Unknown"),
     "type": recipe_data.get("type", "Unknown"),
     "description": recipe_data.get("description", ""),
