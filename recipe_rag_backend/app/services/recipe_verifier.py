@@ -17,6 +17,8 @@ from app.services.digestive_comfort import audit_digestive_comfort
 from app.services.recipe_follow_up import unchanged_adaptation, audit_texture_adaptation
 from app.services.aicr_guidelines_service import aicr_service as configured_guidelines
 from app.services.budget_service import budget_rules
+from app.core.config import settings
+from app.services.response_cache import ResponseCache, model_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +85,12 @@ For other requests ingredient_storage_check may be null.
     def __init__(self):
         self.llm = None
         self.verification_cache = {}
+        self.batch_response_cache = ResponseCache()
         self.cache_hits = 0
         self.cache_misses = 0
         
     def initialize(self, llm):
+        self.clear_caches()
         self.llm = llm
 
     def _get_constraints_hash(self, intent_data: Dict[str, Any]) -> str:
@@ -491,19 +495,16 @@ The backend will retain existing failures and independently validate this eviden
             or intent_data.get("budget_request")
         )
         batch_size = 1 if detailed_checks else 3
-        if batch_size == 1 and len(recipes) > 1:
-            with ThreadPoolExecutor(max_workers=min(3, len(recipes))) as executor:
-                assessments = executor.map(
-                    lambda recipe: self.batch_verify_recipes([recipe], intent_data, aicr_service)[0],
-                    recipes,
-                )
-                return list(assessments)
         if len(recipes) > batch_size:
-            return [
-                recipe
-                for start in range(0, len(recipes), batch_size)
-                for recipe in self.batch_verify_recipes(recipes[start:start + batch_size], intent_data, aicr_service)
-            ]
+            batches = [recipes[start:start + batch_size] for start in range(0, len(recipes), batch_size)]
+            if settings.RECIPE_IO_WORKERS == 1:
+                return [recipe for batch in batches
+                        for recipe in self.batch_verify_recipes(batch, intent_data, aicr_service)]
+            with ThreadPoolExecutor(max_workers=min(settings.RECIPE_IO_WORKERS, len(batches))) as executor:
+                assessments = executor.map(
+                    lambda batch: self.batch_verify_recipes(batch, intent_data, aicr_service), batches
+                )
+                return [recipe for batch in assessments for recipe in batch]
         
         try:
             recipes_for_verification = []
@@ -528,10 +529,15 @@ The backend will retain existing failures and independently validate this eviden
                 })
             
             batch_prompt = self._build_batch_verification_prompt(recipes_for_verification, intent_data)
+            cache_key = model_cache_key(self.llm, batch_prompt, intent_data)
             
             start_time = time.time()
-            response = self.llm.predict(batch_prompt)
-            logger.info(f"Batch verification took {time.time() - start_time:.2f}s for {len(recipes)} recipes")
+            response = self.batch_response_cache.get(cache_key)
+            cache_hit = response is not None
+            if not cache_hit:
+                response = self.llm.predict(batch_prompt)
+            logger.info("Batch verification took %.2fs for %s recipes (cached assessment=%s)",
+                        time.time() - start_time, len(recipes), cache_hit)
             
             verification_results = self._parse_verification_response(response)
             if len(recipes) == 1:
@@ -594,6 +600,11 @@ The backend will retain existing failures and independently validate this eviden
                         "meets_preferences": False
                     }
             
+            if all(recipe.get("verification_details", {}).get("passes_verification") is True for recipe in recipes):
+                if not cache_hit:
+                    self.batch_response_cache.put(cache_key, response)
+            else:
+                self.batch_response_cache.discard(cache_key)
             return recipes
             
         except Exception as e:
@@ -913,11 +924,13 @@ Return ONLY one valid JSON assessment object.
             "cache_size": len(self.verification_cache),
             "cache_hits": self.cache_hits,
             "cache_misses": self.cache_misses,
+            "batch_response_cache": self.batch_response_cache.stats(),
             "hit_rate": f"{round(self.cache_hits / max(self.cache_hits + self.cache_misses, 1) * 100, 1)}%"
         }
 
     def clear_caches(self):
         self.verification_cache.clear()
+        self.batch_response_cache.clear()
         self.cache_hits = 0
         self.cache_misses = 0
         logger.info("Verification caches cleared")

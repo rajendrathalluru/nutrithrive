@@ -482,6 +482,23 @@ To expand or refresh coverage, update the catalog with verified package price, n
 
 Offline regression coverage lives in `recipe_rag_backend/tests/test_budget_service.py`, with frontend mapping/history/card tests. These tests do not validate live LLM quality, local availability, or actual checkout prices. Run the backend suite with `PYTHONPATH=recipe_rag_backend recipe_rag_backend/.venv/bin/python -m unittest discover -s recipe_rag_backend/tests -q` and frontend tests with `CI=true npm test -- --watchAll=false --runInBand`.
 
+## Latency improvements without removing recipe checks
+
+Independent retrieval queries and verification batches run with bounded concurrency (up to three workers per stage). Query order, deduplication, candidate counts, individual verification prompts, recipe ordering, enhancements, and database → guided AI → AI-only fallback order are unchanged. All candidates still undergo the same required checks; this is scheduling optimization, not relaxed validation or an early cutoff.
+
+Successful batch model responses can be reused only for the same complete verification prompt, active intent, and model identity/configuration. Reuse still runs the current deterministic checks and application guideline validation; budget arithmetic remains independently recalculated. Changed ingredients, instructions, tips, adaptations, patient requirements, policy text, or model configuration invalidate reuse. Failed or malformed batch assessments are not cached. The cache stores the model assessment, not an unconditional final approval or finished response.
+
+Identical scoped follow-up requests also use a working context cache. Keys include the complete scoped history, recipe references and prompt; new independent requests keep the existing context-isolation behavior. Cached intent objects are copied so downstream edits cannot contaminate later requests. These are bounded, in-memory caches, not a persistent patient-data store. Entries expire after five minutes by default and are cleared at service initialization or `/cache/clear`.
+
+Environment controls (require restart):
+- `RECIPE_IO_WORKERS=3`: concurrency for retrieval and verification, clamped to 1–3. Set to `1` for serial scheduling or when provider rate limits require it.
+- `RECIPE_CACHE_TTL_SECONDS=300`: lifetime of the new exact-response caches. Set to `0` to disable them.
+- `RECIPE_CACHE_MAX_ENTRIES=128`: capacity of each new cache, clamped to 1–512 entries.
+
+`/cache/stats` now returns the existing combined cache statistics, including separate context and batch-response hit/miss counts. Existing access protection remains unchanged. The new cache settings do not disable the pre-existing independent-intent, individual-verification, or enhancement caches.
+
+No generation attempts, enhancement steps, safety checks, model prompts, or output-token limits were removed. These changes reduce serial waits and repeated work; they do not guarantee a production response time. Provider latency and rate limits still matter. Offline regression tests exercise preserved results, concurrent scheduling, expiry, invalidation, mutation isolation, and current-safety-check rejection after cache hits. Measure isolated warm-request latency after deployment before claiming a specific improvement; synthetic timing tests are not Azure benchmarks.
+
 ## Local development notes
 
 - If the backend is not fully initialized yet, `/health` may show startup in progress while the server is already reachable.

@@ -392,7 +392,7 @@ async def system_info():
 @app.get("/cache/stats")
 async def cache_stats():
     """Get cache statistics"""
-    return rag_service.get_cache_stats()
+    return rag_service.get_combined_cache_stats()
 
 @app.post("/cache/clear")
 async def clear_cache():

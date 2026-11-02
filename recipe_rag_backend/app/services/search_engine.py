@@ -2,8 +2,11 @@ import logging
 from app.services.model_errors import raise_if_model_unavailable
 import re
 import json
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from typing import List, Dict, Any
 from langchain.schema import Document
+from app.core.config import settings
 from app.services.storage_guidance import extract_storage_guidance
 
 logger = logging.getLogger(__name__)
@@ -48,21 +51,28 @@ class SearchEngine:
         if not search_queries and original_query.strip():
             search_queries = [original_query.strip()]
         
-        for i, search_query in enumerate(search_queries):
-            try:
-                logger.info(f"Search {i+1}/{len(search_queries)}: {search_query}")
-                docs = self.vector_store.similarity_search(search_query, k=k)
-                
-                for doc in docs:
-                    content_hash = hash(doc.page_content[:100])
-                    if content_hash not in seen_content:
-                        all_docs.append(doc)
-                        seen_content.add(content_hash)
-                        
-            except Exception as e:
-                raise_if_model_unavailable(e)
-                logger.error(f"Error in search '{search_query}': {e}")
-                continue
+        def search(query_index, search_query):
+            logger.info(f"Search {query_index+1}/{len(search_queries)}: {search_query}")
+            return self.vector_store.similarity_search(search_query, k=k)
+
+        workers = settings.RECIPE_IO_WORKERS
+        with ThreadPoolExecutor(max_workers=workers) if workers > 1 else nullcontext() as executor:
+            futures = [executor.submit(search, query_index, search_query)
+                       for query_index, search_query in enumerate(search_queries)] if executor else []
+            for query_index, search_query in enumerate(search_queries):
+                try:
+                    docs = futures[query_index].result() if executor else search(query_index, search_query)
+
+                    for doc in docs:
+                        content_hash = hash(doc.page_content[:100])
+                        if content_hash not in seen_content:
+                            all_docs.append(doc)
+                            seen_content.add(content_hash)
+
+                except Exception as e:
+                    raise_if_model_unavailable(e)
+                    logger.error(f"Error in search '{search_query}': {e}")
+                    continue
         
         logger.info(f"Multi-query search found {len(all_docs)} unique documents")
         return all_docs

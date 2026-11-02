@@ -33,6 +33,9 @@ class Settings:
     LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.5
     LLM_MAX_TOKENS: int = 1500
+    RECIPE_IO_WORKERS: int = max(1, min(3, int(os.getenv("RECIPE_IO_WORKERS", "3"))))
+    RECIPE_CACHE_TTL_SECONDS: int = max(0, int(os.getenv("RECIPE_CACHE_TTL_SECONDS", "300")))
+    RECIPE_CACHE_MAX_ENTRIES: int = max(1, min(512, int(os.getenv("RECIPE_CACHE_MAX_ENTRIES", "128"))))
     
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 100

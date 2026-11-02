@@ -132,6 +132,7 @@ class RecipeFollowUpTests(unittest.TestCase):
         }})
         self.assertEqual(self.analyze("Make the one with tofu creamier")["referenced_recipe_ids"], ["soup"])
         self.parsed["referenced_recipe_ids"] = ["foreign-id"]
+        self.analyzer.clear_caches()
         self.assertEqual(self.analyze("Make the one with tofu creamier")["query_type"], "clarification")
 
     def test_comparison_keeps_both_recipes_but_singular_next_reference_clarifies(self):

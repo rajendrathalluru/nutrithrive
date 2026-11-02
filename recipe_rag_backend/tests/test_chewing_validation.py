@@ -197,6 +197,7 @@ class ChewingVerificationTests(unittest.TestCase):
 
     def test_texture_assessments_use_single_recipe_batches(self):
         verifier = RecipeVerifier()
+        verifier.batch_response_cache.ttl = 0
         verifier.initialize(Mock(predict=Mock(return_value=json.dumps([model_pass(SOUP)]))))
         guidelines = Mock(validate_recipe_compliance=Mock(return_value={"overall_compliant": True}))
         results = verifier.batch_verify_recipes([copy.deepcopy(SOUP) for _ in range(3)], INTENT, guidelines)

@@ -19,6 +19,7 @@ from app.services.recipe_prompt_rules import DIGESTIVE_COMFORT_RULES, LOW_EXERTI
 from app.services.digestive_comfort import explicit_digestive_comfort
 from app.services.preparation_validation import explicit_preparation_effort
 from app.services.recipe_follow_up import resolve_recipe_follow_up, apply_recipe_follow_up, parse_recipe_context, is_more_recipes_request
+from app.services.response_cache import ResponseCache, model_cache_key
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,12 @@ class IntentAnalyzer:
         self.llm = None
         self.recipe_names = ()
         self.intent_cache = {}
+        self.context_cache = ResponseCache()
         self.cache_hits = 0
         self.cache_misses = 0
         
     def initialize(self, llm, recipe_names=()):
+        self.clear_caches()
         self.llm = llm
         self.recipe_names = tuple(recipe_names)
     
@@ -40,7 +43,7 @@ class IntentAnalyzer:
         if normalized_query in self.intent_cache:
             self.cache_hits += 1
             logger.info(f"Intent cache HIT for query: '{query}'")
-            return self.intent_cache[normalized_query]
+            return deepcopy(self.intent_cache[normalized_query])
         
         self.cache_misses += 1
         
@@ -50,7 +53,7 @@ class IntentAnalyzer:
             intent_data = self._parse_intent_response(response)
             intent_data = self._post_process_intent(query, intent_data)
             
-            self.intent_cache[normalized_query] = intent_data
+            self.intent_cache[normalized_query] = deepcopy(intent_data)
             return intent_data
             
         except Exception as e:
@@ -165,6 +168,10 @@ goal. An assistant list of possible foods followed by "a recipe with those ingre
 ingredients_available, NOT ingredients_must_use, unless the user explicitly requires ALL items.
 """
 
+            cache_key = model_cache_key(self.llm, enhanced_prompt, sanitized_history)
+            cached = self.context_cache.get(cache_key)
+            if cached is not None:
+                return cached
             response = self.llm.predict(enhanced_prompt)
             intent_data = self._parse_intent_response(response)
             follow_up = follow_up or resolve_recipe_follow_up(query, sanitized_history, intent_data)
@@ -224,9 +231,7 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
                 intent_data["search_strategy"]["enhanced_query"] = resolved_query
             logger.info(f"Context-aware intent analysis: {intent_data['query_type']}")
             
-            # Cache with context consideration
-            cache_key = self._normalize_query(query + str(hash(str(sanitized_history))))
-            self.intent_cache[cache_key] = intent_data
+            self.context_cache.put(cache_key, intent_data)
             
             return intent_data
             
@@ -924,10 +929,12 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             "cache_size": len(self.intent_cache),
             "cache_hits": self.cache_hits,
             "cache_misses": self.cache_misses,
+            "context_response_cache": self.context_cache.stats(),
             "hit_rate": f"{round(self.cache_hits / max(self.cache_hits + self.cache_misses, 1) * 100, 1)}%"
         }
     
     def clear_caches(self):
         self.intent_cache.clear()
+        self.context_cache.clear()
         self.cache_hits = 0
         self.cache_misses = 0

@@ -96,6 +96,7 @@ class VerificationContractTests(unittest.TestCase):
 
     def test_batching_bounds_output_and_checks_every_candidate(self):
         verifier = RecipeVerifier()
+        verifier.batch_response_cache.ttl = 0
 
         def response(prompt):
             example = prompt.split("Example shape (replace all example values with your assessment, never copy example evidence):\n")[1].split("\n")[0]
