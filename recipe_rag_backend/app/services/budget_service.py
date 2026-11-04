@@ -164,7 +164,7 @@ pass/fail/unknown and evidence. ingredient_completeness_check checks ONLY that e
 tips and adaptations is listed with quantities and all subrecipes are expanded (tap water may be excluded).
 portion_adequacy_check checks ONLY that the declared servings are realistic meal portions and match the
 requested serving count. Neither check assesses prices. Missing prices are NOT missing recipe ingredients.
-The backend_price_assessment is calculated independently from reference prices, not an LLM estimate.
+The backend calculates the price assessment independently from reference prices, not an LLM estimate.
 Do not reject any semantic check, including recipe_request or user_request_context, because prices are
 absent from the recipe text. The backend alone gates cost, missing price coverage and the planning allowance.
 Assess all non-price requirements normally; delegate the dollar limit, currency and arithmetic to the backend.
@@ -231,9 +231,12 @@ class BudgetService:
                 catalog["observed_on"] = min(catalog["observed_on"], quote["observed_on"])
         return catalog
 
-    def prepare_prices(self, recipes, intent):
+    def prepare_prices(self, recipes, intent, *, generation=False):
         request = intent.get("budget_request")
         if not request or not self.provider.enabled or request.get("_price_lookup_batches", 0) >= getattr(self.provider, "lookup_batches", 2):
+            return
+        if (not generation and request.get("_retrieval_price_lookup_batches", 0)
+                >= getattr(self.provider, "retrieval_lookup_batches", 2)):
             return
         catalog = self.pricing_catalog() or {"items": []}
         fresh = {(item["name"], item["unit"]) for item in self.provider.items()}
@@ -256,9 +259,12 @@ class BudgetService:
                             missing.append((name, unit))
                 except (ValueError, InvalidOperation, ZeroDivisionError):
                     continue
-        if missing or refresh:
+        if request.get("_price_lookup_batches", 0) and not missing:
+            return
+        if (missing or refresh) and self.provider.resolve(missing if missing else refresh):
             request["_price_lookup_batches"] = request.get("_price_lookup_batches", 0) + 1
-            self.provider.resolve(missing + refresh)
+            if not generation:
+                request["_retrieval_price_lookup_batches"] = request.get("_retrieval_price_lookup_batches", 0) + 1
 
     def catalog(self):
         configured = Path(self.catalog_path or settings.BUDGET_PRICE_CATALOG)
@@ -293,14 +299,17 @@ class BudgetService:
             return None
 
     def options(self):
-        catalog = self.catalog()
+        catalog = self.pricing_catalog()
         if not catalog:
             return []
+        items = catalog["items"]
+        if len(items) > 64:
+            items = items[:32] + items[-32:]
         return [{**{key: item[key] for key in ("name", "aliases", "unit", "package_quantity", "package_price")},
                  "ingredient_format": f"<quantity> {item['unit']} {item['name']}",
                  "food_role": item.get("food_role", "other"),
                  "package_description": item.get("product", "")}
-                for item in catalog["items"]]
+                for item in items]
 
     def measure_ingredient(self, line):
         text = re.sub(r"^[-•]\s+", "", str(line).lower().strip())

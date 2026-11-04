@@ -71,25 +71,25 @@ class IngredientPriceProvider:
 
     def resolve(self, ingredients):
         if not self.enabled:
-            return
+            return False
         requested = list(dict.fromkeys(
             (name, unit) for name, unit in ingredients
             if isinstance(name, str) and re.fullmatch(r"[a-z][a-z0-9 '\-(),é]{0,119}", name)
             and unit in {"g", "ml", "count"}
-        ))[:self.batch_size]
+        ))
         with self.lock:
             self._expire()
-            pending = [key for key in requested if key not in self.entries]
+            pending = [key for key in requested if key not in self.entries][:self.batch_size]
             for key in pending:
                 self.entries[key] = (self.clock() + 60, None)
             while len(self.entries) > 512:
                 self.entries.popitem(last=False)
         if not pending:
-            return
+            return False
         try:
             quotes = self.fetch_quotes(pending)
             if not isinstance(quotes, list) or len(quotes) > 24:
-                return
+                return True
             valid = [item for quote in quotes if (item := self._validate(quote, pending)) is not None]
             counts = Counter((item["name"], item["unit"]) for item in valid)
             with self.lock:
@@ -100,7 +100,8 @@ class IngredientPriceProvider:
                 while len(self.entries) > 512:
                     self.entries.popitem(last=False)
         except (requests.RequestException, ValueError, TypeError):
-            return
+            return True
+        return True
 
     def read_response(self, response):
         if response.status_code != 200:

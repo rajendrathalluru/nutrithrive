@@ -224,6 +224,39 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(len(generated), 2)
         self.assertNotIn("CACHED PRICE REFERENCES", model.predict.call_args.args[0])
 
+    def test_structured_budget_fallback_keeps_repair_feedback(self):
+        intent = self.intent()
+        enhancer = RecipeEnhancer()
+        model = Mock(predict=Mock(return_value=json.dumps([recipe(generated=True)])))
+        enhancer.initialize(model, aicr_service)
+        failed = {**recipe(generated=True), "budget_assessment": {"issues": ["Unpriced optional garnish"]}}
+        enhancer.generate_structured_fallback_recipe("Dinner under $5", intent, failed_recipes=[failed])
+        prompt = model.predict.call_args.args[0]
+        self.assertIn("Unpriced optional garnish", prompt.split("IMMEDIATE REPAIR TASK")[1])
+        self.assertIn("Keep cuisine-defining ingredients", prompt)
+
+    def test_budget_stage_transition_retains_generated_price_failures(self):
+        intent = self.intent()
+        unknown = {**recipe("Unpriced generated bowl", True), "ingredients": ["100 g unknown food"]}
+        pipeline = self.configure_pipeline(intent, [{**recipe(), "unsafe": True}], [unknown])
+        result = self.ask(pipeline)
+        self.assertEqual(result["matches_found"], 0)
+        ai_only_failures = pipeline.recipe_enhancer.generate_fallback_recipes.call_args_list[2].args[2]
+        self.assertEqual(ai_only_failures[0]["name"], "Unpriced generated bowl")
+        self.assertTrue(ai_only_failures[0]["budget_assessment"]["issues"])
+        structured_failures = pipeline.recipe_enhancer.generate_structured_fallback_recipe.call_args.kwargs["failed_recipes"]
+        self.assertTrue(structured_failures[0]["budget_assessment"]["issues"])
+
+    def test_semantic_context_keeps_product_forms_without_price_failure_leakage(self):
+        with patch("app.services.recipe_verifier.budget_service.assess", return_value={
+            "status": "uncertain", "issues": ["Unresolved ingredient price: pepper"],
+            "line_items": [{"ingredient": "raw tofu", "product": "Smoked tofu", "used_cost": "2.00"}],
+        }):
+            context = RecipeVerifier()._budget_verification_context(recipe(), self.intent())
+        self.assertEqual(context["priced_product_forms"], [{"ingredient": "raw tofu", "product": "Smoked tofu"}])
+        self.assertNotIn("Unresolved", json.dumps(context))
+        self.assertNotIn("used_cost", json.dumps(context))
+
     def test_pantry_credit_requires_explicit_quantity_and_does_not_change_used_cost(self):
         result = self.assess(basis="shopping", owned_ingredients=["200 g dry rice"])
         self.assertEqual(result["shopping_cost"], "1.00")
@@ -292,7 +325,8 @@ class BudgetTests(unittest.TestCase):
         self.assertIn('"servings": 2', prompt)
         self.assertIn("ingredient_completeness_check", prompt)
         self.assertIn("portion_adequacy_check", prompt)
-        self.assertIn("backend_price_assessment", prompt)
+        self.assertIn("price_verification", prompt)
+        self.assertNotIn("backend_price_assessment", prompt)
         self.assertNotIn("budget_recipe_check", prompt)
         enhancer = RecipeEnhancer()
         enhancer.initialize(Mock(predict=Mock(return_value=json.dumps([recipe(generated=True)]))), aicr_service)
@@ -448,7 +482,6 @@ class BudgetTests(unittest.TestCase):
         model = Mock(predict=Mock(return_value=json.dumps([self.assessment(intent)])))
         pipeline.recipe_verifier.initialize(model)
         with patch("app.services.rag_service.budget_service", self.service), \
-                patch("app.services.recipe_verifier.budget_service", self.service), \
                 patch("app.services.rag_service.safety_service.should_intercept", return_value=False):
             result = pipeline.ask_question(reply, conversation_history=history)
         self.assertEqual(result["matches_found"], 1, result)
@@ -458,7 +491,7 @@ class BudgetTests(unittest.TestCase):
         self.assertTrue(candidate["verification_details"]["passes_verification"])
         prompt = model.predict.call_args.args[0]
         self.assertIn('"requested_servings": 2', prompt)
-        self.assertIn('"estimate": "1.40"', prompt)
+        self.assertNotIn('"estimate"', prompt)
         self.assertIn("Missing prices are NOT missing recipe ingredients", prompt)
 
     def test_dollar_requests_return_cards_without_a_cost_basis_followup(self):
@@ -487,8 +520,7 @@ class BudgetTests(unittest.TestCase):
                     assessment[field] = {"status": status, "evidence": "Unlisted food addition or unsupported portion size."}
                     verifier = RecipeVerifier()
                     verifier.initialize(Mock(predict=Mock(return_value=json.dumps([assessment]))))
-                    with patch("app.services.recipe_verifier.budget_service", self.service):
-                        checked = verifier.batch_verify_recipes([recipe(generated=True)], intent, aicr_service)
+                    checked = verifier.batch_verify_recipes([recipe(generated=True)], intent, aicr_service)
                     final = self.service.annotate(checked, intent)[0]
                     self.assertEqual(final["budget_assessment"]["status"], "estimated_within_budget")
                     self.assertFalse(final["verification_details"]["passes_verification"])
@@ -500,37 +532,37 @@ class BudgetTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 verifier = RecipeVerifier()
                 verifier.initialize(Mock(predict=Mock(return_value=json.dumps([self.assessment(intent)]))))
-                with patch("app.services.recipe_verifier.budget_service", self.service):
-                    checked = verifier.batch_verify_recipes([{**recipe(generated=True), **changes}], intent, aicr_service)
+                checked = verifier.batch_verify_recipes([{**recipe(generated=True), **changes}], intent, aicr_service)
                 self.assertTrue(checked[0]["verification_details"]["passes_verification"])
                 final = self.service.annotate(checked, intent)[0]
                 self.assertNotEqual(final["budget_assessment"]["status"], "estimated_within_budget")
                 self.assertFalse(final["verification_details"]["passes_verification"])
 
-    def test_budget_verification_cache_tracks_current_prices_in_both_paths(self):
+    def test_semantic_cache_is_reused_but_changed_prices_are_recalculated(self):
         intent = self.intent()
         candidate = recipe(generated=True)
         verifier = RecipeVerifier()
         model = Mock(predict=Mock(return_value=json.dumps([self.assessment(intent)])))
         verifier.initialize(model)
-        with patch("app.services.recipe_verifier.budget_service", self.service):
-            first = verifier.batch_verify_recipes([copy.deepcopy(candidate)], intent, aicr_service)
-            second = verifier.batch_verify_recipes([copy.deepcopy(candidate)], intent, aicr_service)
-            self.assertEqual(first, second)
-            self.assertEqual(model.predict.call_count, 1)
-            changed = copy.deepcopy(CATALOG)
-            changed["items"][1]["package_price"] = "20"
-            self.path.write_text(json.dumps(changed))
-            checked = verifier.batch_verify_recipes([copy.deepcopy(candidate)], intent, aicr_service)
-            self.assertEqual(model.predict.call_count, 2)
-            self.assertEqual(self.service.annotate(checked, intent)[0]["budget_assessment"]["status"], "over_budget")
-            model.predict.return_value = json.dumps(self.assessment(intent))
-            verifier.verify_recipe_against_constraints(candidate, intent)
-            verifier.verify_recipe_against_constraints(candidate, intent)
-            self.assertEqual(model.predict.call_count, 3)
-            self.path.write_text(json.dumps(CATALOG))
-            verifier.verify_recipe_against_constraints(candidate, intent)
-            self.assertEqual(model.predict.call_count, 4)
+        first = verifier.batch_verify_recipes([copy.deepcopy(candidate)], intent, aicr_service)
+        second = verifier.batch_verify_recipes([copy.deepcopy(candidate)], intent, aicr_service)
+        self.assertEqual(first, second)
+        self.assertEqual(model.predict.call_count, 1)
+        changed = copy.deepcopy(CATALOG)
+        changed["items"][1]["package_price"] = "20"
+        self.path.write_text(json.dumps(changed))
+        checked = verifier.batch_verify_recipes([copy.deepcopy(candidate)], intent, aicr_service)
+        self.assertEqual(model.predict.call_count, 1)
+        self.assertEqual(self.service.annotate(checked, intent)[0]["budget_assessment"]["status"], "over_budget")
+        model.predict.return_value = json.dumps(self.assessment(intent))
+        verifier.verify_recipe_against_constraints(candidate, intent)
+        verifier.verify_recipe_against_constraints(candidate, intent)
+        self.assertEqual(model.predict.call_count, 2)
+        self.path.write_text(json.dumps(CATALOG))
+        verifier.verify_recipe_against_constraints(candidate, intent)
+        self.assertEqual(model.predict.call_count, 2)
+        checked = verifier.batch_verify_recipes([copy.deepcopy(candidate)], intent, aicr_service)
+        self.assertEqual(self.service.annotate(checked, intent)[0]["budget_assessment"]["status"], "estimated_within_budget")
 
     def test_budget_summary_is_calculated_not_invented_by_response_llm(self):
         intent = self.intent()
@@ -642,8 +674,7 @@ class BudgetTests(unittest.TestCase):
                 verdict["constraint_checks"][key] = {"status": "fail", "evidence": "Does not satisfy the requested requirement."}
                 verifier = RecipeVerifier()
                 verifier.initialize(Mock(predict=Mock(return_value=json.dumps([verdict]))))
-                with patch("app.services.recipe_verifier.budget_service", self.service):
-                    checked = verifier.batch_verify_recipes([recipe(generated=True)], intent, aicr_service)
+                checked = verifier.batch_verify_recipes([recipe(generated=True)], intent, aicr_service)
                 self.assertFalse(self.service.annotate(checked, intent)[0]["verification_details"]["passes_verification"])
 
     def test_expanded_catalog_is_priceable_without_equating_different_food_forms(self):

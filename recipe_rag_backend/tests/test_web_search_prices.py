@@ -82,6 +82,24 @@ class WebPriceTests(unittest.TestCase):
         provider = self.provider(response([listing(), listing(price_text="$2.00", listing_evidence="1 lb $2.00")]))
         provider.resolve([("dry lentils", "g")])
         self.assertEqual(provider.items(), [])
+
+    def test_specific_browse_listing_requires_complete_product_identity_and_evidence(self):
+        url = "https://www.walmart.com/browse/food/black-pepper/976759_976794_3029941"
+        product = listing(name="black pepper", product="Great Value Ground Black Pepper", source_url=url,
+                          package_size="3 oz", price_text="$3.58",
+                          listing_evidence="Great Value Ground Black Pepper, 3 oz, Price $3.58 $1.19/oz")
+        provider = self.provider(response([product], urls=[url]))
+        provider.resolve([("black pepper", "g")])
+        self.assertEqual(provider.items()[0]["source_url"], url)
+        self.assertEqual(provider.items()[0]["package_price"], "3.58")
+        for changes in [{"product": "Different Brand Ground Black Pepper"},
+                        {"listing_evidence": "Black pepper category, 3 oz, $3.58"},
+                        {"price_text": "$1.19/oz"}, {"price_text": "from $3.58"},
+                        {"source_url": "https://www.walmart.com/search?q=black+pepper"}]:
+            with self.subTest(changes=changes):
+                provider = self.provider(response([{**product, **changes}], urls=[url]))
+                provider.resolve([("black pepper", "g")])
+                self.assertEqual(provider.items(), [])
         for url in ["https://www.walmart.com.evil.example/ip/123", "https://other.example/ip/123",
                     "http://www.walmart.com/ip/123", "https://person:password@www.walmart.com/ip/123"]:
             provider = self.provider(response([listing(source_url=url)], urls=[url]))
@@ -134,7 +152,75 @@ class WebPriceTests(unittest.TestCase):
         fixture.service.provider = provider
         fixture.service.prepare_prices([{"ingredients": ["100 g dry rice", "200 g dry lentils"]}], fixture.intent())
         requested = provider.post.call_args.kwargs["json"]["input"]
-        self.assertLess(requested.index('"name": "dry lentils"'), requested.index('"name": "dry rice"'))
+        self.assertIn('"name": "dry lentils"', requested)
+        self.assertNotIn('"name": "dry rice"', requested)
+        fixture.service.prepare_prices([{"ingredients": ["100 g dry rice"]}], fixture.intent())
         quote = fixture.service.parse_ingredient("100 g dry rice", fixture.service.pricing_catalog())[0]
         self.assertEqual(quote["package_price"], "1.92")
         self.assertEqual(quote["observed_on"], "2026-11-04")
+
+    def fixture(self):
+        fixture = budget_fixtures.BudgetTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        fixture.service.today = lambda: date(2026, 11, 4)
+        fixture.service.provider = self.provider()
+        return fixture
+
+    def test_retrieval_reserves_one_lookup_for_generated_cuisine_candidate(self):
+        fixture = self.fixture()
+        provider = fixture.service.provider
+        sauce = listing(name="reduced-sodium soy sauce", product="Reduced-sodium soy sauce, 150 ml", unit="ml", package_size="150 ml",
+                        price_text="$3.00", listing_evidence="Reduced-sodium soy sauce 150 ml $3.00")
+        provider.post.side_effect = [http_response(response()), http_response(response([sauce]))]
+        intent = fixture.intent("can you help me to generate a korean dish inder 10 dollars")
+        intent["preferences"] = {"cuisine_types": ["Korean"]}
+        retrieved = {**budget_fixtures.recipe(), "ingredients": ["200 g dry lentils"], "unsafe": True}
+        generated = {**budget_fixtures.recipe("Korean egg rice bowl", True),
+                     "ingredients": ["150 g dry rice", "2 count eggs", "10 ml canola oil", "15 ml reduced-sodium soy sauce"]}
+        pipeline = fixture.configure_pipeline(intent, [retrieved], [generated])
+        result = fixture.ask(pipeline, "can you help me to generate a korean dish inder 10 dollars")
+        self.assertEqual(result["matches_found"], 1, result)
+        accepted = result["source_documents"][0]
+        self.assertEqual(accepted["name"], generated["name"])
+        self.assertEqual(accepted["budget_assessment"]["status"], "estimated_within_budget")
+        self.assertEqual(provider.post.call_count, 2)
+        generation_intent = pipeline.recipe_enhancer.generate_fallback_recipes.call_args.args[1]
+        self.assertIn("dry lentils", [item["name"] for item in generation_intent["budget_price_options"]])
+        self.assertEqual(generation_intent["preferences"]["cuisine_types"], ["Korean"])
+        fixture.service.prepare_prices([{"ingredients": ["100 g raw salmon"]}], intent, generation=True)
+        self.assertEqual(provider.post.call_count, 2)
+
+    def test_cache_only_pass_does_not_consume_request_allowance(self):
+        fixture = self.fixture()
+        provider = fixture.service.provider
+        provider.resolve([("raw salmon", "g")])
+        intent = fixture.intent("Under $10")
+        fixture.service.prepare_prices([{"ingredients": ["100 g raw salmon"]}], intent)
+        self.assertEqual(intent["budget_request"].get("_price_lookup_batches", 0), 0)
+        fixture.service.prepare_prices([{"ingredients": ["200 g dry lentils"]}], intent)
+        self.assertEqual(intent["budget_request"]["_price_lookup_batches"], 1)
+        self.assertEqual(provider.post.call_count, 2)
+
+    def test_repair_prices_new_units_and_gets_newly_found_options(self):
+        fixture = self.fixture()
+        provider = fixture.service.provider
+        provider.post.side_effect = [http_response(response([])), http_response(response())]
+        intent = fixture.intent("Korean dinner under $10")
+        rejected = {**budget_fixtures.recipe("Korean lentil bowl", True), "ingredients": ["1 cup dry lentils"]}
+        repaired = {**rejected, "ingredients": ["200 g dry lentils"]}
+        pipeline = fixture.configure_pipeline(intent, [], [])
+        pipeline.recipe_enhancer.generate_fallback_recipes.side_effect = [[rejected], [repaired]]
+        result = fixture.ask(pipeline, "Korean dinner under $10")
+        self.assertEqual(result["matches_found"], 1, result)
+        self.assertEqual(provider.post.call_count, 2)
+        failures = pipeline.recipe_enhancer.generate_fallback_recipes.call_args.args[2]
+        self.assertTrue(failures[0]["budget_assessment"]["issues"])
+        self.assertIn("dry lentils", [item["name"] for item in fixture.service.options()])
+
+    def test_second_search_is_not_spent_refreshing_already_priced_foods(self):
+        fixture = self.fixture()
+        intent = fixture.intent("Under $10")
+        fixture.service.prepare_prices([{"ingredients": ["200 g dry lentils"]}], intent, generation=True)
+        fixture.service.prepare_prices([{"ingredients": ["100 g dry rice"]}], intent, generation=True)
+        self.assertEqual(fixture.service.provider.post.call_count, 1)

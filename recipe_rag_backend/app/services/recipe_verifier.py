@@ -485,7 +485,13 @@ The backend will retain existing failures and independently validate this eviden
         return {
             "servings": recipe.get("servings"),
             "requested_servings": intent_data["budget_request"].get("servings"),
-            "backend_price_assessment": budget_service.assess(recipe, intent_data["budget_request"]),
+            "priced_product_forms": [
+                {"ingredient": item["ingredient"], "product": item["product"]}
+                for item in budget_service.assess(recipe, intent_data["budget_request"]).get("line_items", [])
+                if item.get("product")
+            ],
+            "price_verification": "The backend independently checks complete pricing and the budget after this recipe review. "
+                                  "Assess ingredient completeness from the recipe's ingredients and instructions, not price availability.",
         }
 
     def batch_verify_recipes(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any], aicr_service) -> List[Dict[str, Any]]:

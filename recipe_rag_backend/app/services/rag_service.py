@@ -162,7 +162,11 @@ class RecipeRAGService:
             report_progress("verifying")
         prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
         if intent_data.get("budget_request"):
-            budget_service.prepare_prices(prepared, intent_data)
+            budget_service.prepare_prices(prepared, intent_data, generation=any(
+                recipe.get("generated_by_llm") or recipe.get("dynamically_adapted")
+                or recipe.get("ingredients_generated") or recipe.get("instructions_generated")
+                for recipe in prepared
+            ))
         if intent_data.get("constraints", {}).get("leftover_friendly"):
             prepared = [{**recipe, "storage_evidence": self._get_recipe_storage_evidence(recipe)} for recipe in prepared]
         verified = self.recipe_verifier.batch_verify_recipes(prepared, intent_data, aicr_service)
@@ -196,13 +200,15 @@ class RecipeRAGService:
 
         for stage_index, references in enumerate(stages):
             stage_name = "reference_guided" if references else "ai_only"
-            stage_failures = list(failed_recipes) if stage_index == 0 else []
+            stage_failures = list(failed_recipes) if stage_index == 0 or intent_data.get("budget_request") else []
             for attempt in range(2):
                 generation_query = query if attempt == 0 else (
                     f"Create complete recipes with ingredients and step-by-step instructions for: {query}"
                 )
                 logger.info("Recipe generation stage=%s attempt=%s", stage_name, attempt + 1)
                 report_progress("generating")
+                if intent_data.get("budget_request"):
+                    intent_data["budget_price_options"] = budget_service.options()
                 candidates = self.recipe_enhancer.generate_fallback_recipes(
                     generation_query, intent_data, stage_failures, grounding_recipes=references
                 )
@@ -214,12 +220,17 @@ class RecipeRAGService:
                 stage_failures = [*assessed, *stage_failures]
 
             report_progress("generating")
+            if intent_data.get("budget_request"):
+                intent_data["budget_price_options"] = budget_service.options()
             candidates = self.recipe_enhancer.generate_structured_fallback_recipe(
-                query, intent_data, grounding_recipes=references
+                query, intent_data, grounding_recipes=references,
+                **({"failed_recipes": stage_failures} if intent_data.get("budget_request") else {}),
             )
             matches = self._verify_new_generated_recipes(candidates, intent_data, excluded_names)
             if matches:
                 return matches
+            if intent_data.get("budget_request"):
+                failed_recipes = stage_failures
             logger.warning("Recipe generation stage=%s exhausted without verified matches", stage_name)
 
         return []
@@ -640,6 +651,7 @@ class RecipeRAGService:
                     return self._build_context_reply(query, mode, intent_data, clarification)
                 intent_data["budget_price_options"] = budget_service.options()
                 intent_data["budget_request"]["_price_lookup_batches"] = 0
+                intent_data["budget_request"]["_retrieval_price_lookup_batches"] = 0
                 intent_data.pop("budget_previous_recipes", None)
                 if is_more_request:
                     intent_data["budget_previous_recipes"] = [

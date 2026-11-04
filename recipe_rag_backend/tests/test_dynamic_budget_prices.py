@@ -74,6 +74,23 @@ class PriceProviderTests(unittest.TestCase):
         now[0] += 86401
         self.assertEqual(provider.items(), [])
 
+    def test_resolve_counts_network_attempts_not_cache_hits(self):
+        provider = self.provider()
+        self.assertTrue(provider.resolve([("raw salmon", "g")]))
+        self.assertFalse(provider.resolve([("raw salmon", "g")]))
+        provider.post.side_effect = requests.Timeout()
+        self.assertTrue(provider.resolve([("fresh asparagus", "g")]))
+        self.assertFalse(provider.resolve([("fresh asparagus", "g")]))
+        self.assertEqual(provider.post.call_count, 2)
+
+    def test_cached_and_negative_keys_do_not_starve_later_batch_items(self):
+        provider = self.provider([])
+        provider.batch_size = 2
+        provider.resolve([("raw salmon", "g"), ("fresh asparagus", "g")])
+        provider.resolve([("raw salmon", "g"), ("fresh asparagus", "g"), ("dry lentils", "g")])
+        self.assertEqual(provider.post.call_count, 2)
+        self.assertEqual(provider.post.call_args.kwargs["json"]["ingredients"], [{"name": "dry lentils", "unit": "g"}])
+
     def test_disabled_or_invalid_endpoints_do_not_make_requests(self):
         for endpoint in ["", "http://prices.example", "https://user:password@prices.example", "https://prices.example?key=secret"]:
             provider = self.provider()
@@ -157,6 +174,19 @@ class DynamicBudgetTests(unittest.TestCase):
         for name in ["raw salmon", "fresh asparagus", "uncooked barley"]:
             self.service.prepare_prices([{ "ingredients": [f"100 g {name}"]}], intent)
         self.assertEqual(self.provider.post.call_count, 2)
+
+    def test_prompt_hints_stay_bounded_without_limiting_priceable_foods(self):
+        catalog = self.service.catalog()
+        catalog["items"] = [{**catalog["items"][0], "name": f"food {index}", "aliases": [f"food {index}"]}
+                            for index in range(100)]
+        with patch.object(self.service, "pricing_catalog", return_value=catalog):
+            options = self.service.options()
+            self.assertEqual(len(options), 64)
+            self.assertEqual(options[0]["name"], "food 0")
+            self.assertEqual(options[-1]["name"], "food 99")
+            self.assertNotIn("food 50", [item["name"] for item in options])
+            assessed = self.service.assess({**recipe(), "ingredients": ["100 g food 50"]}, self.fixture.intent()["budget_request"])
+            self.assertEqual(assessed["status"], "estimated_within_budget")
 
     def test_budget_guidance_allows_new_foods_and_keeps_acs_patient_context(self):
         intent = self.fixture.intent("Salmon dinner under $10")

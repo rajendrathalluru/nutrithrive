@@ -783,6 +783,24 @@ calories and protein_grams (numeric per-serving estimates), description, nutriti
 Keep the full preparation and safe cooking endpoints. Preserve all requested preparation/timing restrictions.
 Do not include extra tips or adaptations that introduce unlisted ingredients. The complete recipe will undergo
 the same independent user-requirement, nutritional-guideline, food-safety and budget checks before being returned.
+
+FINAL QUANTITY CHECK BEFORE RETURNING JSON:
+Every solid, including dry grains, frozen vegetables and powdered seasonings, needs a numeric weight in g.
+Every liquid needs a numeric volume in ml; individually sold foods such as eggs may use count.
+For example, ingredient-format examples are '150 g dry rice', '200 g frozen broccoli', '15 ml reduced-sodium soy sauce',
+'2 count eggs', '1 g salt'. These illustrate formatting only, not required ingredients or a prescribed recipe.
+Do not return cups of rice/vegetables, tablespoons of powders, or 'salt/pepper to taste': these cannot be
+priced against weight-based packages without unsupported density assumptions. Design realistic weighed
+quantities; do not pretend a cup is a gram amount or change raw/cooked forms to force a price match.
+Do not repeat a rejected recipe unchanged. Remove nonessential extras only when not requested by the user
+and not needed for the dish's identity or nutritional adequacy. Recheck every remaining ingredient's quantity.
+Repair every rejected ingredient's quantity/form as well as its matching instructions. Preserve the requested
+cuisine and required foods; updated cached references are price evidence, not permission to substitute them.
+
+IMMEDIATE REPAIR TASK (empty for a first attempt): {json.dumps(failures)}
+When a nonessential, non-required extra has repeatedly unresolved pricing, omit it from BOTH the ingredient
+list and the instructions rather than returning the same failed recipe. Keep cuisine-defining ingredients,
+user-required foods, adequate portions and all safety/nutrition requirements. Never claim an unavailable price.
 """
 
     def _build_repair_prompt(
@@ -850,10 +868,11 @@ The output will undergo the same independent verification as every other recipe.
         self,
         query: str,
         intent_data: Dict[str, Any],
-        grounding_recipes: List[Dict[str, Any]] = None
+        grounding_recipes: List[Dict[str, Any]] = None,
+        failed_recipes: List[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         if intent_data.get("budget_request"):
-            return self.generate_fallback_recipes(query, intent_data, [], grounding_recipes=grounding_recipes)
+            return self.generate_fallback_recipes(query, intent_data, failed_recipes or [], grounding_recipes=grounding_recipes)
         recipe_name = "Custom Recipe"
         recipe = {
             "name": recipe_name,
