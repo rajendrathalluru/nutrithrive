@@ -41,6 +41,37 @@ test('does not turn an uncertain estimate into a budget claim or unsafe link', (
   expect(screen.queryByRole('link', { name: 'Price source' })).not.toBeInTheDocument();
 });
 
+test('distinguishes already-owned food from a zero ingredient value and shows price evidence', () => {
+  render(<RecipeCard recipe={{ ...recipe, budgetAssessment: {
+    status: 'estimated_within_budget', currency: 'USD', basis: 'shopping', estimate: '4.00',
+    line_items: [
+      { ingredient: 'Salmon', used_cost: null, packages_to_buy: 0, purchase_cost: '0.00', source_url: '' },
+      { ingredient: 'Rice', used_cost: '0.40', packages_to_buy: 1, purchase_cost: '4.00',
+        source_url: 'https://example.com/rice', product: 'Rice, 1 kg', observed_on: '2026-11-04', region: 'Reference store' },
+    ],
+  } }} />);
+  const budget = screen.getByRole('region', { name: 'Budget estimate' });
+  expect(budget).toHaveTextContent('Salmon: consumed value unknown; 0 package(s) to buy, $0.00.');
+  expect(budget).not.toHaveTextContent('$null');
+  expect(budget).toHaveTextContent('Reference product: Rice, 1 kg');
+  expect(budget).toHaveTextContent('Checked 2026-11-04 · Reference store');
+  expect(within(budget).getAllByRole('link', { name: 'Price source' })).toHaveLength(1);
+});
+
+test('labels web-retrieved product prices without claiming live checkout or an average', () => {
+  render(<RecipeCard recipe={{ ...recipe, budgetAssessment: {
+    status: 'estimated_within_budget', currency: 'USD', basis: 'recipe', estimate: '0.85',
+    line_items: [{ ingredient: 'Dry lentils', used_cost: '0.85', packages_to_buy: 1,
+      purchase_cost: '1.92', source_url: 'https://www.walmart.com/ip/123',
+      product: 'Lentils, 1 lb', price_basis: 'web_listing', observed_on: '2026-11-04' }],
+  } }} />);
+  const budget = screen.getByRole('region', { name: 'Budget estimate' });
+  expect(budget).toHaveTextContent('Retrieved 2026-11-04');
+  expect(budget).toHaveTextContent('not a live checkout quote');
+  expect(budget).not.toHaveTextContent('average');
+  expect(within(budget).getByRole('link', { name: 'Price source' })).toHaveAttribute('href', 'https://www.walmart.com/ip/123');
+});
+
 test.each(['database_exact', 'llm_generated'])('renders accessible nested ingredient bullets for %s', source => {
   render(<RecipeCard recipe={{ ...recipe, source }} />);
   expect(screen.queryByRole('list', { name: 'Ingredients' })).not.toBeInTheDocument();

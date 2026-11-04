@@ -311,6 +311,24 @@ class AICRGuidelinesService:
         
         return "\n".join(sections)
     
+    def get_budget_nutrition_context(self) -> str:
+        return """AICR/ACS-informed application guidance for budget meals (not organizational certification):
+Sources:
+https://www.aicr.org/cancer-survival/treatment-tips/during-treatment/
+https://www.cancer.org/cancer/supportive-care/nutrition-activity-with-cancer/acs-nutrition-and-physical-activity-guideline-for-survivors.html
+Application summary reviewed 2026-11-04; not a replacement for personalized oncology dietitian advice.
+Choose ingredients for the individual and the complete prepared meal, not from a fixed list of approved foods.
+Preserve stated allergies, clinician-directed restrictions, texture needs, symptoms and adequate portions.
+During treatment, adequate energy, maintaining muscle and managing eating difficulties can take priority over
+general prevention goals. Do not impose weight loss, high fiber or one protein target on every survivor.
+When compatible with the individual's needs, favor varied vegetables, fruit, whole grains and legumes;
+limit processed/red meats, sugary drinks and highly processed foods. This is dietary-pattern guidance,
+not a requirement for every recipe to contain every food group or meet a whole day's nutrient targets.
+Price or availability never overrides food safety or patient-specific requirements. Do not claim a recipe
+treats cancer, prevents recurrence, or is clinically/AICR/ACS certified. Independently assess quantities,
+preparation, storage and overall nutritional suitability, not just ingredient names.
+"""
+
     def get_verification_policy(self, intent_data: Dict[str, Any]) -> Dict[str, Any]:
         guidelines = self.get_guidelines()
         focus_areas = self.extract_focus_areas_from_intent(intent_data)
@@ -322,6 +340,8 @@ class AICRGuidelinesService:
                 "foods_to_emphasize": guidelines["foods_to_emphasize"],
                 "foods_to_limit": guidelines["foods_to_limit"],
                 "general_principles": guidelines["general_principles"],
+                **({"budget_patient_guidance": self.get_budget_nutrition_context()}
+                   if intent_data.get("budget_request") else {}),
             },
             "symptom_suitability": {
                 area: guidelines["symptom_management"][area]

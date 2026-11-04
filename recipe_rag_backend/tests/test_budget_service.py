@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app.services.budget_service import BudgetService, apply_budget_intent, budget_clarification, budget_rules
+from app.services.ingredient_price_provider import IngredientPriceProvider
 from app.services.intent_analyzer import IntentAnalyzer
 from app.services.recipe_verifier import RecipeVerifier
 from app.services.recipe_enhancer import RecipeEnhancer
@@ -47,7 +48,7 @@ class BudgetTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / "prices.json"
         self.path.write_text(json.dumps(CATALOG))
-        self.service = BudgetService(self.path, today=lambda: TODAY)
+        self.service = BudgetService(self.path, today=lambda: TODAY, provider=IngredientPriceProvider(endpoint=""))
 
     def intent(self, query="Show meals under $5 for the whole recipe", history=None):
         analyzer = IntentAnalyzer()
@@ -194,7 +195,7 @@ class BudgetTests(unittest.TestCase):
         generated = enhancer.generate_fallback_recipes("Meal under $5", intent, [rejected], grounding_recipes=[reference])
         prompt = model.predict.call_args.args[0]
         self.assertIn("Create exactly 1 complete", prompt)
-        self.assertIn("AVAILABLE REFERENCE-PRICED INGREDIENTS", prompt)
+        self.assertIn("CACHED PRICE REFERENCES, NOT AN INGREDIENT WHITELIST", prompt)
         self.assertIn("<quantity> g dry rice", prompt)
         self.assertIn("Reference Bowl", prompt)
         self.assertIn("Unpriced honey", prompt)
@@ -221,7 +222,7 @@ class BudgetTests(unittest.TestCase):
         enhancer.initialize(model, aicr_service)
         generated = enhancer.generate_fallback_recipes("Show meals", self.intent("Show meals"), [])
         self.assertEqual(len(generated), 2)
-        self.assertNotIn("AVAILABLE REFERENCE-PRICED INGREDIENTS", model.predict.call_args.args[0])
+        self.assertNotIn("CACHED PRICE REFERENCES", model.predict.call_args.args[0])
 
     def test_pantry_credit_requires_explicit_quantity_and_does_not_change_used_cost(self):
         result = self.assess(basis="shopping", owned_ingredients=["200 g dry rice"])
@@ -396,15 +397,15 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(candidate["recipe_link"], "https://example.com/recipe")
             self.assertEqual(candidate["budget_assessment"]["status"], "estimated_within_budget")
 
-    def test_missing_budget_amount_and_missing_catalog_do_not_trigger_generation(self):
-        for intent, missing in [(self.intent("affordable meals"), False), (self.intent(), True)]:
-            if missing:
-                self.path.unlink()
-            pipeline = self.configure_pipeline(intent, [], [])
-            result = self.ask(pipeline)
-            self.assertEqual(result["source_documents"], [])
-            pipeline.search_engine.multi_query_search.assert_not_called()
-            pipeline.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+    def test_missing_amount_needs_clarification_but_missing_catalog_is_not_a_recipe_whitelist(self):
+        pipeline = self.configure_pipeline(self.intent("affordable meals"), [], [])
+        self.assertEqual(self.ask(pipeline)["source_documents"], [])
+        pipeline.search_engine.multi_query_search.assert_not_called()
+        pipeline.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+        self.path.unlink()
+        pipeline = self.configure_pipeline(self.intent(), [], [recipe(generated=True)])
+        self.assertEqual(self.ask(pipeline)["source_documents"], [])
+        pipeline.recipe_enhancer.generate_fallback_recipes.assert_called()
 
     def test_reported_ten_dollar_whole_recipe_followup_returns_a_priced_recipe(self):
         first = "can you help me to prepare a meal under 10 dollars"

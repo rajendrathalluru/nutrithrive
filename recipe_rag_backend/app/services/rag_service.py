@@ -161,6 +161,8 @@ class RecipeRAGService:
         if recipes:
             report_progress("verifying")
         prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
+        if intent_data.get("budget_request"):
+            budget_service.prepare_prices(prepared, intent_data)
         if intent_data.get("constraints", {}).get("leftover_friendly"):
             prepared = [{**recipe, "storage_evidence": self._get_recipe_storage_evidence(recipe)} for recipe in prepared]
         verified = self.recipe_verifier.batch_verify_recipes(prepared, intent_data, aicr_service)
@@ -637,16 +639,13 @@ class RecipeRAGService:
                     intent_data["query_type"] = "clarification"
                     return self._build_context_reply(query, mode, intent_data, clarification)
                 intent_data["budget_price_options"] = budget_service.options()
+                intent_data["budget_request"]["_price_lookup_batches"] = 0
                 intent_data.pop("budget_previous_recipes", None)
                 if is_more_request:
                     intent_data["budget_previous_recipes"] = [
                         {key: recipe.get(key) for key in ("name", "ingredients", "instructions")}
                         for recipe in conversation_recipes
                     ]
-                if not intent_data["budget_price_options"]:
-                    return self._build_context_reply(query, mode, intent_data,
-                        "I can't check this budget because current reference prices are unavailable. "
-                        "I won't invent prices or relax your dietary requirements. The price catalog needs updating.")
             reference_ids = intent_data.get("referenced_recipe_ids") or []
             referenced_recipes = [recipe for recipe in conversation_recipes if recipe["recipe_id"] in reference_ids]
             if query_type == "clarification" or (

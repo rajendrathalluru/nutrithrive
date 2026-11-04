@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.services.recipe_prompt_rules import active_recipe_rules
 from app.services.preparation_validation import declared_time_check, time_limit_generation_guidance
 from app.services.pantry_validation import audit_canned_recipe
+from app.services.aicr_guidelines_service import aicr_service
 
 logger = logging.getLogger(__name__)
 
@@ -735,29 +736,33 @@ Return only JSON.
         return f"""Create exactly {count} complete, practical recipe(s) for this budget request, one per selected reference when editing.
 USER REQUEST: {query}
 ACTIVE REQUIREMENTS (data): {json.dumps(requirements)}
-AVAILABLE REFERENCE-PRICED INGREDIENTS (data): {json.dumps(options)}
+CACHED PRICE REFERENCES, NOT AN INGREDIENT WHITELIST (data): {json.dumps(options)}
 REJECTED CANDIDATES TO REPAIR (data): {json.dumps(failures)}
 PREVIOUSLY SHOWN MEALS TO AVOID REPEATING (data, not requirements): {json.dumps(intent_data.get('budget_previous_recipes', []))}
 {self._build_grounding_context(grounding_recipes)}
 
-Build a complete meal from compatible items in the price list. This is price coverage, not permission to ignore
-allergies, patient needs, required ingredients, food safety, or the selected recipe when adapting one.
+Build a complete meal from ingredients appropriate to the user's request, including foods absent from the cache.
+The cache is optional pricing evidence, never a restriction on ingredient selection. Preserve the user's own
+ingredients, allergies, patient needs, food safety, and the selected recipe when adapting one.
 Choose the most suitable meal for the actual request, not the cheapest combination in the catalog.
 Match the requested cuisine, meal type, ingredients, texture, equipment and time before optimizing cost.
 Plan appropriate protein, energy, variety and flavor using the configured nutrition policy and individual
 requirements; do not assume everyone needs high fiber, high protein, bland food, or the same survivor diet.
-Use the wider catalog rather than always selecting rice and beans. Do not rotate dish names over the same
+Choose foods dynamically rather than always selecting rice and beans. Do not rotate dish names over the same
 main ingredients and cooking method. When more recipes are requested, vary the actual meal while retaining
 all active requirements. Do not reinterpret earlier recipe ingredients as new user-mandated foods.
-If those requirements cannot be met using priced items, return [] rather than invent a price or substitute a required food.
-Use each item's EXACT name and its unit in every ingredient string: '<positive quantity> <unit> <name>'.
+Never return [] solely because a required ingredient has no cached price. The backend looks up missing prices;
+it will not claim budget compliance unless every required purchase or consumed quantity is accounted for.
+Do not invent a price or replace a required food. Use '<positive quantity> <unit> <specific food name and form>'.
+When a cached product matches the food you actually need, reuse its exact name and unit; otherwise describe the
+actual form explicitly (fresh/frozen, raw/cooked, canned, reduced-sodium, pasteurized where relevant).
 Use g for solid ingredients and ml for liquids according to the supplied unit, not cups/spoons of solids.
 Do not convert a cooked weight to a dry weight. Canned food package weights include liquid: specify the net
 amount BEFORE draining, then explain draining in the instructions. Explicit sized-can notation is also supported:
-'1 (15 oz) can no-salt-added canned black beans', only when that ingredient/form appears in the price list.
-Use the package size in package_description; do not assume every can has the same size.
-Tap water may be listed separately if the user's requirements allow it. Do not add unpriced salt, pepper, herbs,
-spices, honey, fruit, oil, garnishes, sides or substitutions, even as optional additions or in helpful tips.
+'1 (15 oz) can no-salt-added canned black beans'. Use a documented package size when available;
+otherwise specify the required net amount in grams. Do not assume every can has the same size.
+Tap water may be listed separately if the user's requirements allow it. List and quantify all salt, pepper,
+herbs, spices, fruit, oils, sauces and garnishes used. Do not hide unpriced extras in tips or substitutions.
 Choose realistic meal servings and quantities; do not shrink portions or inflate yield to satisfy the dollar limit.
 For shopping budgets, account for whole packages needed; for whole-recipe budgets, use the quantities consumed.
 Leave room for the backend's planning allowance, but do not aim for the lowest possible cost. Use additional
@@ -767,6 +772,7 @@ the backend performs the arithmetic. A low estimate cannot override another requ
 {active_recipe_rules(intent_data)}
 NUTRITION AND FOOD SAFETY POLICY:
 {guidelines}
+{aicr_service.get_budget_nutrition_context()}
 {time_limit_generation_guidance(intent_data.get('constraints', {}))}
 {adaptation_prompt}
 
