@@ -26,7 +26,7 @@ CATALOG = {
         {"name": "canned beans", "aliases": ["canned beans"], "unit": "g", "package_quantity": "425.242846875",
          "package_price": "1", "source_url": "https://example.com/beans"},
         {"name": "canola oil", "aliases": ["canola oil"], "unit": "ml", "package_quantity": "1000",
-         "package_price": "5", "source_url": "https://example.com/oil"},
+         "package_price": "5", "food_role": "oil", "source_url": "https://example.com/oil"},
         {"name": "eggs", "aliases": ["eggs"], "unit": "count", "package_quantity": "12",
          "package_price": "3", "source_url": "https://example.com/eggs"},
     ],
@@ -251,13 +251,14 @@ class BudgetTests(unittest.TestCase):
         self.path.unlink()
         self.assertIsNone(self.service.catalog())
 
-    def test_ranking_prefers_fewer_purchases_without_imposing_a_hard_count_limit(self):
+    def test_ranking_preserves_relevance_order_instead_of_preferring_fewer_purchases(self):
         intent = self.intent()
         simple = recipe("Simple Bowl")
         more = recipe("Bowl with Oil")
         more["ingredients"].append("1 tbsp canola oil")
+        more["instructions"] = ["Bake the rice and beans with oil and sufficient water until fully cooked."]
         ranked = self.service.rank(self.service.annotate([more, simple], intent))
-        self.assertEqual([item["name"] for item in ranked], ["Simple Bowl", "Bowl with Oil"])
+        self.assertEqual([item["name"] for item in ranked], ["Bowl with Oil", "Simple Bowl"])
         self.assertEqual(len(ranked), 2)
 
     def assessment(self, intent):
@@ -384,7 +385,10 @@ class BudgetTests(unittest.TestCase):
             self.assertEqual(excluded[0]["recipe_id"], "unknown")
 
     def test_budget_results_keep_database_attribution_and_three_recipe_limit(self):
-        pipeline = self.configure_pipeline(self.intent(), [recipe(f"Bowl {index}") for index in range(5)], [])
+        candidates = [recipe(f"Bowl {index}") for index in range(5)]
+        for candidate, method in zip(candidates, ["Heat", "Steam", "Bake", "Microwave", "Simmer"]):
+            candidate["instructions"] = [f"{method} the rice and beans until fully cooked."]
+        pipeline = self.configure_pipeline(self.intent(), candidates, [])
         result = self.ask(pipeline)
         self.assertEqual(len(result["source_documents"]), 3)
         for candidate in result["source_documents"]:
@@ -542,3 +546,122 @@ class BudgetTests(unittest.TestCase):
         response = ResponseGenerator().generate_personalized_response("under $5", self.service.annotate([recipe()], intent), intent)
         self.assertIn("Don't push through cooking", response)
         self.assertIn("can't keep fluids down", response)
+
+    def test_more_suitable_higher_cost_recipe_keeps_its_relevance_rank(self):
+        catalog = copy.deepcopy(CATALOG)
+        catalog["items"][3]["package_price"] = "36"
+        self.path.write_text(json.dumps(catalog))
+        intent = self.intent("Dinner under $10")
+        better_match = recipe("Requested Egg and Bean Dinner")
+        better_match["ingredients"].append("2 eggs")
+        cheaper = recipe("Basic Rice Bowl")
+        candidates = self.service.annotate([better_match, cheaper], intent)
+        self.assertEqual(candidates[0]["budget_assessment"]["estimate"], "7.40")
+        self.assertEqual(candidates[0]["budget_assessment"]["planning_ceiling"], "8.88")
+        self.assertEqual([candidate["name"] for candidate in self.service.rank(candidates)],
+                         [better_match["name"], cheaper["name"]])
+        self.assertEqual(self.service.rank(list(reversed(candidates)))[0]["name"], cheaper["name"])
+        self.assertEqual(self.assess(limit="10", candidate={**recipe(), "ingredients": ["2000 g dry rice"]})["status"],
+                         "estimated_within_budget")
+
+    def test_diversity_uses_main_foods_and_method_not_names_or_oil(self):
+        first = recipe("Rice Bowl")
+        renamed = recipe("Protein Power Dinner")
+        renamed["ingredients"].append("10 ml canola oil")
+        steamed = {**recipe("Steamed Beans and Rice"), "instructions": ["Steam the rice and beans until fully cooked."]}
+        with_eggs = recipe("Egg Rice Dinner")
+        with_eggs["ingredients"].append("2 eggs")
+        ranked = self.service.rank([first, renamed, steamed, with_eggs])
+        self.assertEqual([candidate["name"] for candidate in ranked], [first["name"], steamed["name"], with_eggs["name"]])
+        self.assertEqual(self.service.rank([first, renamed], {"query_type": "recipe_adaptation"}), [first, renamed])
+
+    def test_more_budget_recipes_reject_renamed_meals_but_new_requests_do_not(self):
+        intent = self.intent()
+        intent["budget_previous_recipes"] = [recipe("Previously Shown")]
+        repeated = {**recipe("New Name"), "verification_details": {"passes_verification": True, "relevance": "match"}}
+        checked = self.service.annotate([repeated], intent)[0]
+        self.assertEqual(checked["budget_assessment"]["status"], "estimated_within_budget")
+        self.assertFalse(checked["verification_details"]["passes_verification"])
+        self.assertIn("changing its name", checked["verification_details"]["constraint_violations"][-1])
+        with patch("app.services.rag_service.budget_service", self.service):
+            self.assertEqual(RecipeRAGService()._apply_deterministic_constraints([repeated], intent), [])
+        self.assertTrue(self.service.annotate([repeated], self.intent())[0]["verification_details"]["passes_verification"])
+
+    def test_budget_pipeline_variety_context_is_followup_only_and_repairs_duplicates(self):
+        original_query = "Show meals under $5 for the whole recipe"
+        history = [{"role": "user", "content": original_query},
+                   {"role": "assistant", "content": "Here is a recipe.", "recipes": [recipe("Original Bowl")]}]
+        for query, expected_calls in [("more recipes", 2), (original_query, 1)]:
+            with self.subTest(query=query):
+                intent = self.intent(original_query)
+                intent["budget_previous_recipes"] = [recipe("Stale Context")]
+                pipeline = self.configure_pipeline(intent, [], [])
+                different = recipe("Egg and Bean Dinner", True)
+                different["ingredients"].append("2 eggs")
+                pipeline.recipe_enhancer.generate_fallback_recipes.side_effect = [
+                    [recipe("Renamed Bowl", True)], [different],
+                ]
+                with patch("app.services.rag_service.budget_service", self.service), \
+                        patch("app.services.rag_service.safety_service.should_intercept", return_value=False):
+                    result = pipeline.ask_question(query, conversation_history=history)
+                self.assertEqual(result["matches_found"], 1, result)
+                self.assertEqual(pipeline.recipe_enhancer.generate_fallback_recipes.call_count, expected_calls)
+                generation_intent = pipeline.recipe_enhancer.generate_fallback_recipes.call_args.args[1]
+                if query == "more recipes":
+                    self.assertEqual(generation_intent["budget_previous_recipes"][0]["name"], "Original Bowl")
+                    self.assertEqual(result["source_documents"][0]["name"], different["name"])
+                else:
+                    self.assertNotIn("budget_previous_recipes", generation_intent)
+                    self.assertEqual(result["source_documents"][0]["name"], "Renamed Bowl")
+
+    def test_budget_prompt_preserves_patient_requirements_and_does_not_minimize_cost(self):
+        intent = self.intent("A vegetarian dinner under $10")
+        intent["constraints"].update(allergens_to_avoid=["soy"], time_max_minutes=20,
+                                     chewing_effort="low", ingredients_must_use=["lentils"])
+        intent["budget_price_options"] = self.service.options()
+        intent["budget_previous_recipes"] = [recipe("Previous Bowl")]
+        enhancer = RecipeEnhancer()
+        prompt = enhancer._build_budget_generation_prompt("Dinner", intent, "Existing nutrition policy", [], [])
+        for expected in ["soy", "lentils", "20", "chewing_effort", "Previous Bowl", "Existing nutrition policy",
+                         "not the cheapest combination", "More expensive does not automatically mean better",
+                         "do not assume everyone needs high fiber", "Do not rotate dish names"]:
+            self.assertIn(expected, prompt)
+
+    def test_budget_cannot_override_any_user_requirement_verification(self):
+        intent = self.intent("Dinner under $10")
+        intent["recipe_request"] = "A vegetarian dinner with beans, no eggs, under $10"
+        intent["constraints"].update(ingredients_must_use=["beans"], dietary_restrictions=["vegetarian"],
+                                     allergens_to_avoid=["eggs"], time_max_minutes=20)
+        required = RecipeVerifier()._required_checks(intent)
+        for key in ["recipe_request", "constraints.ingredients_must_use[0]", "constraints.dietary_restrictions",
+                    "constraints.allergens_to_avoid", "constraints.time_max_minutes"]:
+            with self.subTest(key=key):
+                self.assertIn(key, required)
+                verdict = self.assessment(intent)
+                verdict["constraint_checks"][key] = {"status": "fail", "evidence": "Does not satisfy the requested requirement."}
+                verifier = RecipeVerifier()
+                verifier.initialize(Mock(predict=Mock(return_value=json.dumps([verdict]))))
+                with patch("app.services.recipe_verifier.budget_service", self.service):
+                    checked = verifier.batch_verify_recipes([recipe(generated=True)], intent, aicr_service)
+                self.assertFalse(self.service.annotate(checked, intent)[0]["verification_details"]["passes_verification"])
+
+    def test_expanded_catalog_is_priceable_without_equating_different_food_forms(self):
+        path = Path(__file__).resolve().parents[1] / "app/data/ingredient_prices.json"
+        service = BudgetService(path, today=lambda: date(2026, 11, 4))
+        catalog = service.catalog()
+        self.assertIsNotNone(catalog)
+        self.assertEqual(len(catalog["items"]), 20)
+        for item in catalog["items"]:
+            with self.subTest(item=item["name"]):
+                self.assertIsNotNone(service.parse_ingredient(f"1 {item['unit']} {item['name']}", catalog))
+        for line in ["100 g cooked brown rice", "100 g gluten-free penne", "100 g shelf-stable tofu",
+                     "100 g fresh chicken breast", "100 g cooked lentils", "2 pasteurized large eggs"]:
+            self.assertIsNone(service.parse_ingredient(line, catalog), line)
+        self.assertEqual({item["food_role"] for item in catalog["items"]}, {"protein", "grain", "vegetable", "oil", "seasoning"})
+        dish = {"name": "Tofu and Vegetable Penne", "servings": 2,
+                "ingredients": ["200 g refrigerated super-firm tofu", "150 g dry whole wheat penne",
+                                "200 g frozen broccoli florets", "100 g fresh spinach", "10 ml canola oil", "2 g garlic powder"]}
+        assessment = service.assess(dish, {"limit": "10", "currency": "USD", "basis": "recipe", "exclusive": True})
+        self.assertEqual(assessment["status"], "estimated_within_budget")
+        self.assertTrue(any("target.com" in line["source_url"] for line in assessment["line_items"]))
+        self.assertTrue(any("walmart.com" in line["source_url"] for line in assessment["line_items"]))

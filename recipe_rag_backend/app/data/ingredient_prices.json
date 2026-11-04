@@ -1,13 +1,14 @@
 {
-  "version": 1,
+  "version": 2,
   "currency": "USD",
   "region": "U.S. online retail reference; not a local store quote",
   "observed_on": "2026-11-01",
   "planning_allowance": "0.20",
-  "notes": "Public online listing snapshots, not live checkout prices. Listings can use different default stores. The 20% allowance is a planning policy, not a statistical confidence interval. Refresh within 90 days. Unknown ingredients are not free.",
+  "notes": "Public online listing snapshots, not live checkout prices. Original eight entries checked November 1, 2026; twelve additions checked November 4, 2026. The catalog date conservatively retains the oldest check; do not advance it without reviewing every entry. Listings can use different default stores and retailers. The 20% allowance is a planning policy, not a statistical confidence interval. Refresh within 90 days. Unknown ingredients are not free. Product-specific forms, added salt, and package weights must be preserved.",
   "items": [
     {
       "name": "canola oil",
+      "food_role": "oil",
       "aliases": ["canola oil"],
       "unit": "ml", "package_quantity": "1419.529419", "package_price": "3.97",
       "source_url": "https://www.walmart.com/ip/10450988",
@@ -15,6 +16,7 @@
     },
     {
       "name": "garlic powder",
+      "food_role": "seasoning",
       "aliases": ["garlic powder"],
       "unit": "g", "package_quantity": "96.388378625", "package_price": "1.08",
       "source_url": "https://www.walmart.com/ip/676979470",
@@ -22,6 +24,7 @@
     },
     {
       "name": "plain nonfat greek yogurt",
+      "food_role": "protein",
       "aliases": ["plain nonfat greek yogurt", "pasteurized plain nonfat greek yogurt"],
       "unit": "g", "package_quantity": "907.18474", "package_price": "3.28",
       "source_url": "https://www.walmart.com/ip/26559565",
@@ -29,6 +32,7 @@
     },
     {
       "name": "uncooked long grain white rice",
+      "food_role": "grain",
       "aliases": ["uncooked long grain white rice", "dry long grain white rice", "uncooked white rice", "dry white rice"],
       "unit": "g", "package_quantity": "907.18474", "package_price": "1.82",
       "source_url": "https://www.walmart.com/ip/10315394",
@@ -36,6 +40,7 @@
     },
     {
       "name": "no-salt-added canned black beans",
+      "food_role": "protein",
       "aliases": ["no-salt-added canned black beans", "canned no-salt-added black beans", "no salt added canned black beans", "no-salt-added black beans"],
       "unit": "g", "package_quantity": "425.242846875", "package_price": "0.92",
       "source_url": "https://www.walmart.com/ip/39778876",
@@ -43,6 +48,7 @@
     },
     {
       "name": "no-salt-added canned diced tomatoes",
+      "food_role": "vegetable",
       "aliases": ["no-salt-added canned diced tomatoes", "canned no-salt-added diced tomatoes", "no salt added canned diced tomatoes", "no-salt-added diced tomatoes"],
       "unit": "g", "package_quantity": "411.0680853125", "package_price": "0.96",
       "source_url": "https://www.walmart.com/ip/10416052",
@@ -50,6 +56,7 @@
     },
     {
       "name": "frozen mixed vegetables",
+      "food_role": "vegetable",
       "aliases": ["frozen mixed vegetables"],
       "unit": "g", "package_quantity": "340.1942775", "package_price": "0.98",
       "source_url": "https://www.walmart.com/c/best-sellers/frozen-mixed-veggies-great-value",
@@ -57,10 +64,107 @@
     },
     {
       "name": "dry old fashioned oats",
+      "food_role": "grain",
       "aliases": ["dry old fashioned oats", "dry old-fashioned oats", "uncooked old fashioned oats", "uncooked old-fashioned oats"],
       "unit": "g", "package_quantity": "1190.67997125", "package_price": "4.18",
       "source_url": "https://www.walmart.com/browse/food/old-fashioned-oats/great-value/976759_976783_7830606_7652308/YnJhbmQ6R3JlYXQgVmFsdWUie",
       "product": "Great Value 100% Whole Grain Old Fashioned Oats, 42 oz"
+    },
+    {
+      "name": "refrigerated super-firm tofu",
+      "food_role": "protein",
+      "aliases": ["refrigerated super-firm tofu", "super-firm tofu", "pasteurized super-firm tofu"],
+      "unit": "g", "package_quantity": "396.89332375", "package_price": "3.99",
+      "source_url": "https://www.target.com/p/-/A-90180214",
+      "product": "Good & Gather Organic Super Firm Tofu, 14 oz; pasteurized, vacuum packed, water drained, refrigerated; not silken or shelf-stable tofu"
+    },
+    {
+      "name": "uncooked long grain brown rice",
+      "food_role": "grain",
+      "aliases": ["uncooked long grain brown rice", "dry long grain brown rice", "uncooked brown rice", "dry brown rice"],
+      "unit": "g", "package_quantity": "907.18474", "package_price": "1.99",
+      "source_url": "https://www.target.com/p/-/A-89285656",
+      "product": "Good & Gather Long Grain Brown Rice, 32 oz; dry, not instant or precooked"
+    },
+    {
+      "name": "dry lentils",
+      "food_role": "protein",
+      "aliases": ["dry lentils", "dried lentils", "uncooked lentils"],
+      "unit": "g", "package_quantity": "453.59237", "package_price": "1.92",
+      "source_url": "https://www.walmart.com/ip/545884744",
+      "product": "Great Value Lentils, 1 lb; dry, not canned or precooked"
+    },
+    {
+      "name": "dry whole wheat penne",
+      "food_role": "grain",
+      "aliases": ["dry whole wheat penne", "dry whole-wheat penne", "uncooked whole wheat penne"],
+      "unit": "g", "package_quantity": "453.59237", "package_price": "1.74",
+      "source_url": "https://www.walmart.com/ip/173699635",
+      "product": "Great Value Whole Wheat Penne, 16 oz; dry pasta containing wheat, not gluten-free"
+    },
+    {
+      "name": "frozen broccoli florets",
+      "food_role": "vegetable",
+      "aliases": ["frozen broccoli florets"],
+      "unit": "g", "package_quantity": "340.1942775", "package_price": "1.16",
+      "source_url": "https://www.walmart.com/c/best-sellers/great-value-frozen-broccoli",
+      "product": "Great Value Frozen Broccoli Florets Steamable Bag, 12 oz; prepare according to package directions"
+    },
+    {
+      "name": "large eggs",
+      "food_role": "protein",
+      "aliases": ["large eggs", "large egg"],
+      "unit": "count", "package_quantity": "12", "package_price": "1.49",
+      "source_url": "https://www.target.com/p/-/A-14713534",
+      "product": "Good & Gather Grade A Large Eggs, 12 count; raw refrigerated shell eggs, not pasteurized or precooked eggs"
+    },
+    {
+      "name": "fresh spinach",
+      "food_role": "vegetable",
+      "aliases": ["fresh spinach", "fresh washed spinach"],
+      "unit": "g", "package_quantity": "255.145708125", "package_price": "1.99",
+      "source_url": "https://www.target.com/p/-/A-54555623",
+      "product": "Good & Gather Fresh Steam-in-Bag Spinach, 9 oz; washed fresh leaves, not frozen or cooked spinach"
+    },
+    {
+      "name": "ground cumin",
+      "food_role": "seasoning",
+      "aliases": ["ground cumin"],
+      "unit": "g", "package_quantity": "56.69904625", "package_price": "1.19",
+      "source_url": "https://www.target.com/p/-/A-84669678",
+      "product": "Good & Gather Ground Cumin, 2 oz"
+    },
+    {
+      "name": "fresh carrots",
+      "food_role": "vegetable",
+      "aliases": ["fresh carrots", "fresh organic carrots", "raw carrots"],
+      "unit": "g", "package_quantity": "453.59237", "package_price": "1.59",
+      "source_url": "https://www.target.com/p/-/A-85760297",
+      "product": "Good & Gather Fresh Organic Carrots, 1 lb; whole raw carrots, not precut or cooked"
+    },
+    {
+      "name": "fresh sliced white mushrooms",
+      "food_role": "vegetable",
+      "aliases": ["fresh sliced white mushrooms", "raw sliced white mushrooms"],
+      "unit": "g", "package_quantity": "226.796185", "package_price": "3.39",
+      "source_url": "https://www.target.com/p/-/A-13519318",
+      "product": "Sliced White Mushrooms, 8 oz; raw refrigerated mushrooms, packaging varies"
+    },
+    {
+      "name": "raw frozen boneless skinless chicken breast with added salt solution",
+      "food_role": "protein",
+      "aliases": ["raw frozen boneless skinless chicken breast with added salt solution"],
+      "unit": "g", "package_quantity": "1133.980925", "package_price": "8.99",
+      "source_url": "https://www.target.com/p/-/A-14777815",
+      "product": "Good & Gather No Antibiotics Ever Boneless Skinless Chicken Breast, frozen, 40 oz; raw, with rib meat and up to 15% water/salt solution. Label lists 300 mg sodium per 112 g. Not low-sodium, unbrined, fresh or precooked chicken; fully cook and include safe thawing time when required"
+    },
+    {
+      "name": "bottled lemon juice from concentrate",
+      "food_role": "seasoning",
+      "aliases": ["bottled lemon juice from concentrate", "bottled lemon juice"],
+      "unit": "ml", "package_quantity": "443.6029434375", "package_price": "2.59",
+      "source_url": "https://www.target.com/p/-/A-14751839",
+      "product": "ReaLemon 100% Lemon Juice, 15 fl oz; bottled juice from concentrate, not fresh lemons; follow label storage directions after opening"
     }
   ]
 }

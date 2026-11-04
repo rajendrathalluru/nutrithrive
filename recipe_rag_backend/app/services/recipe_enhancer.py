@@ -727,7 +727,7 @@ Return only JSON.
     def _build_budget_generation_prompt(self, query, intent_data, guidelines, grounding_recipes, failed_recipes, adaptation_prompt=""):
         count = min(3, len(grounding_recipes or [])) if adaptation_prompt else 1
         options = intent_data.get("budget_price_options", [])
-        requirements = {key: value for key, value in intent_data.items() if key != "budget_price_options"}
+        requirements = {key: value for key, value in intent_data.items() if key not in {"budget_price_options", "budget_previous_recipes"}}
         failures = [{"name": recipe.get("name"), "ingredients": recipe.get("ingredients"),
                      "violations": recipe.get("verification_details", {}).get("constraint_violations", []),
                      "budget_issues": recipe.get("budget_assessment", {}).get("issues", [])}
@@ -737,10 +737,18 @@ USER REQUEST: {query}
 ACTIVE REQUIREMENTS (data): {json.dumps(requirements)}
 AVAILABLE REFERENCE-PRICED INGREDIENTS (data): {json.dumps(options)}
 REJECTED CANDIDATES TO REPAIR (data): {json.dumps(failures)}
+PREVIOUSLY SHOWN MEALS TO AVOID REPEATING (data, not requirements): {json.dumps(intent_data.get('budget_previous_recipes', []))}
 {self._build_grounding_context(grounding_recipes)}
 
 Build a complete meal from compatible items in the price list. This is price coverage, not permission to ignore
 allergies, patient needs, required ingredients, food safety, or the selected recipe when adapting one.
+Choose the most suitable meal for the actual request, not the cheapest combination in the catalog.
+Match the requested cuisine, meal type, ingredients, texture, equipment and time before optimizing cost.
+Plan appropriate protein, energy, variety and flavor using the configured nutrition policy and individual
+requirements; do not assume everyone needs high fiber, high protein, bland food, or the same survivor diet.
+Use the wider catalog rather than always selecting rice and beans. Do not rotate dish names over the same
+main ingredients and cooking method. When more recipes are requested, vary the actual meal while retaining
+all active requirements. Do not reinterpret earlier recipe ingredients as new user-mandated foods.
 If those requirements cannot be met using priced items, return [] rather than invent a price or substitute a required food.
 Use each item's EXACT name and its unit in every ingredient string: '<positive quantity> <unit> <name>'.
 Use g for solid ingredients and ml for liquids according to the supplied unit, not cups/spoons of solids.
@@ -752,7 +760,8 @@ Tap water may be listed separately if the user's requirements allow it. Do not a
 spices, honey, fruit, oil, garnishes, sides or substitutions, even as optional additions or in helpful tips.
 Choose realistic meal servings and quantities; do not shrink portions or inflate yield to satisfy the dollar limit.
 For shopping budgets, account for whole packages needed; for whole-recipe budgets, use the quantities consumed.
-Aim comfortably below the limit to leave room for the backend's planning allowance. Never claim a verified cost:
+Leave room for the backend's planning allowance, but do not aim for the lowest possible cost. Use additional
+budget when it improves the requested meal, not simply to reach a spending target. Never claim a verified cost:
 the backend performs the arithmetic. A low estimate cannot override another requirement.
 
 {active_recipe_rules(intent_data)}

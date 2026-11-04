@@ -152,7 +152,7 @@ class RecipeRAGService:
                 prefix = (ingredient_matches, -effort_conflicts, equipment_matches, timing_rank, score)
                 if budget:
                     assessment = budget_service.assess(self._build_recipe_data_from_record(record), budget)
-                    prefix += (int(assessment["status"] == "estimated_within_budget"), -assessment.get("ingredient_count", 1000))
+                    prefix += (int(assessment["status"] == "estimated_within_budget"),)
                 ranked.append((*prefix, record))
         ranked.sort(key=lambda item: item[:-1], reverse=True)
         return [self._build_recipe_data_from_record(item[-1]) for item in ranked[:limit]]
@@ -176,7 +176,7 @@ class RecipeRAGService:
         if matches and intent_data.get("constraints", {}).get("digestive_comfort") == "gentle":
             least_cautions = min(len(digestive_tolerance_cautions(recipe)) for recipe in matches)
             matches = [recipe for recipe in matches if len(digestive_tolerance_cautions(recipe)) == least_cautions]
-        return budget_service.rank(matches) if intent_data.get("budget_request") else matches
+        return budget_service.rank(matches, intent_data) if intent_data.get("budget_request") else matches
 
     def _verify_new_generated_recipes(
         self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any], excluded_names: set[str]
@@ -281,7 +281,8 @@ class RecipeRAGService:
         recipes = [recipe for recipe in recipes if not missing_required_ingredients(recipe, required)]
         if intent_data.get("budget_request"):
             recipes = [recipe for recipe in budget_service.annotate(recipes, intent_data)
-                       if recipe["budget_assessment"]["status"] == "estimated_within_budget"]
+                       if recipe["budget_assessment"]["status"] == "estimated_within_budget"
+                       and recipe.get("verification_details", {}).get("passes_verification") is not False]
         if not intent_data.get("constraints", {}).get("leftover_friendly"):
             return recipes
 
@@ -636,6 +637,12 @@ class RecipeRAGService:
                     intent_data["query_type"] = "clarification"
                     return self._build_context_reply(query, mode, intent_data, clarification)
                 intent_data["budget_price_options"] = budget_service.options()
+                intent_data.pop("budget_previous_recipes", None)
+                if is_more_request:
+                    intent_data["budget_previous_recipes"] = [
+                        {key: recipe.get(key) for key in ("name", "ingredients", "instructions")}
+                        for recipe in conversation_recipes
+                    ]
                 if not intent_data["budget_price_options"]:
                     return self._build_context_reply(query, mode, intent_data,
                         "I can't check this budget because current reference prices are unavailable. "
