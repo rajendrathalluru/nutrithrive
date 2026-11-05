@@ -169,8 +169,20 @@ class RecipeRAGService:
             ))
         if intent_data.get("constraints", {}).get("leftover_friendly"):
             prepared = [{**recipe, "storage_evidence": self._get_recipe_storage_evidence(recipe)} for recipe in prepared]
-        verified = self.recipe_verifier.batch_verify_recipes(prepared, intent_data, aicr_service)
-        return budget_service.annotate(verified, intent_data)
+        deferred = []
+        if intent_data.get("budget_request"):
+            assessed = budget_service.annotate(prepared, intent_data)
+            prepared = []
+            for recipe in assessed:
+                if recipe["budget_assessment"]["status"] == "estimated_within_budget":
+                    recipe.pop("budget_verification_pending", None)
+                    prepared.append(recipe)
+                else:
+                    recipe["budget_verification_pending"] = True
+                    recipe["verification_details"].setdefault("relevance", "unreviewed")
+                    deferred.append(recipe)
+        verified = self.recipe_verifier.batch_verify_recipes(prepared, intent_data, aicr_service) if prepared else []
+        return budget_service.annotate(verified, intent_data) + deferred
 
     def _get_verified_matches(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         matches = [
@@ -755,7 +767,8 @@ class RecipeRAGService:
                 grounding_recipes = referenced_recipes if is_recipe_adaptation else [
                     recipe for recipe in candidate_recipes
                     if recipe.get("database_record_found")
-                    and recipe.get("verification_details", {}).get("relevance") in {"match", "adaptable"}
+                    and (recipe.get("verification_details", {}).get("relevance") in {"match", "adaptable"}
+                         or recipe.get("budget_verification_pending"))
                 ][:3]
                 logger.info("Generating recipes with %s database references", len(grounding_recipes))
                 generation_query = normalized_recipe_request

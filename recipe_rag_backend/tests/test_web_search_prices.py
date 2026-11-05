@@ -205,7 +205,7 @@ class WebPriceTests(unittest.TestCase):
     def test_repair_prices_new_units_and_gets_newly_found_options(self):
         fixture = self.fixture()
         provider = fixture.service.provider
-        provider.post.side_effect = [http_response(response([])), http_response(response())]
+        provider.post.side_effect = [http_response(response())]
         intent = fixture.intent("Korean dinner under $10")
         rejected = {**budget_fixtures.recipe("Korean lentil bowl", True), "ingredients": ["1 cup dry lentils"]}
         repaired = {**rejected, "ingredients": ["200 g dry lentils"]}
@@ -213,7 +213,7 @@ class WebPriceTests(unittest.TestCase):
         pipeline.recipe_enhancer.generate_fallback_recipes.side_effect = [[rejected], [repaired]]
         result = fixture.ask(pipeline, "Korean dinner under $10")
         self.assertEqual(result["matches_found"], 1, result)
-        self.assertEqual(provider.post.call_count, 2)
+        self.assertEqual(provider.post.call_count, 1)
         failures = pipeline.recipe_enhancer.generate_fallback_recipes.call_args.args[2]
         self.assertTrue(failures[0]["budget_assessment"]["issues"])
         self.assertIn("dry lentils", [item["name"] for item in fixture.service.options()])

@@ -9,6 +9,7 @@ from app.services.recipe_prompt_rules import active_recipe_rules
 from app.services.preparation_validation import declared_time_check, time_limit_generation_guidance
 from app.services.pantry_validation import audit_canned_recipe
 from app.services.aicr_guidelines_service import aicr_service
+from app.services.budget_recipe_contract import budget_recipe_response_format, normalize_budget_recipe
 
 logger = logging.getLogger(__name__)
 
@@ -596,11 +597,16 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
                     generation_prompt if intent_data.get("adaptation_request") else "",
                 )
 
-            response = self.llm.predict(generation_prompt)
+            response = self.llm.predict(generation_prompt, **(
+                {"response_format": budget_recipe_response_format(intent_data.get("budget_price_options"))}
+                if intent_data.get("budget_request") else {}
+            ))
             
             # STEP 4: Parse Response
             response = response.strip()
             generated_recipes = self._parse_generated_recipe_response(response)
+            if intent_data.get("budget_request"):
+                generated_recipes = [normalize_budget_recipe(recipe, intent_data.get("budget_price_options")) for recipe in generated_recipes]
             
             if not generated_recipes:
                 logger.error("LLM returned empty recipe array")
@@ -730,6 +736,7 @@ Return only JSON.
         options = intent_data.get("budget_price_options", [])
         requirements = {key: value for key, value in intent_data.items() if key not in {"budget_price_options", "budget_previous_recipes"}}
         failures = [{"name": recipe.get("name"), "ingredients": recipe.get("ingredients"),
+                     "instructions": recipe.get("instructions"), "servings": recipe.get("servings"),
                      "violations": recipe.get("verification_details", {}).get("constraint_violations", []),
                      "budget_issues": recipe.get("budget_assessment", {}).get("issues", [])}
                     for recipe in failed_recipes[:2]]
@@ -745,6 +752,9 @@ Build a complete meal from ingredients appropriate to the user's request, includ
 The cache is optional pricing evidence, never a restriction on ingredient selection. Preserve the user's own
 ingredients, allergies, patient needs, food safety, and the selected recipe when adapting one.
 Choose the most suitable meal for the actual request, not the cheapest combination in the catalog.
+Write culinary_basis first: identify the real dish's defining ingredients and method before selecting price references.
+Do not replace a defining ingredient with an incompatible cached item (for example, pasta is not pancake flour).
+Use the new-food schema branch for a needed ingredient absent from the cache rather than changing the dish's identity.
 Match the requested cuisine, meal type, ingredients, texture, equipment and time before optimizing cost.
 Plan appropriate protein, energy, variety and flavor using the configured nutrition policy and individual
 requirements; do not assume everyone needs high fiber, high protein, bland food, or the same survivor diet.
@@ -753,7 +763,11 @@ main ingredients and cooking method. When more recipes are requested, vary the a
 all active requirements. Do not reinterpret earlier recipe ingredients as new user-mandated foods.
 Never return [] solely because a required ingredient has no cached price. The backend looks up missing prices;
 it will not claim budget compliance unless every required purchase or consumed quantity is accounted for.
-Do not invent a price or replace a required food. Use '<positive quantity> <unit> <specific food name and form>'.
+Do not invent a price or replace a required food. For a suitable cached product, return an ingredient object
+with price_reference (its exact name) and quantity (in that reference's unit). This selects the actual food form,
+including added salt or processing attributes; never select an incompatible form just to get a price.
+For ANY food not represented by a compatible reference, return food, numeric quantity and unit instead.
+New foods remain allowed and receive dynamic price lookup. A reference is not permission to replace a required food.
 When a cached product matches the food you actually need, reuse its exact name and unit; otherwise describe the
 actual form explicitly (fresh/frozen, raw/cooked, canned, reduced-sodium, pasteurized where relevant).
 Use g for solid ingredients and ml for liquids according to the supplied unit, not cups/spoons of solids.
@@ -776,8 +790,8 @@ NUTRITION AND FOOD SAFETY POLICY:
 {time_limit_generation_guidance(intent_data.get('constraints', {}))}
 {adaptation_prompt}
 
-Return only a JSON array of {count} object(s) with these fields:
-name, type, servings (positive integer), ingredients (quantified strings in the exact format above),
+Return a JSON object with a recipes array of {count} object(s) matching the supplied response schema:
+culinary_basis, name, type, servings (positive integer), ingredients (reference/quantity objects or new food/quantity/unit objects),
 instructions (complete steps using ONLY the listed ingredients), total_time (elapsed time with units),
 calories and protein_grams (numeric per-serving estimates), description, nutrition_benefits, storage_instructions.
 Keep the full preparation and safe cooking endpoints. Preserve all requested preparation/timing restrictions.
@@ -787,8 +801,9 @@ the same independent user-requirement, nutritional-guideline, food-safety and bu
 FINAL QUANTITY CHECK BEFORE RETURNING JSON:
 Every solid, including dry grains, frozen vegetables and powdered seasonings, needs a numeric weight in g.
 Every liquid needs a numeric volume in ml; individually sold foods such as eggs may use count.
-For example, ingredient-format examples are '150 g dry rice', '200 g frozen broccoli', '15 ml reduced-sodium soy sauce',
-'2 count eggs', '1 g salt'. These illustrate formatting only, not required ingredients or a prescribed recipe.
+For example, an ingredient object is {{"food": "ground cumin", "quantity": 2, "unit": "g"}}.
+This illustrates formatting only, not a required ingredient or a prescribed recipe. Put chopping and draining
+in the instructions, not in food names. The backend renders the measured ingredient objects as recipe-card text.
 Do not return cups of rice/vegetables, tablespoons of powders, or 'salt/pepper to taste': these cannot be
 priced against weight-based packages without unsupported density assumptions. Design realistic weighed
 quantities; do not pretend a cup is a gram amount or change raw/cooked forms to force a price match.
@@ -796,6 +811,10 @@ Do not repeat a rejected recipe unchanged. Remove nonessential extras only when 
 and not needed for the dish's identity or nutritional adequacy. Recheck every remaining ingredient's quantity.
 Repair every rejected ingredient's quantity/form as well as its matching instructions. Preserve the requested
 cuisine and required foods; updated cached references are price evidence, not permission to substitute them.
+When repairing a food-safety failure, change the actual instruction that failed. Include the configured safe
+cooking endpoint for eggs/meat/poultry/fish, rather than relying on browning, crispness or elapsed time alone.
+For egg batters, the center must be fully cooked/set, not just the surface golden. Never add unlisted dipping
+sauces, garnishes, extra oil or seasonings in steps or serving suggestions. Use only the quantities listed.
 
 IMMEDIATE REPAIR TASK (empty for a first attempt): {json.dumps(failures)}
 When a nonessential, non-required extra has repeatedly unresolved pricing, omit it from BOTH the ingredient

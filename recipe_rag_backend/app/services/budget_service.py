@@ -9,6 +9,7 @@ from app.core.config import BASE_DIR, settings
 from app.services.ingredient_price_provider import IngredientPriceProvider
 from app.services.kroger_price_provider import KrogerPriceProvider
 from app.services.web_search_price_provider import WebSearchPriceProvider
+from app.services.budget_recipe_contract import unlisted_small_additions
 
 
 MONEY = re.compile(
@@ -146,6 +147,9 @@ An unspecified cost basis defaults to the whole recipe; do not ask the user to c
 Never invent prices, a budget pass, price evidence, or a price-based reason to fail a recipe: the backend calculates cost.
 Treat the dollar amount as a ceiling, not a command to minimize spending or to spend the entire allowance.
 Prioritize the user's meal, cuisine, required foods, preparation needs, and appropriate nutritional balance.
+For cuisine requirements, cite the actual ingredients and cooking technique that support the cuisine, not the title.
+Reject a cuisine label pasted onto an unrelated dish. Check preparation feasibility: dry pasta/grains must actually
+be cooked as required, not treated as edible after a brief soak. A low price never makes an incoherent recipe valid.
 A more suitable $8 recipe may be preferable to a $3 recipe under a $10 limit, provided the planning allowance
 also fits. A satisfying cheaper meal is still valid. More expensive does not automatically mean better.
 Use fewer purchases or ingredients only as a tie-breaker between equally suitable meals; never remove useful
@@ -243,6 +247,8 @@ class BudgetService:
         missing = []
         refresh = []
         for recipe in recipes:
+            if not self.price_lookup_ready(recipe, catalog):
+                continue
             for line in recipe.get("ingredients") or []:
                 try:
                     priced = self.parse_ingredient(line, catalog)
@@ -265,6 +271,32 @@ class BudgetService:
             request["_price_lookup_batches"] = request.get("_price_lookup_batches", 0) + 1
             if not generation:
                 request["_retrieval_price_lookup_batches"] = request.get("_retrieval_price_lookup_batches", 0) + 1
+
+    def price_lookup_ready(self, recipe, catalog):
+        ingredients = recipe.get("ingredients") or []
+        if not ingredients or unlisted_small_additions(recipe):
+            return False
+        for line in ingredients:
+            if str(line).strip().endswith(":") or re.fullmatch(
+                r"(?:(?:[\d./ ]+)\s*(?:cups?|ml|l)\s+)?(?:tap )?water(?: as needed)?", str(line).strip(), re.I
+            ):
+                continue
+            try:
+                if self.parse_ingredient(line, catalog):
+                    continue
+                measured = self.measure_ingredient(line)
+                if not measured or measured[3]:
+                    return False
+                reference = next((item for item in catalog["items"] if measured[0] in item["aliases"]), None)
+                if reference and reference["unit"] != measured[1]:
+                    return False
+                if re.search(r"\b(?:cups?|tbsp|tsp|tablespoons?|teaspoons?)\b", str(line), re.I):
+                    return False
+                if re.search(r"\b(?:plus|divided use|or)\b", measured[0]):
+                    return False
+            except (ValueError, InvalidOperation, ZeroDivisionError):
+                return False
+        return True
 
     def catalog(self):
         configured = Path(self.catalog_path or settings.BUDGET_PRICE_CATALOG)
@@ -384,6 +416,8 @@ class BudgetService:
             except (ValueError, InvalidOperation, ZeroDivisionError):
                 continue
         ingredients = recipe.get("ingredients") or []
+        result["issues"].extend(f"Unlisted food addition needs an explicit priced quantity: {food}"
+                                for food in unlisted_small_additions(recipe))
         for line in ingredients:
             if re.fullmatch(r"(?:ingredients|sauce|dressing|vinaigrette|garnishes|garnish|topping|toppings|vegetable mix|base):", str(line).strip(), re.I):
                 continue
@@ -497,7 +531,8 @@ class BudgetService:
             if assessment["status"] != "estimated_within_budget":
                 verification = recipe.setdefault("verification_details", {})
                 verification["passes_verification"] = False
-                verification.setdefault("constraint_violations", []).extend(assessment["issues"])
+                violations = verification.setdefault("constraint_violations", [])
+                violations.extend(issue for issue in assessment["issues"] if issue not in violations)
                 if verification.get("relevance") == "match":
                     verification["relevance"] = "adaptable"
             if previous and self.dish_signature(recipe, catalog) in previous:
