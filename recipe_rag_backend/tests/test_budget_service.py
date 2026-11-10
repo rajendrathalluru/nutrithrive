@@ -63,10 +63,13 @@ class BudgetTests(unittest.TestCase):
                 "or for buying the groceries before tax and delivery fees? I use U.S. reference prices, not guaranteed local prices.")
 
     def test_money_extraction_does_not_confuse_time_or_ingredient_count(self):
-        for query in ["under $5", "under 5 dollars", "under five dollars", "under US$5"]:
+        for query in ["under $5", "under 5 dollars", "under five dollars", "under US$5", "under 5 dolalrs"]:
             with self.subTest(query=query):
                 self.assertEqual(self.intent(query)["budget_request"]["limit"], "5")
                 self.assertTrue(self.intent(query)["budget_request"]["exclusive"])
+        chinese = self.intent("a chinese recipe under 10 dolalrs")
+        self.assertEqual(chinese["budget_request"]["limit"], "10")
+        self.assertEqual(chinese["budget_request"]["currency"], "USD")
         for query in ["under 5 minutes", "only 5 ingredients", "make dinner for 5 people", "recipes with 5 pounds of chicken"]:
             self.assertNotIn("budget_request", self.intent(query))
         self.assertFalse(self.intent("at most $5")["budget_request"]["exclusive"])
@@ -679,10 +682,10 @@ class BudgetTests(unittest.TestCase):
 
     def test_expanded_catalog_is_priceable_without_equating_different_food_forms(self):
         path = Path(__file__).resolve().parents[1] / "app/data/ingredient_prices.json"
-        service = BudgetService(path, today=lambda: date(2026, 11, 4))
+        service = BudgetService(path, today=lambda: date(2026, 11, 10))
         catalog = service.catalog()
         self.assertIsNotNone(catalog)
-        self.assertEqual(len(catalog["items"]), 20)
+        self.assertEqual(len(catalog["items"]), 21)
         for item in catalog["items"]:
             with self.subTest(item=item["name"]):
                 self.assertIsNotNone(service.parse_ingredient(f"1 {item['unit']} {item['name']}", catalog))

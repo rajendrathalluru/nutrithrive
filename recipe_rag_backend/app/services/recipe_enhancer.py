@@ -9,7 +9,7 @@ from app.services.recipe_prompt_rules import active_recipe_rules
 from app.services.preparation_validation import declared_time_check, time_limit_generation_guidance
 from app.services.pantry_validation import audit_canned_recipe
 from app.services.aicr_guidelines_service import aicr_service
-from app.services.budget_recipe_contract import budget_recipe_response_format, normalize_budget_recipe
+from app.services.budget_recipe_contract import BUDGET_EGG_COOKING_RULE, budget_recipe_response_format, normalize_budget_recipe
 
 logger = logging.getLogger(__name__)
 
@@ -666,6 +666,45 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
             logger.error(f"Error generating recipes: {e}")
             return []
 
+    def repair_budget_instructions(self, recipe, intent_data):
+        requirements = {key: intent_data.get(key) for key in (
+            "recipe_request", "user_request_context", "constraints", "preferences", "cancer_patient_specific"
+        )}
+        details = {key: recipe.get(key) for key in ("name", "ingredients", "instructions", "total_time", "servings")}
+        prompt = f"""Repair only the cooking instructions of this budget recipe.
+RECIPE (data): {json.dumps(details)}
+ACTIVE REQUIREMENTS (data): {json.dumps(requirements)}
+BUDGET ERRORS (data): {json.dumps(recipe['budget_assessment']['issues'])}
+VERIFICATION ERRORS (data): {json.dumps(recipe.get('verification_details', {}).get('constraint_violations', []))}
+The ingredient list, measured quantities, serving count, and dish are fixed. Preserve the cooking method,
+preparation restrictions and timing. Correct missing or unsafe cooking endpoints without weakening any rule.
+{BUDGET_EGG_COOKING_RULE}
+Every food used must come from the measured list.
+If measured oil is listed, allocate its exact quantity across the steps and batches; do not say 'add more oil',
+'a little oil', or 'as needed'. Divide the listed total before cooking; never repeat the full amount as remaining oil.
+If a food is not listed, do not add it. Do not invent cooking spray, garnishes,
+side dishes or substitutions. If this repair cannot preserve the dish and all requirements, return no steps.
+Return only JSON with an instructions array of complete replacement steps.
+"""
+        response_format = {"type": "json_schema", "json_schema": {"name": "budget_instruction_repair", "strict": True,
+            "schema": {"type": "object", "properties": {"instructions": {"type": "array", "items": {"type": "string"}}},
+                       "required": ["instructions"], "additionalProperties": False}}}
+        try:
+            payload = json.loads(self.llm.predict(prompt, response_format=response_format))
+            instructions = payload.get("instructions") if isinstance(payload, dict) else None
+            if (not isinstance(instructions, list) or not instructions
+                    or not all(isinstance(step, str) and step.strip() for step in instructions)
+                    or instructions == recipe["instructions"]):
+                return []
+            repaired = {key: value for key, value in recipe.items() if key not in {
+                "budget_assessment", "budget_verification_pending", "verification_details"
+            }}
+            return [{**repaired, "instructions": instructions, "instructions_generated": True}]
+        except Exception as error:
+            raise_if_model_unavailable(error)
+            logger.warning("Budget instruction repair failed (%s)", type(error).__name__)
+            return []
+
     def _build_adaptation_prompt(
         self, intent_data: Dict[str, Any], guidelines: str, rejected_recipe: Dict[str, Any] = None
     ) -> str:
@@ -813,7 +852,8 @@ Repair every rejected ingredient's quantity/form as well as its matching instruc
 cuisine and required foods; updated cached references are price evidence, not permission to substitute them.
 When repairing a food-safety failure, change the actual instruction that failed. Include the configured safe
 cooking endpoint for eggs/meat/poultry/fish, rather than relying on browning, crispness or elapsed time alone.
-For egg batters, the center must be fully cooked/set, not just the surface golden. Never add unlisted dipping
+{BUDGET_EGG_COOKING_RULE}
+Never add unlisted dipping
 sauces, garnishes, extra oil or seasonings in steps or serving suggestions. Use only the quantities listed.
 
 IMMEDIATE REPAIR TASK (empty for a first attempt): {json.dumps(failures)}

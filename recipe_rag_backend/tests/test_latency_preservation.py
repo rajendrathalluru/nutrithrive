@@ -5,11 +5,13 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock, patch
 
+from langchain.schema import Document
 from app.services.intent_analyzer import IntentAnalyzer
 from app.services.recipe_verifier import RecipeVerifier
 from app.services.response_cache import ResponseCache
 from app.services.budget_service import apply_budget_intent
 from app.services.model_errors import RecipeModelUnavailable
+from app.services.search_engine import SearchEngine
 from guideline_fixtures import passing_guideline_checks
 
 
@@ -96,6 +98,42 @@ class IntentCacheTests(unittest.TestCase):
         self.assertEqual(second["context_action"], "new_request")
         self.assertEqual(self.model.predict.call_count, 1)
 
+
+class BudgetLatencyTests(unittest.TestCase):
+    def setUp(self):
+        self.query = "Mexican recipes under $10"
+        self.intent = {"search_strategy": {"enhanced_query": self.query, "search_keywords": ["Mexican", "dinner"]},
+                       "preferences": {"cuisine_types": ["Mexican"]}, "constraints": {"allergens_to_avoid": ["peanuts"]}}
+        apply_budget_intent(self.intent, self.query)
+        self.engine = SearchEngine()
+        self.embeddings = Mock(embed_documents=Mock(return_value=[[1.0], [2.0], [3.0]]))
+        self.store = Mock()
+        self.engine.initialize(self.store, Mock(), self.embeddings)
+
+    def test_batch_preserves_all_queries_ranked_candidates_and_deduplication(self):
+        first = Document(page_content="Black bean soup")
+        second = Document(page_content="Vegetable migas")
+        third = Document(page_content="Chicken and pepper skillet")
+        matches = [[first, second], [second, third], [first]]
+        queries = [self.query, "Mexican dinner", "Mexican"]
+        self.store.similarity_search_by_vector.side_effect = lambda vector, k: matches[int(vector[0]) - 1]
+        self.store.similarity_search.side_effect = lambda query, k: matches[queries.index(query)]
+        batched = self.engine.multi_query_search(self.query, self.intent, 8)
+        self.embeddings.embed_documents.assert_called_once_with(queries)
+        self.store.similarity_search.assert_not_called()
+        self.assertEqual(self.store.similarity_search_by_vector.call_count, 3)
+        baseline = self.engine.multi_query_search(self.query, {key: value for key, value in self.intent.items()
+                                                               if key != "budget_request"}, 8)
+        self.assertEqual(batched, baseline)
+        self.assertEqual(batched, [first, second, third])
+        self.assertEqual(self.embeddings.embed_documents.call_count, 1)
+
+    def test_batch_failure_uses_existing_individual_searches(self):
+        self.embeddings.embed_documents.side_effect = RuntimeError("Batch failed")
+        self.store.similarity_search.return_value = [Document(page_content="Mexican dinner")]
+        self.assertEqual(len(self.engine.multi_query_search(self.query, self.intent, 8)), 1)
+        self.assertEqual(self.store.similarity_search.call_count, 3)
+        self.store.similarity_search_by_vector.assert_not_called()
 
 class VerificationLatencyTests(unittest.TestCase):
     def setUp(self):

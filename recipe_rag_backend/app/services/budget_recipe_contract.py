@@ -5,6 +5,15 @@ from decimal import Decimal
 from app.services.required_ingredients import ingredient_present
 
 
+UNLISTED_ADDITION_ISSUE = "Unlisted food addition needs an explicit priced quantity: "
+UNRESOLVED_INGREDIENT_ISSUE = "Unresolved ingredient price, form or quantity: "
+BUDGET_EGG_COOKING_RULE = (
+    "For egg-based batter or other egg dishes without meat or poultry, cook the center to at least 160°F (71°C) "
+    "as measured with a food thermometer; browning or elapsed time alone is not an endpoint. "
+    "Follow any higher applicable safety endpoint."
+)
+
+
 def budget_recipe_response_format(options=None):
     ingredient = {
         "type": "object",
@@ -83,6 +92,8 @@ def unlisted_small_additions(recipe):
     for field in ("instructions", "helpful_tips", "ingredient_adaptations"):
         lines = recipe.get(field) or []
         for line in [lines] if isinstance(lines, str) else lines:
+            if re.search(r"\bwith (?:a )?(?:dipping sauce|sauce|garnish|topping) of (?:your )?choice\b", str(line), re.I):
+                missing.add("unspecified serving addition")
             for match in pattern.finditer(str(line)):
                 clause = re.split(r"[,.;]", str(line)[:match.start()])[-1]
                 if re.search(r"\b(?:no|not|never|without|avoid|omit)\b", clause, re.I):
@@ -92,3 +103,39 @@ def unlisted_small_additions(recipe):
                 if food not in {"water", "tap water"} and (extra or not ingredient_present(food, ingredients)):
                     missing.add(food)
     return sorted(missing)
+
+
+def overallocated_measured_oils(recipe):
+    totals = {}
+    for ingredient in recipe.get("ingredients") or []:
+        match = re.fullmatch(r"(\d+(?:\.\d+)?)\s+ml\s+([a-z -]*\boil)", str(ingredient).strip(), re.I)
+        if match:
+            food = match[2].lower()
+            totals[food] = totals.get(food, Decimal(0)) + Decimal(match[1])
+    steps = recipe.get("instructions") or []
+    text = steps if isinstance(steps, str) else "\n".join(map(str, steps))
+    overallocated = []
+    for food, total in totals.items():
+        uses = re.finditer(rf"\b(?:add|heat|pour|use|using)\s+(?:the\s+)?(?:remaining\s+)?"
+                           rf"(\d+(?:\.\d+)?)\s+ml\s+(?:of\s+)?{re.escape(food)}\b(?!\s+(?:total|in total)\b)", text, re.I)
+        if sum((Decimal(use[1]) for use in uses), Decimal(0)) > total:
+            overallocated.append(f"{food} allocated above its listed {total} ml total")
+    return overallocated
+
+
+def budget_preparation_issues(recipe):
+    pasta = r"(?:pasta|penne|spaghetti|macaroni|rotini|fusilli|linguine|fettuccine)"
+    dry_pasta = rf"\b(?:dry|uncooked)\b[^.;]{{0,48}}\b{pasta}\b"
+    ingredients = recipe.get("ingredients") or []
+    steps = recipe.get("instructions") or []
+    if isinstance(steps, str):
+        steps = [steps]
+    if not any(re.search(dry_pasta, line, re.I) for line in ingredients if isinstance(line, str)):
+        return []
+    text = " ".join([str(recipe.get("name", "")), *map(str, steps)])
+    if re.search(r"\b(?:batter|pancakes?|fritters?)\b", text, re.I) and any(
+        re.search(rf"\b(?:add|fold|stir|mix|combine)\b[^.;]{{0,100}}{dry_pasta}", str(step), re.I)
+        for step in steps
+    ):
+        return ["Do not add dry pasta directly to pancake or fritter batter. Use suitable flour for batter, or cook pasta separately before using it in a dish designed for cooked pasta."]
+    return []

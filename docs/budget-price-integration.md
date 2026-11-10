@@ -2,6 +2,10 @@
 
 Recipes are selected for the request, not restricted to the local price catalog. The pipeline remains database → database-guided generation → AI-only generation. Prepared candidates receive missing-price lookup before existing independent verification and deterministic budget arithmetic. All dietary, allergy, symptom, time, equipment, required-food, portion and food-safety checks still apply. A price match is not nutritional approval.
 
+Budget retrieval batches the same search-query embeddings into one API request, then searches each vector and merges candidates in the original query order. A recoverable batching error falls back to the existing per-query searches. Recipe prompts, pricing refresh policy, lookup limits, and verification gates are unchanged.
+
+An existing retry can repair just the instructions when an AI-generated candidate has unmeasured additions or fails only the food-safety check. The same repair is not repeated for an unchanged ingredient list and failure; the generation-attempt limit is unchanged. Ingredients and servings stay fixed. The repaired candidate still needs complete pricing and independent recipe verification. Budget preflight also catches explicit allocations that exceed the listed oil and direct use of dry pasta in batter. Egg-dish cooking instructions use the applicable [FoodSafety.gov minimum cooking temperature](https://www.foodsafety.gov/food-safety-charts/safe-minimum-internal-temperatures), without overriding any higher applicable endpoint.
+
 ## Web search: specific product listings, not averages
 
 The default provider is now `web_search`. It uses the existing server-side `OPENAI_API_KEY` with a separately configurable search model; the recipe-generation model stays unchanged:

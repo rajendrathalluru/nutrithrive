@@ -4,8 +4,17 @@
   "region": "U.S. online retail reference; not a local store quote",
   "observed_on": "2026-11-01",
   "planning_allowance": "0.20",
-  "notes": "Public online listing snapshots, not live checkout prices. Original eight entries checked November 1, 2026; twelve additions checked November 4, 2026. The catalog date conservatively retains the oldest check; do not advance it without reviewing every entry. Listings can use different default stores and retailers. The 20% allowance is a planning policy, not a statistical confidence interval. Refresh within 90 days. Unknown ingredients are not free. Product-specific forms, added salt, and package weights must be preserved.",
+  "notes": "Public online listing snapshots, not live checkout prices. Original eight entries checked November 1, 2026; twelve additions checked November 4, 2026; all-purpose flour listing checked November 10, 2026. The catalog date conservatively retains the oldest check; do not advance it without reviewing every entry. Listings can use different default stores and retailers. The 20% allowance is a planning policy, not a statistical confidence interval. Refresh within 90 days. Unknown ingredients are not free. Product-specific forms, added salt, and package weights must be preserved.",
   "items": [
+    {
+      "name": "all-purpose flour",
+      "food_role": "grain",
+      "aliases": ["all-purpose flour", "all purpose flour", "all-purpose wheat flour"],
+      "unit": "g", "package_quantity": "907.18474", "package_price": "1.47",
+      "observed_on": "2026-11-10",
+      "source_url": "https://www.walmart.com/browse/food/flours-meals/976759_976780_9959366_9084673",
+      "product": "Great Value All-Purpose Enriched Bleached Flour, 2 lb Bag; wheat flour, not self-rising or gluten-free"
+    },
     {
       "name": "canola oil",
       "food_role": "oil",

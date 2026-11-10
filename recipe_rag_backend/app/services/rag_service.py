@@ -23,6 +23,7 @@ from app.services.recipe_follow_up import resolve_recipe_follow_up, is_more_reci
 from app.services.required_ingredients import missing_required_ingredients
 from app.services.model_errors import RecipeModelUnavailable
 from app.services.budget_service import budget_service, budget_clarification, budget_no_results, is_budget_clarification_reply
+from app.services.budget_recipe_contract import UNLISTED_ADDITION_ISSUE, UNRESOLVED_INGREDIENT_ISSUE
 from app.services.recipe_progress import report_progress, RecipeRequestCancelled
 
 logger = logging.getLogger(__name__)
@@ -196,11 +197,21 @@ class RecipeRAGService:
             matches = [recipe for recipe in matches if len(digestive_tolerance_cautions(recipe)) == least_cautions]
         return budget_service.rank(matches, intent_data) if intent_data.get("budget_request") else matches
 
-    def _verify_new_generated_recipes(
-        self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any], excluded_names: set[str]
-    ) -> List[Dict[str, Any]]:
-        new_recipes = self._exclude_previously_shown_recipes(recipes, excluded_names)
-        return self._get_verified_matches(self._verify_candidates(new_recipes, intent_data), intent_data)
+    def _budget_instruction_repair_kind(self, recipe):
+        if not recipe.get("generated_by_llm"):
+            return None
+        assessment = recipe.get("budget_assessment", {})
+        issues = assessment.get("issues", [])
+        violations = recipe.get("verification_details", {}).get("constraint_violations", [])
+        if (any(issue.startswith(UNLISTED_ADDITION_ISSUE) for issue in issues)
+                and all(issue.startswith((UNLISTED_ADDITION_ISSUE, UNRESOLVED_INGREDIENT_ISSUE)) for issue in issues)
+                and budget_service.price_lookup_ready({"ingredients": recipe.get("ingredients")},
+                                                     budget_service.pricing_catalog() or {"items": []})):
+            return "quantity"
+        if (assessment.get("status") == "estimated_within_budget" and violations
+                and all(issue.startswith("Guideline food_safety:") for issue in violations)):
+            return "safety"
+        return None
 
     def _generate_verified_fallback_recipes(
         self, query: str, intent_data: Dict[str, Any], failed_recipes: List[Dict[str, Any]],
@@ -210,20 +221,42 @@ class RecipeRAGService:
         if grounding_recipes and intent_data.get("query_type") != "recipe_adaptation":
             stages.append([])
 
+        instruction_repairs = set()
+        budget = bool(intent_data.get("budget_request"))
+        assessed = []
         for stage_index, references in enumerate(stages):
             stage_name = "reference_guided" if references else "ai_only"
-            stage_failures = list(failed_recipes) if stage_index == 0 or intent_data.get("budget_request") else []
-            for attempt in range(2):
-                generation_query = query if attempt == 0 else (
+            stage_failures = list(failed_recipes) if stage_index == 0 or budget else []
+            for attempt in range(3):
+                generation_query = query if attempt != 1 else (
                     f"Create complete recipes with ingredients and step-by-step instructions for: {query}"
                 )
                 logger.info("Recipe generation stage=%s attempt=%s", stage_name, attempt + 1)
                 report_progress("generating")
-                if intent_data.get("budget_request"):
+                if budget:
                     intent_data["budget_price_options"] = budget_service.options()
-                candidates = self.recipe_enhancer.generate_fallback_recipes(
-                    generation_query, intent_data, stage_failures, grounding_recipes=references
-                )
+                repair = None
+                if budget and intent_data.get("query_type") != "recipe_adaptation":
+                    for recipe in assessed:
+                        kind = self._budget_instruction_repair_kind(recipe)
+                        repair_key = (kind, tuple(sorted(recipe.get("ingredients") or [])),
+                                      tuple(sorted(recipe.get("budget_assessment", {}).get("issues", []))))
+                        if kind and repair_key not in instruction_repairs:
+                            repair = (recipe, repair_key)
+                            break
+                if repair:
+                    target, repair_key = repair
+                    instruction_repairs.add(repair_key)
+                    candidates = self.recipe_enhancer.repair_budget_instructions(target, intent_data)
+                elif attempt == 2:
+                    candidates = self.recipe_enhancer.generate_structured_fallback_recipe(
+                        query, intent_data, grounding_recipes=references,
+                        **({"failed_recipes": stage_failures} if budget else {}),
+                    )
+                else:
+                    candidates = self.recipe_enhancer.generate_fallback_recipes(
+                        generation_query, intent_data, stage_failures, grounding_recipes=references
+                    )
                 candidates = self._exclude_previously_shown_recipes(candidates, excluded_names)
                 assessed = self._verify_candidates(candidates, intent_data)
                 matches = self._get_verified_matches(assessed, intent_data)
@@ -231,17 +264,7 @@ class RecipeRAGService:
                     return matches
                 stage_failures = [*assessed, *stage_failures]
 
-            report_progress("generating")
-            if intent_data.get("budget_request"):
-                intent_data["budget_price_options"] = budget_service.options()
-            candidates = self.recipe_enhancer.generate_structured_fallback_recipe(
-                query, intent_data, grounding_recipes=references,
-                **({"failed_recipes": stage_failures} if intent_data.get("budget_request") else {}),
-            )
-            matches = self._verify_new_generated_recipes(candidates, intent_data, excluded_names)
-            if matches:
-                return matches
-            if intent_data.get("budget_request"):
+            if budget:
                 failed_recipes = stage_failures
             logger.warning("Recipe generation stage=%s exhausted without verified matches", stage_name)
 
@@ -532,7 +555,7 @@ class RecipeRAGService:
                 self.intent_analyzer.initialize(self.llm, recipe_names=self.data_loader.recipe_lookup)
                 self.recipe_verifier.initialize(self.llm)
                 self.recipe_enhancer.initialize(self.llm, aicr_service)
-                self.search_engine.initialize(self.vector_store, self.llm)
+                self.search_engine.initialize(self.vector_store, self.llm, self.embeddings)
                 self.response_generator.initialize(self.llm)
                 
                 self.is_initialized = True

@@ -9,13 +9,16 @@ from app.core.config import BASE_DIR, settings
 from app.services.ingredient_price_provider import IngredientPriceProvider
 from app.services.kroger_price_provider import KrogerPriceProvider
 from app.services.web_search_price_provider import WebSearchPriceProvider
-from app.services.budget_recipe_contract import unlisted_small_additions
+from app.services.budget_recipe_contract import (
+    UNLISTED_ADDITION_ISSUE, UNRESOLVED_INGREDIENT_ISSUE, budget_preparation_issues, overallocated_measured_oils,
+    unlisted_small_additions,
+)
 
 
 MONEY = re.compile(
     r"(?P<comparison>under|less than|below|at most|up to|maximum|budget(?: of)?|no more than)?\s*"
     r"(?:(?P<prefix>USD|US\$|CAD|AUD|EUR|GBP|INR|JPY|\$|€|£|₹)\s*(?P<amount>\d+(?:\.\d{1,2})?)"
-    r"|(?P<words>\d+(?:\.\d{1,2})?|five|ten|twenty|fifteen|two|three)\s*(?P<suffix>USD|CAD|AUD|EUR|GBP|INR|JPY|dollars?|bucks?|euros?|British pounds?|rupees?|yen))",
+    r"|(?P<words>\d+(?:\.\d{1,2})?|five|ten|twenty|fifteen|two|three)\s*(?P<suffix>USD|CAD|AUD|EUR|GBP|INR|JPY|dollars?|dolalrs?|bucks?|euros?|British pounds?|rupees?|yen))",
     re.I,
 )
 NUMBER_WORDS = {"two": "2", "three": "3", "five": "5", "ten": "10", "fifteen": "15", "twenty": "20"}
@@ -86,7 +89,7 @@ def apply_budget_intent(intent, query, history=None):
             currency = (match["prefix"] or match["suffix"]).upper()
             currency = "EUR" if currency in {"€", "EURO", "EUROS"} else "GBP" if currency in {"£", "BRITISH POUND", "BRITISH POUNDS"} else currency
             currency = "INR" if currency in {"₹", "RUPEE", "RUPEES"} else "JPY" if currency == "YEN" else currency
-            currency = "USD" if currency in {"$", "US$", "DOLLAR", "DOLLARS", "BUCK", "BUCKS"} else currency
+            currency = "USD" if currency in {"$", "US$", "DOLLAR", "DOLLARS", "DOLALR", "DOLALRS", "BUCK", "BUCKS"} else currency
             request.update(limit=value, currency=currency, exclusive=(match["comparison"] or "").lower() in {"under", "less than", "below"})
         elif not request and re.search(r"\b(?:budget[- ]friendly|on a budget|cheap|affordable)\b", text, re.I):
             request = {"currency": "USD"}
@@ -274,7 +277,8 @@ class BudgetService:
 
     def price_lookup_ready(self, recipe, catalog):
         ingredients = recipe.get("ingredients") or []
-        if not ingredients or unlisted_small_additions(recipe):
+        if (not ingredients or unlisted_small_additions(recipe) or overallocated_measured_oils(recipe)
+                or budget_preparation_issues(recipe)):
             return False
         for line in ingredients:
             if str(line).strip().endswith(":") or re.fullmatch(
@@ -416,8 +420,9 @@ class BudgetService:
             except (ValueError, InvalidOperation, ZeroDivisionError):
                 continue
         ingredients = recipe.get("ingredients") or []
-        result["issues"].extend(f"Unlisted food addition needs an explicit priced quantity: {food}"
-                                for food in unlisted_small_additions(recipe))
+        result["issues"].extend(f"{UNLISTED_ADDITION_ISSUE}{food}"
+                                for food in [*unlisted_small_additions(recipe), *overallocated_measured_oils(recipe)])
+        result["issues"].extend(budget_preparation_issues(recipe))
         for line in ingredients:
             if re.fullmatch(r"(?:ingredients|sauce|dressing|vinaigrette|garnishes|garnish|topping|toppings|vegetable mix|base):", str(line).strip(), re.I):
                 continue
@@ -438,7 +443,7 @@ class BudgetService:
                     entry["quantity"] += quantity
                     entry["lines"].append(line)
                 else:
-                    result["issues"].append(f"Unresolved ingredient price, form or quantity: {line}")
+                    result["issues"].append(f"{UNRESOLVED_INGREDIENT_ISSUE}{line}")
                 continue
             item, quantity = parsed
             entry = totals.setdefault(item["name"], {"item": item, "quantity": Decimal(0), "lines": []})
@@ -453,7 +458,7 @@ class BudgetService:
                     "purchase_cost": "0.00", "source_url": "", "price_basis": "already_owned"})
                 result["assumptions"].append(f"{name}: the declared pantry quantity covers this use; no new purchase, but its consumed value is unknown.")
             else:
-                result["issues"].append(f"Unresolved ingredient price, form or quantity: {'; '.join(entry['lines'])}")
+                result["issues"].append(f"{UNRESOLVED_INGREDIENT_ISSUE}{'; '.join(entry['lines'])}")
         if not totals and not covered_owned:
             result["issues"].append("No priced food ingredients were established.")
         owned = {}

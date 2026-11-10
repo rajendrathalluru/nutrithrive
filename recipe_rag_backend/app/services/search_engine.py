@@ -37,10 +37,12 @@ class SearchEngine:
     def __init__(self):
         self.vector_store = None
         self.llm = None
+        self.embeddings = None
         
-    def initialize(self, vector_store, llm):
+    def initialize(self, vector_store, llm, embeddings=None):
         self.vector_store = vector_store
         self.llm = llm
+        self.embeddings = embeddings
     
     def multi_query_search(self, original_query: str, intent_data: Dict[str, Any], k: int) -> List[Document]:
         """Perform multiple searches with different query formulations"""
@@ -50,9 +52,21 @@ class SearchEngine:
         search_queries = self._generate_contextual_search_queries(intent_data)
         if not search_queries and original_query.strip():
             search_queries = [original_query.strip()]
+
+        vectors = None
+        if intent_data.get("budget_request") and self.embeddings is not None and len(search_queries) > 1:
+            try:
+                embedded = self.embeddings.embed_documents(search_queries)
+                if len(embedded) == len(search_queries):
+                    vectors = embedded
+            except Exception as error:
+                raise_if_model_unavailable(error)
+                logger.warning("Batched budget embeddings failed; using individual queries (%s)", type(error).__name__)
         
         def search(query_index, search_query):
             logger.info(f"Search {query_index+1}/{len(search_queries)}: {search_query}")
+            if vectors is not None:
+                return self.vector_store.similarity_search_by_vector(vectors[query_index], k=k)
             return self.vector_store.similarity_search(search_query, k=k)
 
         workers = settings.RECIPE_IO_WORKERS
