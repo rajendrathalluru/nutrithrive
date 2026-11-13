@@ -1,3 +1,5 @@
+from app.services.model_latency import predict_with_budget
+
 import logging
 from app.services.model_errors import raise_if_model_unavailable
 import re
@@ -54,14 +56,14 @@ class SearchEngine:
             search_queries = [original_query.strip()]
 
         vectors = None
-        if intent_data.get("budget_request") and self.embeddings is not None and len(search_queries) > 1:
+        if self.embeddings is not None and len(search_queries) > 1:
             try:
                 embedded = self.embeddings.embed_documents(search_queries)
                 if len(embedded) == len(search_queries):
                     vectors = embedded
             except Exception as error:
                 raise_if_model_unavailable(error)
-                logger.warning("Batched budget embeddings failed; using individual queries (%s)", type(error).__name__)
+                logger.warning("Batched embeddings failed; using individual queries (%s)", type(error).__name__)
         
         def search(query_index, search_query):
             logger.info(f"Search {query_index+1}/{len(search_queries)}: {search_query}")
@@ -145,19 +147,47 @@ class SearchEngine:
         logger.info(f"Generated {len(unique_queries)} search queries")
         return unique_queries[:6]
     
+    def rank_candidates_locally(self, docs, query, intent_data):
+        meal_types = {str(meal).lower() for meal in intent_data.get("preferences", {}).get("meal_types", [])}
+        terms = set(re.findall(r"[a-z]+", query.lower())) - {
+            "show", "recipes", "recipe", "meals", "meal", "that", "take", "minutes", "or", "less",
+            "for", "the", "a", "an", "i", "want", "some", "make", "can", "please", "dinner", "lunch",
+        }
+
+        def score(doc):
+            recipe_type = str(self.safe_get_metadata(doc, "type", "")).lower()
+            name = str(self.safe_get_metadata(doc, "name", "")).lower()
+            meal_score = 0
+            if meal_types & {"dinner", "lunch"}:
+                if re.search(r"\b(?:main dishes?|one[- ]dish meals?|entree|entrée)\b", recipe_type):
+                    meal_score = 2
+                elif re.search(r"\b(?:snacks?|desserts?|beverages?|appetizers?|side dishes?)\b", recipe_type):
+                    meal_score = -1
+            elif any(meal in recipe_type for meal in meal_types):
+                meal_score = 2
+            storage_score = self.storage_evidence_score(doc.page_content) if intent_data.get("constraints", {}).get("leftover_friendly") else 0
+            return (meal_score, storage_score, len(terms & set(re.findall(r"[a-z]+", name))))
+
+        return sorted(docs, key=score, reverse=True)
+
     def rerank_with_constraint_filtering(self, docs: List[Document], query: str, intent_data: Dict[str, Any], top_k: int) -> List[Document]:
         """Use LLM to rerank with intelligent constraint filtering"""
         top_k = top_k or 8  # Default from your settings
         
         if not docs:
             return []
+
+        local_ranking = self.rank_candidates_locally(docs, query, intent_data)
+        if not settings.RECIPE_LLM_RERANKING:
+            logger.info("Local ranking selected %s candidates; no reranking model call", min(top_k, len(docs)))
+            return local_ranking[:top_k]
         
         try:
             constraints = intent_data.get("constraints", {})
-            ranked_docs = docs
+            ranked_docs = local_ranking
             if constraints.get("leftover_friendly"):
                 ranked_docs = sorted(
-                    docs,
+                    local_ranking,
                     key=lambda doc: self.storage_evidence_score(doc.page_content),
                     reverse=True
                 )
@@ -194,7 +224,7 @@ Return {top_k} best indices as JSON:
 {{"selected_indices": [0, 3, 7, ...]}}
 """
 
-            response = self.llm.predict(rerank_prompt)
+            response = predict_with_budget(self.llm, rerank_prompt)
             
             response = response.strip()
             if response.startswith("```json"):
@@ -219,13 +249,7 @@ Return {top_k} best indices as JSON:
         except Exception as e:
             raise_if_model_unavailable(e)
             logger.error(f"Error in reranking: {e}")
-            if intent_data.get("constraints", {}).get("leftover_friendly"):
-                return sorted(
-                    docs,
-                    key=lambda doc: self.storage_evidence_score(doc.page_content),
-                    reverse=True
-                )[:top_k]
-            return docs[:top_k]
+            return local_ranking[:top_k]
 
     def storage_evidence_score(self, text: str) -> int:
         return sum(1 for pattern in self.STORAGE_EVIDENCE_PATTERNS if pattern.search(str(text)))

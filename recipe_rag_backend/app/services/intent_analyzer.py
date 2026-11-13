@@ -1,6 +1,8 @@
+from app.services.model_latency import predict_with_budget
+
 import logging
 from app.services.model_errors import raise_if_model_unavailable
-from app.services.budget_service import apply_budget_intent, is_budget_clarification_reply
+from app.services.budget_service import apply_budget_intent, is_budget_clarification_reply, is_budget_revision
 import json
 import re
 from copy import deepcopy
@@ -20,6 +22,9 @@ from app.services.digestive_comfort import explicit_digestive_comfort
 from app.services.preparation_validation import explicit_preparation_effort
 from app.services.recipe_follow_up import resolve_recipe_follow_up, apply_recipe_follow_up, parse_recipe_context, is_more_recipes_request
 from app.services.response_cache import ResponseCache, model_cache_key
+from app.services.verified_catalog import simple_catalog_intent
+from app.services.intent_contract import compact_intent_prompt
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +54,15 @@ class IntentAnalyzer:
         
         try:
             intent_prompt = self._build_intent_prompt(query)
-            response = self.llm.predict(intent_prompt)
+            response = predict_with_budget(self.llm, intent_prompt, stage="intent")
             intent_data = self._parse_intent_response(response)
-            intent_data = self._post_process_intent(query, intent_data)
+            corrected = intent_data.get("normalized_request")
+            if isinstance(corrected, str) and corrected.strip():
+                intent_data = self._post_process_intent(corrected.strip(), intent_data, current_query=query)
+                if not intent_data.get("resolved_query"):
+                    intent_data["resolved_query"] = corrected.strip()
+            else:
+                intent_data = self._post_process_intent(query, intent_data)
             
             self.intent_cache[normalized_query] = deepcopy(intent_data)
             return intent_data
@@ -67,16 +78,34 @@ class IntentAnalyzer:
         try:
             sanitized_history = self._sanitize_conversation_history(conversation_history or [])
             recipe_name = matching_recipe_title(query, [*self.recipe_names, *recipe_titles_from_history(sanitized_history)])
-            sanitized_history, new_request = scope_recipe_history(query, sanitized_history, self.recipe_names)
+            sanitized_history, new_request = scope_recipe_history(query, sanitized_history, self.recipe_names, semantic_current=True)
             if new_request:
                 return self._understand_independent_request(query, recipe_name)
-            follow_up = resolve_recipe_follow_up(query, sanitized_history)
+            budget_revision = is_budget_revision(query) and any(message["role"] == "user" for message in sanitized_history)
+            follow_up = None if budget_revision else resolve_recipe_follow_up(query, sanitized_history)
             if follow_up and follow_up["waiting_for"]:
                 intent = apply_recipe_follow_up(follow_up, self._get_fallback_intent_data(query))
                 intent["user_request_context"] = [message["content"] for message in sanitized_history if message["role"] == "user"] + [query]
                 return intent
             if not sanitized_history:
                 return self._understand_independent_request(query)
+            if (simple_catalog_intent(query) is not None
+                    and not any(message.get("role") == "user" or message.get("recipes") for message in sanitized_history)):
+                return self._understand_independent_request(query)
+
+            if self._is_unchanged_more_request(query):
+                requests = [message["content"] for message in sanitized_history
+                            if message.get("role") == "user"
+                            and not self._is_unchanged_more_request(message["content"])]
+                if len(requests) == 1:
+                    cached = self.intent_cache.get(self._normalize_query(requests[0]))
+                    if cached and cached.get("query_type") == "recipe_search":
+                        intent = deepcopy(cached)
+                        intent.update(context_action="continue_request", more_recipes=True,
+                                      referenced_recipe_ids=[], user_request_context=requests,
+                                      resolved_query=cached.get("resolved_query") or requests[0])
+                        logger.info("Intent route: reuse unchanged request for additional recipes")
+                        return intent
 
             # Build conversation context
             context_lines = []
@@ -115,12 +144,18 @@ Analyze this query considering the conversation history. Extract ALL relevant in
 3. **Search Strategy** (considering the full conversation flow)
 
 Pay special attention to:
+- Interpret misspellings and informal wording from the surrounding conversation. Do not treat a typo as
+  a topic change or change an ingredient or allergy when its intended meaning is ambiguous.
 - Each self-contained request is independent, even within this chat. Use context only for a follow-up,
   refinement, or reference to a previous message. A new ingredient list or a new named dish is a new task
   unless the user explicitly links it to the earlier request. Do not inherit time limits, dietary preferences,
   preparation restrictions, or ingredients from a different task.
 - Return context_action='new_request' for a new task or 'continue_request' for a follow-up/reference.
   If this is a new task, the backend will analyze it independently of this history.
+- Set more_recipes=true when the user wants additional distinct recipes under the active request,
+  regardless of phrasing. Keep all unchanged constraints, including budget, and exclude already shown dishes.
+- Changing the spending limit for the active recipe search is a search refinement, not a recipe edit.
+  Preserve the cuisine, meal type and dietary requirements; the latest spending limit replaces the old one.
 - Follow-up questions that reference previous recipes
 - Refinements or changes to previous constraints
 - New information that builds on previous context
@@ -172,9 +207,9 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
             cached = self.context_cache.get(cache_key)
             if cached is not None:
                 return cached
-            response = self.llm.predict(enhanced_prompt)
+            response = predict_with_budget(self.llm, enhanced_prompt, stage="context_intent")
             intent_data = self._parse_intent_response(response)
-            follow_up = follow_up or resolve_recipe_follow_up(query, sanitized_history, intent_data)
+            follow_up = None if budget_revision else (follow_up or resolve_recipe_follow_up(query, sanitized_history, intent_data))
             if follow_up:
                 intent_data = apply_recipe_follow_up(follow_up, intent_data)
                 if follow_up["operation"] == "texture":
@@ -186,15 +221,25 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
                 intent_data.update(query_type="recipe_search", context_action="continue_request", referenced_recipe_ids=[])
                 for field in ("recipe_context", "adaptation_request", "clarification_question"):
                     intent_data.pop(field, None)
-            if is_budget_clarification_reply(query, sanitized_history):
+            if budget_revision or is_budget_clarification_reply(query, sanitized_history):
                 intent_data.update(query_type="recipe_search", context_action="continue_request", referenced_recipe_ids=[])
                 for field in ("recipe_context", "adaptation_request", "clarification_question"):
                     intent_data.pop(field, None)
                 intent_data["resolved_query"] = "; ".join(
                     [message["content"] for message in sanitized_history if message["role"] == "user"] + [query]
                 )
+                if budget_revision:
+                    intent_data["search_strategy"] = {"enhanced_query": intent_data["resolved_query"]}
             if intent_data.get("context_action") == "new_request":
-                return self._understand_independent_request(query)
+                coverage = intent_data.get("requirement_coverage", {})
+                if (not isinstance(coverage, dict) or coverage.get("complete") is not True
+                        or coverage.get("scope") != "current_request"):
+                    return self._understand_independent_request(query)
+                corrected = intent_data.get("normalized_request") or query
+                intent_data = self._post_process_intent(corrected, intent_data, current_query=query)
+                intent_data.update(context_action="new_request", user_request_context=[query], referenced_recipe_ids=[])
+                self.context_cache.put(cache_key, intent_data)
+                return intent_data
             intent_data["context_action"] = "continue_request"
             active_temperature = None
             for message in [*sanitized_history, {"role": "user", "content": query}]:
@@ -232,6 +277,8 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
             logger.info(f"Context-aware intent analysis: {intent_data['query_type']}")
             
             self.context_cache.put(cache_key, intent_data)
+            if len(user_requests) == 1 and not any(message.get("recipes") for message in sanitized_history):
+                self.intent_cache[self._normalize_query(query)] = deepcopy(intent_data)
             
             return intent_data
             
@@ -242,7 +289,100 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
             fallback_intent["context_resolution_failed"] = True
             return self._post_process_intent(query, fallback_intent, sanitized_history)
 
+    @staticmethod
+    def _is_unchanged_more_request(query):
+        return bool(re.fullmatch(
+            r"\s*(?:(?:please|can you|could you|show me|give me)\s+)*"
+            r"(?:some\s+)?(?:more|additional|other|extra)\s+recipes"
+            r"(?:\s+please)?[.!?]*\s*", query, re.I,
+        ))
+
+    def interpret_and_generate(self, query, guidelines, recipe_count=1):
+        if self.llm is None or apply_budget_intent({}, query).get("budget_request"):
+            return None, []
+        if recipe_count not in {1, 3}:
+            raise ValueError("Combined generation supports one or three recipes")
+        output_key = "recipes" if recipe_count == 3 else "recipe"
+        analysis_instructions = self._build_intent_prompt(query) if recipe_count == 1 else f"""Interpret this independent request and create dinner recipes: {query}
+The intent object must contain query_type='recipe_search', resolved_query preserving the complete request,
+constraints, preferences, cancer_patient_specific and search_strategy. Omit unspecified fields and empty arrays.
+Extract every stated allergy, dietary restriction, required ingredient, time/equipment/preparation requirement
+and serving count into constraints; preserve cuisine and meal type in preferences. Preserve other explicit
+requirements in search_strategy.must_match_criteria. Do not invent diagnoses or constraints. A holiday is a
+serving occasion, not a requirement for a canonical holiday dish unless the user explicitly asks for tradition.
+Keep the interpretation concise. The full original request is independently verified against each recipe."""
+        prompt = f"""{analysis_instructions}
+
+Return a single JSON object with keys intent and {output_key}, not the intent alone.
+Use the intent fields above inside intent. Include constraints.requested_servings as an integer
+when the user specifies how many people to feed (including informal wording); otherwise omit it.
+Set {output_key} to {'an empty array' if recipe_count == 3 else 'null'} unless this is a clear request for a new recipe
+that needs neither clarification nor budget pricing. Do not assume unstated requirements.
+Otherwise provide {'exactly three distinct complete dinner recipes in the recipes array' if recipe_count == 3 else 'one recipe'} with name, type, description, integer servings, ingredients,
+instructions, total_time and storage_instructions. Ingredients and instructions must be arrays
+of nonempty strings. Size the quantities for the requested yield and include safe cooking endpoints.
+Preserve the requested cuisine, occasion, allergies and all other requirements. Each recipe must feed the
+requested number of people, not divide that number between recipes. Do not claim official source certification.
+Use concise complete instructions; never shorten required food-safety steps to fit the response.
+For three recipes, omit optional commentary and nutrition claims; favor concise quantified ingredient lists
+and 4-6 complete preparation steps per recipe. Do not omit yields, safe endpoints or storage guidance.
+Apply the relevant rules from this configured policy:
+{json.dumps(guidelines)}
+The top-level JSON MUST contain "intent" and "{output_key}". Put the intent template INSIDE
+"intent"; do not return a bare intent object. Recipe quantities and yields must be complete.
+"""
+        try:
+            payload = json.loads(predict_with_budget(self.llm, prompt, response_format={"type": "json_object"},
+                                                  **({"max_tokens": 3600} if recipe_count == 3 else {})))
+            intent = payload.get("intent", payload if "query_type" in payload else None)
+            if not isinstance(intent, dict):
+                return None, []
+            defaults = self._get_fallback_intent_data(query)
+            for section in ("constraints", "preferences", "cancer_patient_specific", "search_strategy"):
+                supplied = intent.get(section) or {}
+                if not isinstance(supplied, dict):
+                    return None, []
+                intent[section] = {**defaults[section], **supplied}
+            recipes = payload.get("recipes") if recipe_count == 3 else [payload.get("recipe")]
+            if intent.get("query_type") != "recipe_search" or intent.get("constraints", {}).get("budget_max") is not None:
+                return None, []
+            intent = self._post_process_intent(query, intent)
+            if intent.get("budget_request") or intent.get("query_type") != "recipe_search":
+                return None, []
+            servings = intent.get("constraints", {}).get("requested_servings")
+            if servings is not None and (type(servings) is not int or servings < 1):
+                return None, []
+            if recipes is None and recipe_count == 3:
+                recipes = []
+            if not isinstance(recipes, list):
+                return None, []
+            candidates = []
+            for recipe in recipes[:recipe_count]:
+                if not isinstance(recipe, dict) or not isinstance(recipe.get("name"), str) or not recipe["name"].strip():
+                    continue
+                if any(not isinstance(recipe.get(field), list) or not recipe[field]
+                       or not all(isinstance(line, str) and line.strip() for line in recipe[field])
+                       for field in ("ingredients", "instructions")):
+                    continue
+                candidate = {key: recipe[key] for key in (
+                    "name", "type", "description", "servings", "ingredients", "instructions", "total_time", "storage_instructions"
+                ) if key in recipe}
+                candidate.update(generated_by_llm=True, generation_basis="ai_only")
+                candidates.append(candidate)
+            intent.update(context_action="new_request", user_request_context=[query], referenced_recipe_ids=[])
+            if recipe_count == 3:
+                intent["generation_recipe_count"] = 3
+            return intent, candidates
+        except Exception as error:
+            raise_if_model_unavailable(error)
+            logger.warning("Combined recipe generation failed (%s); using existing route", type(error).__name__)
+            return None, []
+
     def _understand_independent_request(self, query: str, recipe_name: Optional[str] = None) -> Dict[str, Any]:
+        local_intent = simple_catalog_intent(query) if not recipe_name else None
+        if local_intent is not None:
+            logger.info("Intent route: local catalog criteria; no model call")
+            return local_intent
         if recipe_name:
             intent = self._get_fallback_intent_data(recipe_name)
             intent["query_type"] = "recipe_search"
@@ -276,17 +416,44 @@ ingredients_available, NOT ingredients_must_use, unless the user explicitly requ
         return sanitized
     
     def _build_intent_prompt(self, query: str, with_context: bool = False) -> str:
+        if settings.RECIPE_COMPACT_INTENT:
+            return compact_intent_prompt(query, with_context)
+        return self._build_legacy_intent_prompt(query, with_context)
+
+    def _build_legacy_intent_prompt(self, query: str, with_context: bool = False) -> str:
         """Build the intent analysis prompt"""
         template = self._get_fallback_intent_data("")
         template["context_action"] = "continue_request" if with_context else "new_request"
+        template["normalized_request"] = ""
+        template["recipe_action"] = "find"
+        template["requirement_coverage"] = {"complete": False, "unresolved": [], "scope": "current_request"}
         return f"""You are an expert at understanding user recipe queries. Analyze this query and extract ALL relevant information.
 
 User Query: "{query}"
 
-Return ONLY one valid JSON object with this structure, replacing defaults only when supported by the user:
+Return ONLY one compact JSON object using these fields, replacing defaults only when supported by the user:
 {json.dumps(template, indent=2)}
 
-Use numbers for numeric limits, arrays of strings for list fields, and null or empty arrays when unspecified.
+Use numbers for numeric limits and arrays of strings for list fields. Omit unspecified/default fields
+instead of emitting nulls or empty arrays; the application restores defaults locally. Always include
+query_type, context_action, resolved_query, recipe_action and requirement_coverage.
+Keep the JSON compact. requirement_coverage.complete is true ONLY when every active requirement
+is represented in constraints, preferences, cancer_patient_specific or search_strategy.must_match_criteria.
+Put ambiguous or unrepresented requirements in requirement_coverage.unresolved and set complete=false.
+Set requirement_coverage.scope=current_request for a new independent request: derive ALL requirements
+only from the latest user message, never previous tasks. Use active_conversation for a genuine follow-up.
+Named dishes, cuisine, occasion, preparation, symptoms, allergies and ingredient restrictions must not
+disappear into resolved_query alone. Keep qualitative requirements in must_match_criteria when needed.
+Do not duplicate represented requirements as prose criteria. Never mark complete just because the request is short.
+Choose recipe_action by meaning, not keywords: create for a request to invent an original recipe or compose
+a custom menu; find for ordinary recipe discovery or an explicit source/catalog search; adapt for changing a
+specific dish; continue for more results or a refinement of the active search. When uncertain, use find.
+Do not infer that a catalog lacks a dish. A serving count, cuisine, or occasion alone does not imply create.
+Interpret obvious typos, transposed letters, shorthand and informal grammar across the entire request,
+including cuisines, appliances, dish names, preparation and time requirements. In normalized_request,
+return the same latest request with only clear spelling corrections, or an empty string if none are needed.
+Preserve numbers, negation, references and every restriction. Never guess an ambiguous ingredient or allergy;
+ask a focused clarification if it changes what can be served. Use the corrected meaning in resolved_query.
 Extract hard requirements into constraints, including dietary restrictions, allergens, ingredient limits,
 equipment, budget, and preparation time. For a stated money limit without a cost basis, assume the
 whole recipe and proceed with recipe_search; do not ask whether it means per serving or groceries.
@@ -338,7 +505,15 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
             response = response[:-3]
         response = response.strip()
         
-        return json.loads(response)
+        parsed = json.loads(response)
+        if not isinstance(parsed, dict):
+            raise ValueError("Intent must be a JSON object")
+        for section in ("constraints", "preferences", "cancer_patient_specific", "search_strategy"):
+            supplied = parsed.get(section, {})
+            if not isinstance(supplied, dict):
+                raise ValueError(f"Invalid intent section: {section}")
+            parsed[section] = {**self._get_fallback_intent_data("")[section], **supplied}
+        return parsed
     
     def _normalize_query(self, query: str) -> str:
         """Normalize query for caching"""
@@ -486,6 +661,8 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         for field in ("equipment_required", "equipment_only"):
             constraints[field] = normalize_equipment(constraints.get(field))
         equipment_constraints = explicit_equipment_constraints(current_query or query)
+        if not equipment_constraints and query == str(intent_data.get("normalized_request") or "").strip():
+            equipment_constraints = explicit_equipment_constraints(query)
         if conversation_history and not re.search(r"\binstead\b", current_query or query, re.I):
             constraints["equipment_required"] = self._merge_unique(
                 constraints["equipment_required"], equipment_constraints.get("equipment_required", [])

@@ -30,7 +30,7 @@ class ModelAvailabilityTests(unittest.TestCase):
         service.intent_analyzer.initialize(model)
         service.search_engine.multi_query_search = Mock()
         service.recipe_enhancer.generate_fallback_recipes = Mock()
-        result = service.ask_question("show recipes that take 30 minutes or less")
+        result = service.ask_question("show vegetarian recipes that take 30 minutes or less")
         self.assertEqual(result["source"], "error")
         self.assertIn("temporarily unavailable", result["response"])
         self.assertNotIn("private diagnostic", result["response"])

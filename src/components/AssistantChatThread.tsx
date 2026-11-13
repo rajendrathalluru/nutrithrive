@@ -11,6 +11,7 @@ import {
 import { ArrowDown, ArrowUpRight, Leaf } from 'lucide-react';
 import { Message } from '../types';
 import MessageComponent from './Message';
+import RecipeFollowUp from './RecipeFollowUp';
 
 interface AssistantChatThreadProps {
   messages: Message[];
@@ -65,6 +66,10 @@ const AssistantChatThread: React.FC<AssistantChatThreadProps> = ({
     },
   });
   const isWelcome = messages.length === 1 && messages[0].role === 'assistant';
+  const latest = messages[messages.length - 1];
+  const previousRequest = messages.slice().reverse().find(message => message.role === 'user');
+  const resolvedRequest = latest?.backendData?.intent_analysis?.resolved_query;
+  const canRefine = latest?.role === 'assistant' && !!latest.recipes?.length && previousRequest;
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -90,6 +95,10 @@ const AssistantChatThread: React.FC<AssistantChatThreadProps> = ({
                   </button>
                 ))}
               </div>
+            )}
+            {!disabled && canRefine && latest.backendData?.follow_up && (
+              <RecipeFollowUp key={latest.id} onDraft={onSuggestion} followUp={latest.backendData.follow_up}
+                request={typeof resolvedRequest === 'string' && resolvedRequest.trim() ? resolvedRequest : previousRequest.content} />
             )}
           </div>
           <div className="tw-scroll-anchor">

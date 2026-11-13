@@ -19,6 +19,19 @@ CONSTRAINTS = {"equipment_required": ["air fryer"], "equipment_only": []}
 
 
 class EquipmentIntentTests(unittest.TestCase):
+    def test_normalized_request_applies_appliance_and_time_constraints(self):
+        analyzer = IntentAnalyzer()
+        model = Mock(predict=Mock(return_value=json.dumps({
+            "query_type": "recipe_search",
+            "normalized_request": "Give me air fryer recipes under 20 minutes.",
+        })))
+        analyzer.initialize(model)
+        result = analyzer.understand_query_intent("Gvie me air fryre recipies udner 20 mintues.")
+        self.assertEqual(result["constraints"]["equipment_required"], ["air fryer"])
+        self.assertEqual(result["constraints"]["time_max_minutes"], 20)
+        self.assertTrue(result["constraints"]["time_limit_exclusive"])
+        model.predict.assert_called_once()
+
     def test_exact_query_routes_to_recipes_and_requires_use_not_exclusivity(self):
         analyzer = IntentAnalyzer()
         parsed = analyzer._get_fallback_intent_data(QUERY)
@@ -188,6 +201,7 @@ class EquipmentVerificationTests(unittest.TestCase):
         self.assertFalse(results[0]["verification_details"]["passes_verification"])
         guidelines.validate_recipe_compliance.assert_not_called()
 
+    @patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", False)
     def test_rejected_salad_reaches_existing_database_guided_generation(self):
         service = RecipeRAGService()
         service.is_initialized = True

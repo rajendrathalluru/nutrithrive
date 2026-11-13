@@ -270,7 +270,7 @@ class ChewingPipelineTests(unittest.TestCase):
 
 class ChewingPromptAndSummaryTests(unittest.TestCase):
     def test_rules_reach_intent_verification_generation_repair_and_enhancement(self):
-        self.assertIn(CHEWING_RULES, IntentAnalyzer()._build_intent_prompt(QUERY))
+        self.assertIn("chewing_effort: low", IntentAnalyzer()._build_intent_prompt(QUERY))
         verifier = RecipeVerifier()
         self.assertIn(CHEWING_RULES, verifier._build_batch_verification_prompt([], INTENT))
         self.assertIn(CHEWING_RULES, verifier._build_individual_verification_prompt(SOUP, INTENT))

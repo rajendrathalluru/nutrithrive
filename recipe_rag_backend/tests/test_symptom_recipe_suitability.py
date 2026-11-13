@@ -187,6 +187,7 @@ class SymptomSuitabilityTests(unittest.TestCase):
                 self.assertIn("Don't push through", result)
             generator.llm.predict.assert_not_called()
 
+    @patch("app.services.rag_service.settings.RECIPE_AI_COST_ESTIMATES", False)
     def test_batch_verification_and_generation_preserve_existing_fallback_and_labels(self):
         service = RecipeRAGService()
         service.is_initialized = True

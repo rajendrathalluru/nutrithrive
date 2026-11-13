@@ -176,7 +176,7 @@ class ServingTemperatureTests(unittest.TestCase):
         self.assertIsNone(result["constraints"]["serving_temperature"])
 
     def test_shared_rules_reach_intent_verification_and_repair(self):
-        self.assertIn(SERVING_TEMPERATURE_RULES, IntentAnalyzer()._build_intent_prompt("warm"))
+        self.assertIn("serving_temperature: warm_not_hot", IntentAnalyzer()._build_intent_prompt("warm"))
         verifier = RecipeVerifier()
         self.assertIn(SERVING_TEMPERATURE_RULES, verifier._build_individual_verification_prompt(self.recipe, self.intent))
         self.assertIn(SERVING_TEMPERATURE_RULES, verifier._build_batch_verification_prompt([], self.intent))

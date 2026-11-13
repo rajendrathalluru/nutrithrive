@@ -70,6 +70,14 @@
 .thrive-chat .tw-suggestions span { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 500; }
 .thrive-chat .tw-suggestions svg { color: #85917e; }
 .thrive-chat .tw-suggestions small { display: block; color: var(--tw-muted); font-size: 11px; margin-top: 7px; }
+.thrive-chat .tw-follow-up { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--tw-line); border-radius: 12px; background: white; }
+.thrive-chat .tw-follow-up summary { cursor: pointer; font-weight: 600; }
+.thrive-chat .tw-follow-up p { color: var(--tw-muted); font-size: 13px; margin: 10px 0; }
+.thrive-chat .tw-follow-up fieldset { display: flex; flex-wrap: wrap; gap: 8px 14px; border: 0; border-top: 1px solid var(--tw-line); padding: 8px 0 12px; margin: 0; }
+.thrive-chat .tw-follow-up legend { font-weight: 600; font-size: 13px; padding-right: 6px; }
+.thrive-chat .tw-follow-up label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; }
+.thrive-chat .tw-follow-up button { padding: 8px 12px; border: 1px solid var(--tw-line); border-radius: 8px; background: #f3f6ed; }
+.thrive-chat .tw-follow-up button:disabled { opacity: .5; }
 .thrive-chat .tw-scroll-anchor { position: sticky; bottom: 12px; height: 0; display: flex; justify-content: center; pointer-events: none; z-index: 2; }
 .thrive-chat .tw-scroll-button { display: grid; place-items: center; width: 34px; height: 34px; transform: translateY(-34px); border-radius: 50%; border: 1px solid var(--tw-line); background: white; box-shadow: 0 3px 12px #25362f14; pointer-events: auto; }
 .thrive-chat .tw-scroll-button:disabled { visibility: hidden; pointer-events: none; }

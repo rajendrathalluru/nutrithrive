@@ -60,6 +60,7 @@ class RecipeResponse(BaseModel):
     
     # The key field that was missing!
     source_documents: List[Dict[str, Any]] = Field(default_factory=list)
+    follow_up: Optional[Dict[str, Any]] = None
     
     # Optional fields
     intent_analysis: Optional[Dict[str, Any]] = None

@@ -226,6 +226,7 @@ export class BackendService {
           cookTime: doc.cookTime || undefined,
           servings: doc.servings || undefined,
           budgetAssessment: doc.budget_assessment || undefined,
+          aiCostEstimate: doc.ai_cost_estimate || undefined,
           difficulty: doc.difficulty || undefined,
           nutrition: {
             calories: doc.calories ? parseFloat(doc.calories) : 0,

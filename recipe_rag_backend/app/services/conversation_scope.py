@@ -1,6 +1,8 @@
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from app.services.recipe_follow_up import parse_recipe_context
+from app.services.recipe_follow_up import is_more_recipes_request, parse_recipe_context
+from app.services.recipe_router import requests_composed_dinner
+from app.services.budget_service import is_budget_revision
 
 
 FOLLOW_UP = re.compile(
@@ -48,7 +50,7 @@ def matching_recipe_title(query: str, recipe_names: Iterable[str]) -> Optional[s
 
 def starts_new_request(query: str, recipe_names: Iterable[str] = ()) -> bool:
     return bool(matching_recipe_title(query, recipe_names) or RESET.search(query)
-                or (DISCOVERY.search(query) and not FOLLOW_UP.search(query)))
+                or (DISCOVERY.search(query) and not (FOLLOW_UP.search(query) or is_more_recipes_request(query))))
 
 
 def _awaits_recipe_selection(history: List[Dict[str, Any]]) -> bool:
@@ -64,16 +66,23 @@ def _awaits_recipe_selection(history: List[Dict[str, Any]]) -> bool:
 
 
 def scope_recipe_history(
-    query: str, history: List[Dict[str, Any]], recipe_names: Iterable[str] = ()
+    query: str, history: List[Dict[str, Any]], recipe_names: Iterable[str] = (), *, semantic_current: bool = False
 ) -> Tuple[List[Dict[str, Any]], bool]:
     names = [*recipe_names, *recipe_titles_from_history(history)]
 
     def begins_task(content, previous):
+        if is_budget_revision(content) and any(message.get("role") == "user" for message in previous):
+            return False
         if matching_recipe_title(content, names) and _awaits_recipe_selection(previous):
             return False
         return starts_new_request(content, names)
 
-    if begins_task(query, history):
+    if begins_task(query, history) and (
+        not semantic_current or not any(message.get("role") == "user" for message in history)
+        or matching_recipe_title(query, names) or RESET.search(query)
+        or requests_composed_dinner(query)
+        or not re.match(r"^\s*(?:please\s+)?(?:can|could|would|will)\s+you\b", query, re.I)
+    ):
         return [], True
     start = 0
     latest_user = None
@@ -83,6 +92,6 @@ def scope_recipe_history(
             if begins_task(message.get("content", ""), history[:index]):
                 start = index
         elif message.get("role") == "assistant" and message.get("context_action") == "new_request":
-            if latest_user is not None:
+            if latest_user is not None and not is_budget_revision(history[latest_user].get("content", "")):
                 start = latest_user
     return history[start:], False

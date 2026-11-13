@@ -2,12 +2,14 @@ import asyncio
 import json
 import logging
 import threading
+from time import monotonic
 from contextvars import ContextVar
 
 import anyio
 
 from app.core.config import settings
 from app.models.schemas import RecipeResponse
+from app.services.model_latency import model_deadline, final_review_limit
 
 logger = logging.getLogger(__name__)
 _progress_callback = ContextVar("recipe_progress_callback", default=None)
@@ -46,10 +48,15 @@ async def run_recipe_work(work, callback=None):
 
     def run():
         token = _progress_callback.set(callback)
+        deadline = monotonic() + settings.RECIPE_MODEL_BUDGET_SECONDS
+        deadline_token = model_deadline.set(deadline)
+        review_token = final_review_limit.set(deadline + settings.RECIPE_FINAL_REVIEW_SECONDS)
         try:
             report_progress("reviewing")
             return work()
         finally:
+            final_review_limit.reset(review_token)
+            model_deadline.reset(deadline_token)
             _progress_callback.reset(token)
 
     return await anyio.to_thread.run_sync(run, limiter=_request_limiter)

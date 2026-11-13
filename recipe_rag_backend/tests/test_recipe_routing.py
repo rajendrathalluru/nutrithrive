@@ -13,6 +13,7 @@ from app.services.intent_analyzer import IntentAnalyzer
 from app.services.response_generator import ResponseGenerator
 from app.services.search_engine import SearchEngine
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES
+from app.services.verified_catalog import simple_timed_intent
 
 
 def recipe_record(name, relevance="match", generated=False):
@@ -32,7 +33,115 @@ def recipe_record(name, relevance="match", generated=False):
 
 
 class RecipeRoutingTests(unittest.TestCase):
+    def test_more_after_sparse_results_skips_catalog_and_keeps_verified_generation(self):
+        intent = self.service.intent_analyzer.understand_query_intent_with_context.return_value
+        intent.update(query_type="recipe_search", context_action="continue_request",
+                      resolved_query="Find gentle lunch recipes")
+        with patch.object(self.service, "_generate_verified_fallback_recipes", return_value=[
+            recipe_record("New Lunch", generated=True)
+        ]) as generate:
+            result = self.ask("more recipes", history=[
+                {"role": "user", "content": "Find gentle lunch recipes"},
+                {"role": "assistant", "content": "One recipe", "recipes": [recipe_record("Rice Bowl")]},
+            ])
+        self.service.search_engine.multi_query_search.assert_not_called()
+        generate.assert_called_once()
+        self.assertTrue(generate.call_args.kwargs["bounded"])
+        self.assertIn("rice bowl", generate.call_args.kwargs["excluded_names"])
+        self.assertEqual(result["source_documents"][0]["name"], "New Lunch")
+
+    def test_unchanged_more_reuses_intent_without_model_call(self):
+        analyzer = IntentAnalyzer()
+        analyzer.llm = Mock()
+        request = "I am feeling nausea can you help me generate lunch recipes"
+        analyzer.intent_cache[analyzer._normalize_query(request)] = {
+            "query_type": "recipe_search", "constraints": {"digestive_comfort": "gentle"},
+            "preferences": {"meal_type": "lunch"},
+        }
+        result = analyzer.understand_query_intent_with_context("more recipes", [
+            {"role": "user", "content": request},
+            {"role": "assistant", "content": "One recipe", "recipes": [recipe_record("Rice Bowl")]},
+        ])
+        self.assertTrue(result["more_recipes"])
+        self.assertEqual(result["constraints"]["digestive_comfort"], "gentle")
+        analyzer.llm.predict.assert_not_called()
+        result["constraints"].clear()
+        self.assertTrue(analyzer.intent_cache[analyzer._normalize_query(request)]["constraints"])
+        self.assertFalse(analyzer._is_unchanged_more_request("more recipes without chicken"))
+        self.assertFalse(analyzer._is_unchanged_more_request("more recipes under 10 dollars"))
+
+    def test_followup_timeout_preserves_requirements_instead_of_claiming_outage(self):
+        from app.services.model_latency import ModelBudgetExhausted
+
+        analyzer = self.service.intent_analyzer.understand_query_intent_with_context
+        analyzer.side_effect = ModelBudgetExhausted("timeout")
+        with patch("app.services.rag_service.safety_service.should_intercept", return_value=False):
+            result = self.service.ask_question("more recipes", conversation_history=[
+                {"role": "user", "content": "Find gentle lunch recipes"},
+                {"role": "assistant", "content": "Here is a recipe.", "recipes": [recipe_record("Rice Bowl")]},
+            ])
+        self.assertIn("not showing an unchecked recipe", result["response"])
+        self.assertEqual(result["source_documents"], [])
+        self.assertEqual(analyzer.call_args.args[1][-1]["recipes"][0]["name"], "Rice Bowl")
+        self.assertNotIn("instructions", analyzer.call_args.args[1][-1]["recipes"][0])
+
+    def test_reported_fever_skips_recipe_model_and_search(self):
+        result = self.ask("I am having a fever. Could you suggest some recipes for dinner?")
+        self.assertEqual(result["source"], "health_safety")
+        self.assertIn("oncology care team", result["response"])
+        self.assertEqual(result["source_documents"], [])
+        self.service.intent_analyzer.understand_query_intent_with_context.assert_not_called()
+        self.service.search_engine.multi_query_search.assert_not_called()
+
+    def test_nearby_street_address_triggers_privacy_redirect_without_echoing_it(self):
+        self.service._contains_phi_like_content = RecipeRAGService._contains_phi_like_content.__get__(self.service)
+        result = self.ask("I am living near the 123 S Example; can you suggest dinner recipes?")
+        self.assertEqual(result["source"], "privacy_redirect")
+        self.assertNotIn("123", result["query"])
+        self.assertEqual(result["source_documents"], [])
+        self.service.intent_analyzer.understand_query_intent_with_context.assert_not_called()
+
+    def test_disclosed_location_is_private_but_cuisine_reference_is_not(self):
+        service = RecipeRAGService()
+        self.assertTrue(service._contains_phi_like_content("i am near to exampleville help me to generate recipes"))
+        self.assertTrue(service._contains_phi_like_content("I'm based in Exampleville. Any dinner ideas?"))
+        self.assertFalse(service._contains_phi_like_content("Suggest Chicago-style pizza recipes"))
+        self.assertFalse(service._contains_phi_like_content("I'm in a hurry. Suggest dinner recipes"))
+
+    def test_personal_details_cannot_bypass_filter_in_recipe_follow_up(self):
+        service = RecipeRAGService()
+        history = [{"role": "assistant", "content": "Here are dinner recipes."}]
+        for identifier in ("123 Example Avenue", "123 S Example", "my legal name is Sample Person",
+                           "sample@example.com", "555-010-1234", "DOB: 01/01/1990", "MRN: TEST1234"):
+            with self.subTest(identifier=identifier):
+                self.assertTrue(service._contains_phi_like_content(f"More recipes, {identifier}", history))
+        self.assertFalse(service._contains_phi_like_content("More dinner recipes for a nut allergy", history))
+
+    def test_identifying_chat_history_is_not_forwarded(self):
+        self.service._contains_phi_like_content = RecipeRAGService._contains_phi_like_content.__get__(self.service)
+        self.ask("More recipes", history=[
+            {"role": "user", "content": "Dinner ideas. My email is sample@example.com"},
+            {"role": "assistant", "content": "Try a bean bowl for dinner."},
+        ])
+        history = self.service.intent_analyzer.understand_query_intent_with_context.call_args.args[1]
+        self.assertNotIn("sample@example.com", str(history))
+
+    def test_grocery_zip_does_not_bypass_other_identifiers_or_trigger_remote_search(self):
+        service = RecipeRAGService()
+        self.assertTrue(service._contains_phi_like_content("I live at 123 S Example; find local market recipes"))
+        self.assertTrue(service._contains_phi_like_content("ZIP 60607 groceries, patient ID 123456"))
+        self.assertFalse(service._contains_phi_like_content("my pincode is 60607 help me check groceries for my recipes"))
+        service.is_initialized = True
+        service.intent_analyzer.understand_query_intent_with_context = Mock()
+        result = service.ask_question("my pincode is 60607 help me check groceries for my recipes")
+        self.assertIn("grocery list", result["response"])
+        self.assertNotIn("60607", result["query"])
+        service.intent_analyzer.understand_query_intent_with_context.assert_not_called()
+
     def setUp(self):
+        enhancement = patch("app.services.rag_service.settings.RECIPE_OPTIONAL_ENHANCEMENT", True)
+        enhancement.start()
+        self.addCleanup(enhancement.stop)
         self.service = RecipeRAGService()
         self.service.is_initialized = True
         self.service._contains_phi_like_content = Mock(return_value=False)
@@ -70,6 +179,18 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertNotEqual(result.get("source"), "error", result)
         return result
 
+    @patch("app.services.rag_service.settings.RECIPE_AI_COST_ESTIMATES", True)
+    def test_fatigue_and_tiredness_do_not_request_cost_estimates(self):
+        intent = self.service.intent_analyzer.understand_query_intent_with_context.return_value
+        intent.update(query_type="recipe_search", constraints={"preparation_effort": "low"})
+        for wording in ("I am feeling fatigue", "I'm tired"):
+            with self.subTest(wording=wording):
+                with patch("app.services.rag_service.generate_once") as generate_once:
+                    result = self.ask(f"Can you generate recipes for dinner? {wording}.")
+                generate_once.assert_not_called()
+                self.assertNotIn("rough AI estimates", result["response"])
+                self.assertEqual(result["intent_analysis"]["constraints"]["preparation_effort"], "low")
+
     def test_good_database_match_wins_without_literal_query_words(self):
         self.service.search_engine.multi_query_search.return_value = [recipe_record("Hot-and-Sour Soup")]
         result = self.ask()
@@ -77,6 +198,411 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual(result["source_documents"][0]["source_label"], "Sourced from AHA")
         self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
         self.service._get_database_search_candidates.assert_not_called()
+
+    def test_thanksgiving_returns_verified_recipes_without_optional_enhancement(self):
+        self.service.search_engine.multi_query_search.return_value = [
+            {**recipe_record("Unverified Dinner"), "test_constraint_failure": True},
+            recipe_record("Squash Salad"), recipe_record("Turkey Meatloaf"), recipe_record("Turkey Pot Pie"),
+        ]
+        with patch("app.services.rag_service.settings.RECIPE_OPTIONAL_ENHANCEMENT", False), \
+                patch("app.services.rag_service.settings.RECIPE_IO_WORKERS", 3):
+            result = self.ask("Find catalog recipes for my Thanksgiving dinner")
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]],
+                         ["Squash Salad", "Turkey Meatloaf", "Turkey Pot Pie"])
+        self.assertEqual([len(call.args[0]) for call in self.service.recipe_verifier.batch_verify_recipes.call_args_list], [3, 1])
+        self.service.recipe_enhancer.batch_enhance_recipes.assert_not_called()
+
+    def test_catalog_verification_stops_after_top_three_pass(self):
+        self.service.search_engine.multi_query_search.return_value = [
+            recipe_record(f"Holiday Dinner {number}") for number in range(8)
+        ]
+        with patch("app.services.rag_service.settings.RECIPE_OPTIONAL_ENHANCEMENT", False), \
+                patch("app.services.rag_service.settings.RECIPE_IO_WORKERS", 3):
+            result = self.ask("Recipes for Thanksgiving dinner")
+        self.assertEqual(result["matches_found"], 3)
+        self.service.recipe_verifier.batch_verify_recipes.assert_called_once()
+        candidates, intent, _ = self.service.recipe_verifier.batch_verify_recipes.call_args.args
+        self.assertEqual([recipe["name"] for recipe in candidates], [f"Holiday Dinner {number}" for number in range(3)])
+        self.assertTrue(intent["_parallel_catalog_verification"])
+
+    def test_gentle_retrieval_overlaps_local_shortlist_and_reviews_one_wave(self):
+        from threading import Event
+
+        local_started = Event()
+        vector_started = Event()
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update(
+            query_type="recipe_search", constraints={"digestive_comfort": "gentle"},
+        )
+
+        def local_search(*args, **kwargs):
+            local_started.set()
+            self.assertTrue(vector_started.wait(2))
+            return [recipe_record(f"Local Bowl {index}") for index in range(5)]
+
+        def vector_search(*args, **kwargs):
+            vector_started.set()
+            self.assertTrue(local_started.wait(2))
+            return [recipe_record(f"Vector Bowl {index}") for index in range(5)]
+
+        self.service._get_database_search_candidates.side_effect = local_search
+        self.service.search_engine.multi_query_search.side_effect = vector_search
+        with patch("app.services.rag_service.settings.RECIPE_IO_WORKERS", 3):
+            result = self.ask("Suggest recipes that are gentle on my stomach")
+        self.service._get_database_search_candidates.assert_called_once()
+        self.service.recipe_verifier.batch_verify_recipes.assert_called_once()
+        self.assertEqual(len(self.service.recipe_verifier.batch_verify_recipes.call_args.args[0]), 3)
+        self.assertEqual(result["matches_found"], 3)
+
+    def test_gentle_prefilter_rejects_clear_conflicts_before_model_review(self):
+        spicy = {**recipe_record("Spicy Bowl"), "ingredients": ["1 tsp cayenne"]}
+        gentle = recipe_record("Plain Bowl")
+        results = self.service._verify_candidates([spicy, gentle], {"constraints": {"digestive_comfort": "gentle"}})
+        self.assertEqual([recipe["name"] for recipe in self.service.recipe_verifier.batch_verify_recipes.call_args.args[0]],
+                         ["Plain Bowl"])
+        self.assertFalse(next(recipe for recipe in results if recipe["name"] == "Spicy Bowl")["verification_details"]["passes_verification"])
+
+    def test_simple_timed_partial_result_gets_one_bounded_verified_topup(self):
+        query = "Show recipes that take 30 minutes or less for dinner"
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value = simple_timed_intent(query)
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Catalog Dinner")]
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [
+            recipe_record("New Dinner One", generated=True), recipe_record("New Dinner Two", generated=True),
+            recipe_record("Unneeded Dinner", generated=True),
+        ]
+        with patch("app.services.rag_service.catalog_matches", return_value=[]):
+            result = self.ask(query)
+        self.assertEqual(result["matches_found"], 3)
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_called_once()
+        self.service.recipe_enhancer.generate_structured_fallback_recipe.assert_not_called()
+        checked = [recipe["name"] for call in self.service.recipe_verifier.batch_verify_recipes.call_args_list
+                   for recipe in call.args[0]]
+        self.assertIn("New Dinner One", checked)
+        self.assertNotIn("Unneeded Dinner", checked)
+
+    def test_partial_topup_never_includes_failed_addition(self):
+        query = "Show recipes that take 30 minutes or less for dinner"
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value = simple_timed_intent(query)
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Catalog Dinner")]
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [
+            {**recipe_record("Unsafe Addition", generated=True), "test_constraint_failure": True}
+        ]
+        with patch("app.services.rag_service.catalog_matches", return_value=[]):
+            result = self.ask(query)
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["Catalog Dinner"])
+
+    def test_timing_prefilter_rejects_conflicts_without_llm_but_checks_unknowns(self):
+        recipes = [
+            {**recipe_record("Slow"), "total_time": "45 minutes"},
+            {**recipe_record("Boundary"), "total_time": "30 minutes"},
+            recipe_record("Unknown"),
+        ]
+        result = self.service._verify_candidates(recipes, {"constraints": {"time_max_minutes": 30}})
+        checked = self.service.recipe_verifier.batch_verify_recipes.call_args.args[0]
+        self.assertEqual([recipe["name"] for recipe in checked], ["Boundary", "Unknown"])
+        rejected = next(recipe for recipe in result if recipe["name"] == "Slow")
+        self.assertFalse(rejected["verification_details"]["passes_verification"])
+        self.assertEqual(rejected["verification_details"]["relevance"], "adaptable")
+
+    def test_exclusive_time_boundary_never_calls_verifier(self):
+        result = self.service._verify_candidates(
+            [{**recipe_record("Boundary"), "source_notes": "Total Time 30 min"}],
+            {"constraints": {"time_max_minutes": 30, "time_limit_exclusive": True}},
+        )
+        self.service.recipe_verifier.batch_verify_recipes.assert_not_called()
+        self.assertFalse(result[0]["verification_details"]["passes_verification"])
+
+    def test_no_time_limit_preserves_verification(self):
+        recipes = [{**recipe_record("Slow"), "total_time": "90 minutes"}]
+        self.service._verify_candidates(recipes, {"constraints": {}})
+        self.service.recipe_verifier.batch_verify_recipes.assert_called_once()
+
+    def test_timing_search_prioritizes_supported_totals_and_preserves_unknowns(self):
+        docs = [recipe_record("Unknown"),
+                {**recipe_record("Slow"), "total_time": "40 minutes"},
+                {**recipe_record("Quick"), "total_time": "20 minutes"}]
+        selected = self.service._timing_search_candidates(docs, {"constraints": {"time_max_minutes": 30}})
+        self.assertEqual([doc["name"] for doc in selected], ["Quick", "Unknown"])
+        self.assertEqual(len(docs), 3)
+
+    def test_invalid_time_limit_does_not_reject_catalog(self):
+        for limit in (True, -1, "30", float("nan")):
+            with self.subTest(limit=limit):
+                docs = [recipe_record("Dinner")]
+                intent = {"constraints": {"time_max_minutes": limit}}
+                self.assertEqual(self.service._timing_search_candidates(docs, intent), docs)
+                self.service.recipe_verifier.batch_verify_recipes.reset_mock()
+                self.service._verify_candidates(docs, intent)
+                self.service.recipe_verifier.batch_verify_recipes.assert_called_once()
+
+    def test_red_meat_alternatives_use_single_pass_and_filter_generated_conflicts(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value["query_type"] = "recipe_search"
+        candidates = [
+            {**recipe_record(name, generated=True),
+             "verification_details": {"passes_verification": True, "relevance": "match"}}
+            for name in ("Beef Dinner", "Lentil Dinner")
+        ]
+        with patch("app.services.rag_service.generate_once", return_value=candidates) as generate:
+            result = self.ask("I have large quantity of pork and beef can you help me to generate recipes for dinner")
+        generate.assert_called_once()
+        self.assertTrue(generate.call_args.args[2]["constraints"]["avoid_red_meat"])
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["Lentil Dinner"])
+        self.assertIn("could return 1", result["response"])
+        self.service.search_engine.multi_query_search.assert_not_called()
+        self.service.recipe_verifier.batch_verify_recipes.assert_not_called()
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+
+    @patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", False)
+    def test_red_meat_request_explains_and_collects_three_verified_alternatives(self):
+        rejected = {**recipe_record("Vegetable Bowl", generated=True), "ingredients": ["Beef broth"]}
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [
+            [rejected, recipe_record("Lentil Bowl", generated=True)],
+            [recipe_record("Lentil Bowl", generated=True), recipe_record("Tofu Skillet", generated=True),
+             recipe_record("Chickpea Stew", generated=True)],
+        ]
+        result = self.ask("i have large portion of beef and pork can you help me to generate few recipes using this meat")
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]],
+                         ["Lentil Bowl", "Tofu Skillet", "Chickpea Stew"])
+        self.assertIn("AICR recommends limiting red meat", result["response"])
+        self.service.search_engine.multi_query_search.assert_not_called()
+
+    def test_request_already_excluding_red_meat_keeps_normal_route(self):
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Lentil Bowl")]
+        result = self.ask("Find recipes without beef or pork")
+        self.assertNotIn("red_meat_alternatives", result["intent_analysis"])
+        self.service.search_engine.multi_query_search.assert_called_once()
+
+    @patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", False)
+    def test_more_recipes_preserves_red_meat_redirect(self):
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [
+            {**recipe_record("Beef Stew", generated=True), "ingredients": ["1 lb beef"]},
+            recipe_record("Chicken Dinner", generated=True),
+            recipe_record("Lentil Dinner", generated=True),
+            recipe_record("Bean Dinner", generated=True),
+        ]
+        result = self.ask("can you give some other extra recipes", history=[
+            {"role": "user", "content": "can you help me to prepare a low budget meal under 15 dolalrs with beef or any meat"},
+            {"role": "assistant", "content": "Here are alternatives."},
+        ])
+        self.assertTrue(result["intent_analysis"]["constraints"]["avoid_red_meat"])
+        self.assertIn("under 15 dolalrs", result["intent_analysis"]["resolved_query"])
+        self.assertEqual(len(result["source_documents"]), 3)
+        self.assertNotIn("Beef Stew", [recipe["name"] for recipe in result["source_documents"]])
+        self.service.search_engine.multi_query_search.assert_not_called()
+
+    @patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", False)
+    def test_semantic_followup_preserves_policy_without_known_followup_words(self):
+        query = "Could you suggest a fresh set of dishes?"
+        original = "Help me prepare meals under $15 with beef"
+        self.assertFalse(self.service._is_more_recipes_query(query))
+        analyzer = self.service.intent_analyzer.understand_query_intent_with_context
+        analyzer.return_value.update(query_type="recipe_search", context_action="continue_request", more_recipes=True)
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [
+            {**recipe_record("Beef Stew", generated=True), "ingredients": ["1 lb beef"]},
+            recipe_record("Chicken Dinner", generated=True),
+        ]
+        result = self.ask(query, history=[{"role": "user", "content": original},
+                                          {"role": "assistant", "content": "Here is an alternative."}])
+        self.assertEqual(analyzer.call_args.args[1][0]["content"], original)
+        self.assertTrue(result["intent_analysis"]["constraints"]["avoid_red_meat"])
+        self.assertIn("under $15", result["intent_analysis"]["resolved_query"])
+        self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["Chicken Dinner"])
+
+    def test_shared_fit_routes_weak_matches_to_generation_without_second_search(self):
+        intent = self.service.intent_analyzer.understand_query_intent_with_context.return_value
+        intent.update(query_type="recipe_search", context_action="new_request")
+        intent["requirement_coverage"] = {"complete": True, "unresolved": []}
+        intent["preferences"]["cuisine_types"] = ["Chicago"]
+        self.service.search_engine.multi_query_search.return_value = [
+            recipe_record("Unrelated meal", relevance="unrelated")
+        ]
+        with patch.object(self.service, "_generate_verified_fallback_recipes", return_value=[]) as generate:
+            self.ask("Help me generate Chicago famous dinner recipes")
+        generate.assert_called_once()
+        self.assertTrue(generate.call_args.kwargs["bounded"])
+        self.service._get_database_search_candidates.assert_not_called()
+        self.service.recipe_verifier.batch_verify_recipes.assert_not_called()
+        self.assertEqual(generate.call_args.kwargs["grounding_recipes"], [])
+
+    def test_shared_fit_timeout_restores_generation_deadline(self):
+        from app.services.model_latency import ModelBudgetExhausted, model_deadline
+        intent = self.service.intent_analyzer.understand_query_intent_with_context.return_value
+        intent.update(query_type="recipe_search", context_action="new_request",
+                      requirement_coverage={"complete": True, "unresolved": []})
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Dinner")]
+        self.service.recipe_verifier.batch_verify_recipes.side_effect = ModelBudgetExhausted("Review deadline")
+        with patch.object(self.service, "_generate_verified_fallback_recipes", return_value=[]) as generate:
+            self.ask("Find regional dinner recipes")
+        generate.assert_called_once()
+        self.assertIsNone(model_deadline.get())
+        self.service._get_database_search_candidates.assert_not_called()
+
+    def test_fallback_review_timeout_tries_one_simpler_verified_recipe(self):
+        from app.services.model_latency import ModelBudgetExhausted, final_review_limit
+
+        initial = recipe_record("First Dinner", generated=True)
+        simpler = recipe_record("Simple Dinner", generated=True)
+        self.service.recipe_enhancer.generate_fallback_recipes.side_effect = [[initial], [simpler]]
+        token = final_review_limit.set(float("inf"))
+        self.addCleanup(final_review_limit.reset, token)
+        with patch.object(self.service, "_verify_candidates", side_effect=[
+            ModelBudgetExhausted("Review deadline"),
+            self.verify([simpler], {}, None),
+        ]) as review:
+            result = self.service._generate_verified_fallback_recipes(
+                "Easy vegetarian dinner", {"query_type": "recipe_search"}, [], [], set(), bounded=True
+            )
+        self.assertEqual([recipe["name"] for recipe in result], ["Simple Dinner"])
+        self.assertEqual(review.call_count, 2)
+        self.assertIn("simpler", self.service.recipe_enhancer.generate_fallback_recipes.call_args.args[0])
+
+    def test_budget_shortage_suggests_next_step_without_echoing_internal_prompt(self):
+        response = self.service._recipe_shortage_message({
+            "budget_request": {"limit": "15", "basis": "recipe"},
+            "red_meat_alternatives": True,
+            "resolved_query": "Generate three distinct recipes. Internal generation instructions.",
+        }, additional=True)
+        self.assertIn("USD $15", response)
+        self.assertIn("excluded recipes already shown", response)
+        self.assertIn("what you already have", response)
+        self.assertNotIn("Internal generation instructions", response)
+
+    def test_ai_budget_route_uses_prior_dishes_and_skips_price_lookup(self):
+        analyzer = self.service.intent_analyzer.understand_query_intent_with_context
+        analyzer.return_value.update(query_type="recipe_search", context_action="continue_request", more_recipes=True,
+                                     budget_request={"limit": "15", "currency": "USD", "basis": "recipe"})
+        candidate = {**recipe_record("Chicken Dinner", generated=True),
+                     "verification_details": {"passes_verification": True, "relevance": "match"},
+                     "ai_cost_estimate": {"low": 8, "high": 12, "currency": "USD", "basis": "recipe"}}
+        with patch("app.services.rag_service.generate_once", return_value=[candidate]) as generate, \
+                patch("app.services.rag_service.budget_service.prepare_prices") as prices:
+            result = self.ask("Could you suggest a fresh set of dishes?", history=[
+                {"role": "user", "content": "Help me prepare a meal under $15 with beef"},
+                {"role": "assistant", "content": "Here is an alternative.",
+                 "recipes": [recipe_record("Tofu Bowl", generated=True)]},
+            ])
+        generate.assert_called_once()
+        metadata = generate.call_args.args[2]
+        self.assertEqual(metadata["previous_dishes"][0]["name"], "Tofu Bowl")
+        self.assertEqual(metadata["budget_request"]["limit"], "15")
+        self.assertTrue(metadata["constraints"]["avoid_red_meat"])
+        self.assertEqual(result["source_documents"][0]["ai_cost_estimate"]["high"], 12)
+        self.assertIn("not verified store prices", result["response"])
+        prices.assert_not_called()
+        self.service.search_engine.multi_query_search.assert_not_called()
+
+    def test_semantic_creation_routes_without_generation_keywords(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update(
+            query_type="recipe_search", context_action="new_request", recipe_action="create",
+        )
+        generated = {**recipe_record("Brunch Bowl", generated=True), "servings": 6,
+                     "verification_details": {"passes_verification": True, "relevance": "match"}}
+        with patch("app.services.rag_service.generate_once", return_value=[generated]) as generate:
+            result = self.ask("Dream up something for our brunch for six people")
+        generate.assert_called_once()
+        self.service.search_engine.multi_query_search.assert_not_called()
+        self.service.recipe_verifier.batch_verify_recipes.assert_not_called()
+        self.assertEqual(result["source"], "llm_generated")
+
+    def test_catalog_source_overrides_model_creation_action(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update(
+            query_type="recipe_search", context_action="new_request", recipe_action="create",
+        )
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Catalog Dinner")]
+        with patch("app.services.rag_service.generate_once") as generate:
+            result = self.ask("Find an AICR recipe for dinner")
+        generate.assert_not_called()
+        self.service.search_engine.multi_query_search.assert_called_once()
+        self.assertEqual(result["source"], "database_exact")
+
+    def test_generated_meat_is_rejected_without_an_explicit_meat_request(self):
+        recipes = [
+            {**recipe_record("Savory Beef Bowl", generated=True), "ingredients": ["1 lb beef"]},
+            recipe_record("Plain Rice Bowl", generated=True),
+        ]
+        result = self.service._verify_candidates(recipes, {"constraints": {"digestive_comfort": "gentle"}})
+        checked = self.service.recipe_verifier.batch_verify_recipes.call_args.args[0]
+        self.assertEqual([recipe["name"] for recipe in checked], ["Plain Rice Bowl"])
+        self.assertEqual([recipe["name"] for recipe in self.service._get_verified_matches(result, {"constraints": {}})],
+                         ["Plain Rice Bowl"])
+        self.assertEqual(self.service._apply_deterministic_constraints(recipes, {}), [recipes[1]])
+
+    def test_missing_catalog_ingredient_routes_to_ai_without_model_review(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value.update(
+            query_type="recipe_search", constraints={"ingredients_must_use": ["chicken"]},
+        )
+        self.service.search_engine.multi_query_search.return_value = [recipe_record("Catalog Tofu Bowl")]
+        generated = {**recipe_record("Chicken Bowl", generated=True), "ingredients": ["1 lb chicken"],
+                     "verification_details": {"passes_verification": True, "relevance": "match"}}
+        with patch("app.services.rag_service.generate_once", return_value=[generated]) as generate:
+            result = self.ask("Find recipes with chicken")
+        generate.assert_called_once()
+        self.service.recipe_verifier.batch_verify_recipes.assert_not_called()
+        self.assertEqual(result["source_documents"][0]["name"], "Chicken Bowl")
+
+    def test_catalog_yield_mismatches_skip_verifier_and_generate_for_requested_group(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value["query_type"] = "recipe_search"
+        self.service.search_engine.multi_query_search.return_value = [
+            {**recipe_record("Small Catalog Dinner"), "servings": 4},
+            recipe_record("Unknown Yield Dinner"),
+        ]
+        generated = {**recipe_record("Dinner for Six", generated=True), "servings": 6,
+                     "verification_details": {"passes_verification": True, "relevance": "match"}}
+        with patch("app.services.rag_service.generate_once", return_value=[generated]) as generate:
+            result = self.ask("Show dinner recipes for 6 people")
+        self.service.recipe_verifier.batch_verify_recipes.assert_not_called()
+        generate.assert_called_once()
+        self.assertEqual(generate.call_args.args[2]["constraints"]["requested_servings"], 6)
+        self.assertEqual(result["source_documents"][0]["servings"], 6)
+        self.assertEqual(result["source"], "llm_generated")
+
+    def test_generate_meal_prep_recipe_for_six_members(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value["context_action"] = "new_request"
+        wrong_yield = {**recipe_record("Small Bowl", generated=True), "servings": 4}
+        correct_yield = {**recipe_record("Meal Prep Bowl", generated=True), "servings": 6}
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [wrong_yield, correct_yield]
+        result = self.ask("i am planning to prep meals for 6 members could you please help me to generate a recipe")
+        self.assertEqual(result["intent_analysis"]["constraints"]["requested_servings"], 6)
+        self.assertEqual([recipe["servings"] for recipe in result["source_documents"]], [6])
+        self.service.search_engine.multi_query_search.assert_not_called()
+
+    def test_combined_generation_interprets_informal_yield_in_one_model_call(self):
+        analyzer = IntentAnalyzer()
+        query = "Please generate a recipe to feed half a dozen guests"
+        intent = analyzer._get_fallback_intent_data(query)
+        intent["query_type"] = "recipe_search"
+        intent["constraints"]["requested_servings"] = 6
+        candidate = {**recipe_record("Meal Prep Bowl", generated=True), "servings": 6}
+        self.service.recipe_verifier.batch_verify_recipes.side_effect = lambda recipes, *_: self.verify(
+            [{**recipe, "test_relevance": "match"} for recipe in recipes], None, None
+        )
+        model = Mock(predict=Mock(return_value=json.dumps({"intent": intent, "recipe": candidate})))
+        analyzer.initialize(model)
+        self.service.intent_analyzer = analyzer
+        result = self.ask(query)
+        self.assertEqual([recipe["servings"] for recipe in result["source_documents"]], [6])
+        model.predict.assert_called_once()
+        self.service.recipe_verifier.batch_verify_recipes.assert_called_once()
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+        self.service.response_generator.generate_personalized_response.assert_called_once()
+
+    def test_explicit_original_recipe_skips_retrieval_and_optional_polish(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value["context_action"] = "new_request"
+        result = self.ask("Generate an original recipe for a Chinese dinner")
+        self.assertEqual(result["matches_found"], 1)
+        self.service.search_engine.multi_query_search.assert_not_called()
+        self.service.search_engine.rerank_with_constraint_filtering.assert_not_called()
+        self.service._get_database_search_candidates.assert_not_called()
+        self.service.recipe_verifier.batch_verify_recipes.assert_called_once()
+        self.service.recipe_enhancer.batch_enhance_recipes.assert_not_called()
+
+    def test_original_recipe_route_does_not_return_failed_candidate(self):
+        self.service.intent_analyzer.understand_query_intent_with_context.return_value["context_action"] = "new_request"
+        rejected = recipe_record("Rejected Dinner", generated=True)
+        rejected["test_constraint_failure"] = True
+        self.service.recipe_enhancer.generate_fallback_recipes.return_value = [rejected]
+        result = self.ask("Create an original recipe for dinner without peanuts")
+        self.assertEqual(result["matches_found"], 0)
+        self.service.recipe_verifier.batch_verify_recipes.assert_called()
 
     def configure_broccoli_chicken_request(self):
         query = "I have broccoli and chicken. Generate a recipe using these ingredients"
@@ -97,6 +623,7 @@ class RecipeRoutingTests(unittest.TestCase):
         self.service.response_generator.initialize(Mock(predict=Mock(side_effect=AssertionError("Ingredient summary should not invent facts"))))
         return query, pork, chicken
 
+    @patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", False)
     def test_inventory_request_does_not_serve_pork_even_when_verifier_says_pass(self):
         query, pork, chicken = self.configure_broccoli_chicken_request()
         original = copy.deepcopy(pork)
@@ -121,6 +648,7 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual(result["source_documents"][0]["source_label"], "Sourced from AICR")
         self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
 
+    @patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", False)
     def test_generated_candidate_cannot_satisfy_chicken_with_broth_either(self):
         query, pork, chicken = self.configure_broccoli_chicken_request()
         bad_generation = {**pork, "name": "Chicken and Broccoli Bowl", "generated_by_llm": True,
@@ -132,6 +660,7 @@ class RecipeRoutingTests(unittest.TestCase):
         for call in self.service.recipe_enhancer.generate_fallback_recipes.call_args_list:
             self.assertEqual(call.args[1]["constraints"]["ingredients_must_use"], ["broccoli", "chicken"])
 
+    @patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", False)
     def test_optional_enhancement_cannot_remove_a_required_ingredient(self):
         query, _, chicken = self.configure_broccoli_chicken_request()
         def remove_chicken(recipes, intent):
@@ -926,11 +1455,11 @@ class RecipeRoutingTests(unittest.TestCase):
         self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["New Dinner"])
         self.assertEqual(self.service.recipe_enhancer.generate_fallback_recipes.call_count, 1)
 
-    def test_exhausted_more_request_retains_original_context_in_response(self):
+    def test_exhausted_more_request_offers_a_next_step(self):
         self.service.recipe_enhancer.generate_fallback_recipes.return_value = []
         result = self.ask("more recipes", [{"role": "user", "content": "Mild flavorful meals"}])
         self.assertEqual(result["source"], "no_results")
-        self.assertIn("Mild flavorful meals", result["response"])
+        self.assertIn("Tell me one ingredient", result["response"])
         self.assertNotIn("rephras", result["response"].lower())
 
     def test_leftover_requirement_still_requires_evidence(self):
@@ -1088,7 +1617,8 @@ class GenerationAndVerificationTests(unittest.TestCase):
 
     def test_storage_rules_reach_intent_verification_and_generation(self):
         analyzer = IntentAnalyzer()
-        self.assertIn(INGREDIENT_STORAGE_RULES, analyzer._build_intent_prompt("pantry meals"))
+        self.assertIn("ingredient_storage: canned_only, frozen_only, shelf_stable_only, or pantry_based",
+                      analyzer._build_intent_prompt("pantry meals"))
         verifier = RecipeVerifier()
         intent = {"constraints": {"ingredient_storage": "pantry_based"}}
         self.assertIn(INGREDIENT_STORAGE_RULES, verifier._build_batch_verification_prompt([], intent))
@@ -1222,9 +1752,9 @@ class GenerationAndVerificationTests(unittest.TestCase):
         analyzer.initialize(llm)
         result = analyzer.understand_query_intent_with_context(query, [{"role": "user", "content": query}])
         prompt = llm.predict.call_args.args[0]
-        self.assertIn('"flavor_profiles"', prompt)
-        self.assertIn('"constraints"', prompt)
-        self.assertIn('"resolved_query": ""', prompt)
+        self.assertIn("flavor_profiles", prompt)
+        self.assertIn("constraints:", prompt)
+        self.assertIn("resolved_query:", prompt)
         self.assertIn("Only user messages establish requirements", prompt)
         self.assertNotIn("Your existing intent prompt", prompt)
         self.assertEqual(result["preferences"]["flavor_profiles"], ["mild", "flavorful"])

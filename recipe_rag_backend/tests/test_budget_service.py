@@ -44,11 +44,37 @@ def recipe(name="Bean and Rice Bowl", generated=False):
 
 class BudgetTests(unittest.TestCase):
     def setUp(self):
+        legacy_route = patch("app.services.rag_service.settings.RECIPE_AI_COST_ESTIMATES", False)
+        legacy_route.start()
+        self.addCleanup(legacy_route.stop)
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.path = Path(self.directory.name) / "prices.json"
         self.path.write_text(json.dumps(CATALOG))
         self.service = BudgetService(self.path, today=lambda: TODAY, provider=IngredientPriceProvider(endpoint=""))
+
+    def test_budget_revision_is_search_and_preserves_cuisine_despite_model_misclassification(self):
+        analyzer = IntentAnalyzer()
+        model = Mock(predict=Mock(return_value=json.dumps({
+            "query_type": "recipe_adaptation", "context_action": "new_request",
+            "resolved_query": "Recipes under $20", "constraints": {},
+        })))
+        analyzer.initialize(model)
+        history = [
+            {"role": "user", "content": "Provide low-budget Mexican recipes for dinner under 15 dollars."},
+            {"role": "assistant", "content": "Here are Mexican dinner ideas."},
+            {"role": "user", "content": "can you increase teh budget to 20 dolalrs and give recipes"},
+            {"role": "assistant", "content": "Which recipe do you mean?", "context_action": "new_request"},
+        ]
+        result = analyzer.understand_query_intent_with_context(
+            "can you increase teh budegt to 20 dollras and give recipes", history
+        )
+        self.assertEqual(result["query_type"], "recipe_search")
+        self.assertEqual(result["context_action"], "continue_request")
+        self.assertEqual(result["budget_request"]["limit"], "20")
+        self.assertIn("mexican", result["preferences"]["cuisine_types"])
+        self.assertIn("dinner", result["preferences"]["meal_types"])
+        model.predict.assert_called_once()
 
     def intent(self, query="Show meals under $5 for the whole recipe", history=None):
         analyzer = IntentAnalyzer()
@@ -492,10 +518,8 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(candidate["servings"], 2)
         self.assertEqual(candidate["budget_assessment"]["status"], "estimated_within_budget")
         self.assertTrue(candidate["verification_details"]["passes_verification"])
-        prompt = model.predict.call_args.args[0]
-        self.assertIn('"requested_servings": 2', prompt)
-        self.assertNotIn('"estimate"', prompt)
-        self.assertIn("Missing prices are NOT missing recipe ingredients", prompt)
+        model.predict.assert_not_called()
+        self.assertEqual(candidate["verification_details"]["method"], "local_checks_only")
 
     def test_dollar_requests_return_cards_without_a_cost_basis_followup(self):
         for query in ["Can you help me to prepare a recipe for my dinner which is around 10 dollars",

@@ -26,6 +26,7 @@
 .env.production.local
 *.py[cod]
 *.sqlite3
+/recipe_rag_backend/app/data/verified_catalog.json
 *.log
 dist/
 

@@ -1,3 +1,6 @@
+from app.services.model_latency import predict_with_budget
+from contextvars import copy_context
+
 import logging
 from app.services.model_errors import raise_if_model_unavailable
 import json
@@ -52,7 +55,7 @@ class RecipeEnhancer:
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_index = {
-                executor.submit(self.enhance_single_recipe, recipe, intent_data, False): index
+                executor.submit(copy_context().run, self.enhance_single_recipe, recipe, intent_data, False): index
                 for index, recipe in recipes_needing_generation
             }
 
@@ -144,7 +147,7 @@ class RecipeEnhancer:
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_recipe = {
-                executor.submit(self.enhance_single_recipe, recipe, intent_data, True): recipe
+                executor.submit(copy_context().run, self.enhance_single_recipe, recipe, intent_data, True): recipe
                 for recipe in recipes_to_enhance
             }
             
@@ -269,7 +272,7 @@ Generate the recipe name, type, and all four sections. Be specific, nutrition-ap
 For this section-based format, put any estimated total time in COOKING_INSTRUCTIONS.
 """
 
-            response = self.llm.predict(combined_prompt)
+            response = predict_with_budget(self.llm, combined_prompt)
             
             generated_core_fields = False
             generated_guidance = False
@@ -424,10 +427,23 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
             preferences = intent_data.get("preferences", {})
             constraints = intent_data.get("constraints", {})
             timed_request = constraints.get("time_max_minutes") is not None and intent_data.get("query_type") != "recipe_adaptation"
-            focused_generation = (timed_request or intent_data.get("budget_request") or constraints.get("ingredient_storage") in {"canned_only", "frozen_only"}
+            focused_generation = (timed_request or constraints.get("requested_servings") is not None or intent_data.get("budget_request") or constraints.get("ingredient_storage") in {"canned_only", "frozen_only"}
                                   or constraints.get("digestive_comfort") == "gentle" or constraints.get("preparation_effort") == "low")
             recipe_count = "exactly ONE complete recipe" if focused_generation else "2-3 recipes"
             generation_limit = 1 if focused_generation else 3
+            budget_alternatives = bool(intent_data.get("budget_request") and intent_data.get("red_meat_alternatives")
+                                       and not intent_data.get("adaptation_request"))
+            if budget_alternatives:
+                generation_limit = 3
+            composed_dinner = intent_data.get("generation_recipe_count") == 3 and not intent_data.get("budget_request")
+            if intent_data.get("_timed_candidate_count") == 3:
+                generation_limit = 3
+                recipe_count = "exactly 3 distinct complete recipes for the requested meal"
+                explicit_timed_rule = "Choose simple methods comfortably below the total time limit, including setup and waiting. Do not shorten safe cooking."
+                query = f"{query}\n{explicit_timed_rule}"
+            if composed_dinner:
+                generation_limit = max(1, min(3, int(intent_data.get("_generation_slots", 3))))
+                recipe_count = f"exactly {generation_limit} distinct complete dinner recipe(s)"
             if intent_data.get("query_type") == "recipe_adaptation":
                 generation_limit = min(len(grounding_recipes or []), 3)
                 if not generation_limit:
@@ -532,6 +548,7 @@ OUTPUT FORMAT (valid JSON only):
         "type": "Main Dish|Side Dish|Soup|Smoothie|Breakfast|Snack",
         "calories": 420,
         "protein_grams": 24,
+        "servings": {constraints.get("requested_servings") or 2},
         "total_time": "Total elapsed time with units, or empty if not established",
         "ingredients": [
             "1 cup ingredient one",
@@ -546,6 +563,8 @@ OUTPUT FORMAT (valid JSON only):
         "description": "Why this recipe meets user needs and AICR guidelines",
         "nutrition_benefits": "Specific benefits (high protein 25g, easy to digest, nourishing)",
         "storage_instructions": "Storage guidance consistent with the request, including a cold-serving option for no-heat requests",
+        "helpful_tips": ["One short, practical tip specific to this dish"],
+        "ingredient_adaptations": ["One optional compatible substitution, including quantity and any changed step"],
         "generated_by_llm": true,
         "meets_requirements": true
     }}
@@ -553,6 +572,8 @@ OUTPUT FORMAT (valid JSON only):
 
 Return only the JSON array. Use JSON numbers for calories and protein_grams, with no comments, placeholders, or markdown fences.
 Generate practical, safe, nutrition-optimized recipes that meet ALL constraints and AICR guidelines.
+Optional tips and adaptations must preserve every restriction, including allergens, time, ingredient forms,
+and equipment. Never replace a required ingredient or shorten a safety step. Use [] if no suitable option exists.
 {time_limit_generation_guidance(constraints)}
 {"Return exactly ONE complete recipe to keep its timing and instructions complete within the output budget." if timed_request else ""}
 {chr(10).join(explicit_rules) if constraints.get('ingredient_storage') in {'canned_only', 'frozen_only'} else ''}
@@ -578,7 +599,9 @@ Keep sequential step durations within total_time and use safe cooking endpoints,
 Return only a valid JSON array with one object containing:
 name, type, ingredients (quantified strings), instructions (complete strings with durations),
 total_time (e.g. '20 minutes', numeric units), calories and protein_grams (numeric estimates),
-description, nutrition_benefits, storage_instructions. Do not include extra tips or variations.
+description, nutrition_benefits, storage_instructions, helpful_tips, ingredient_adaptations.
+Use at most one short tip and one substitution with quantities and changed steps. Each option must meet
+the same total time, safety and other restrictions. Use [] when no compatible option exists.
 The finished recipe undergoes independent timing, user-requirement, and guideline verification.
 """
 
@@ -587,6 +610,8 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
                 if recipe.get("generated_by_llm") and recipe.get("ingredients") and recipe.get("instructions")
                 and not recipe.get("verification_details", {}).get("passes_verification")
             ), None)
+            if composed_dinner:
+                repair_target = None
             if repair_target:
                 generation_prompt = self._build_repair_prompt(query, intent_data, repair_target, aicr_context)
             if intent_data.get("adaptation_request"):
@@ -597,9 +622,21 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
                     generation_prompt if intent_data.get("adaptation_request") else "",
                 )
 
-            response = self.llm.predict(generation_prompt, **(
-                {"response_format": budget_recipe_response_format(intent_data.get("budget_price_options"))}
-                if intent_data.get("budget_request") else {}
+            if (servings := constraints.get("requested_servings")) is not None:
+                generation_prompt += (
+                    f"\nEach recipe must yield exactly {servings} realistic portions. Include integer servings: {servings} "
+                    "and ingredient quantities and cooking directions sized for that yield. Do not just relabel a smaller batch."
+                )
+            embedded_review = bool(intent_data.get("budget_request") and not intent_data.get("adaptation_request")
+                                   and not repair_target)
+            generation_prompt += (
+                "\nThriveWell policy for generated recipes: do not use red or processed meat, including broths "
+                "and optional substitutions. Use an alternative protein compatible with the request."
+            )
+            response = predict_with_budget(self.llm, generation_prompt, **(
+                {"response_format": budget_recipe_response_format(intent_data.get("budget_price_options")),
+                 **({"max_tokens": 3600} if budget_alternatives and not repair_target else {})}
+                if intent_data.get("budget_request") else {"max_tokens": 3600} if composed_dinner else {}
             ))
             
             # STEP 4: Parse Response
@@ -616,6 +653,12 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
             formatted_recipes = []
             for i, recipe in enumerate(generated_recipes[:1 if repair_target else generation_limit]):
                 storage_instructions = str(recipe.get("storage_instructions", "")).strip()
+                guidance = {}
+                for field in ("helpful_tips", "ingredient_adaptations"):
+                    entries = recipe.get(field)
+                    if isinstance(entries, list):
+                        guidance[field] = [entry.strip() for entry in entries
+                                           if isinstance(entry, str) and entry.strip()][:1]
                 
                 # Validate against AICR guidelines
                 aicr_compliance = self.aicr_service.validate_recipe_compliance(recipe)
@@ -625,7 +668,7 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
                     "type": recipe.get("type", "CUSTOM"),
                     "calories": recipe.get("calories", 0),
                     "protein_grams": recipe.get("protein_grams", 0),
-                    **({"servings": recipe.get("servings")} if intent_data.get("budget_request") else {}),
+                    **({"servings": recipe.get("servings")} if intent_data.get("budget_request") or constraints.get("requested_servings") is not None else {}),
                     "ingredients": recipe.get("ingredients", []),
                     "instructions": recipe.get("instructions", []),
                     "description": recipe.get("description", "Custom generated recipe for optimal nutrition"),
@@ -633,8 +676,10 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
                     "nutrition_benefits": recipe.get("nutrition_benefits", ""),
                     "storage_instructions": storage_instructions,
                     "storage_evidence": storage_instructions,
+                    **guidance,
                     "aicr_compliance": aicr_compliance,
                     "generated_by_llm": True,
+                    **({"_local_generation_checks": True} if embedded_review else {}),
                     **self._generation_metadata(grounding_recipes),
                     "meets_requirements": aicr_compliance["overall_compliant"],
                     "verification_details": {
@@ -690,7 +735,7 @@ Return only JSON with an instructions array of complete replacement steps.
             "schema": {"type": "object", "properties": {"instructions": {"type": "array", "items": {"type": "string"}}},
                        "required": ["instructions"], "additionalProperties": False}}}
         try:
-            payload = json.loads(self.llm.predict(prompt, response_format=response_format))
+            payload = json.loads(predict_with_budget(self.llm, prompt, response_format=response_format))
             instructions = payload.get("instructions") if isinstance(payload, dict) else None
             if (not isinstance(instructions, list) or not instructions
                     or not all(isinstance(step, str) and step.strip() for step in instructions)
@@ -771,7 +816,9 @@ Return only JSON.
 """
 
     def _build_budget_generation_prompt(self, query, intent_data, guidelines, grounding_recipes, failed_recipes, adaptation_prompt=""):
-        count = min(3, len(grounding_recipes or [])) if adaptation_prompt else 1
+        count = min(3, len(grounding_recipes or [])) if adaptation_prompt else (
+            3 if intent_data.get("red_meat_alternatives") else 1
+        )
         options = intent_data.get("budget_price_options", [])
         requirements = {key: value for key, value in intent_data.items() if key not in {"budget_price_options", "budget_previous_recipes"}}
         failures = [{"name": recipe.get("name"), "ingredients": recipe.get("ingredients"),
@@ -1040,7 +1087,7 @@ The output will undergo the same independent verification as every other recipe.
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_recipe = {
-                executor.submit(self.enhance_single_recipe, recipe, intent_data): recipe
+                executor.submit(copy_context().run, self.enhance_single_recipe, recipe, intent_data): recipe
                 for recipe in recipes
             }
             

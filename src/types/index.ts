@@ -36,6 +36,8 @@ export interface Recipe {
   dynamicallyAdapted?: boolean;
   cookTime?: string;
   servings?: number;
+  aiCostEstimate?: { low: number; high: number; currency: string; basis: string;
+    line_items?: Array<{ ingredient: string; low: number; high: number }> };
   budgetAssessment?: {
     status: 'estimated_within_budget' | 'uncertain' | 'over_budget';
     currency: string;

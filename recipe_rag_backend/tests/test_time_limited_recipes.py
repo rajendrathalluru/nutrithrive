@@ -3,7 +3,7 @@ import json
 import unittest
 from guideline_fixtures import passing_guideline_checks
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from app.services.aicr_guidelines_service import aicr_service
 from app.services.data_loader import DataLoader
@@ -350,6 +350,7 @@ HELPFUL_TIPS:
         self.assertIn("Unsafe storage advice", service.recipe_enhancer.llm.predict.call_args.args[0])
         self.assertEqual(result["source_documents"][0]["verification_details"]["guideline_checks"]["food_safety"]["status"], "pass")
 
+    @patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", False)
     def test_pipeline_repairs_excluded_boundary_using_database_context(self):
         loader = DataLoader()
         loader.load_data(Path(__file__).parents[1] / "app/data/Recipe.csv")
@@ -385,7 +386,7 @@ HELPFUL_TIPS:
     def test_no_results_explains_verification_instead_of_blame_on_phrasing(self):
         response = ResponseGenerator().generate_helpful_no_results_message(QUERIES[0], self.intent())
         self.assertIn("less than 5 minutes", response)
-        self.assertIn("Your request is clear", response)
+        self.assertIn("assembly-only option within the same limit", response)
         self.assertNotIn("rephras", response)
 
 

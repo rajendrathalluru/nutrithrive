@@ -67,7 +67,7 @@ def _simplification_requested(query: str) -> bool:
 TEXTURE = re.compile(r"\b(?:soft(?:er)?|smooth(?:er)?|creamy|creamier|crunchy|crunchier|crispy|crispier|"
                      r"firm(?:er)?|thick(?:er)?|thin(?:ner)?|coars(?:e|er)|chewy|chewier|puree(?:d)?|purée(?:d)?)\b", re.I)
 MORE_RECIPES = re.compile(
-    r"\b(?:more|another|other|similar) (?:recipes?|meals?|options?)\b|"
+    r"\b(?:more|another|other|similar|extra|additional) (?:recipes?|meals?|options?)\b|"
     r"\bshow (?:me )?(?:more|others?)[.!?]*$|"
     r"^what else(?:[.!?]*$| can (?:i|we) (?:make|cook|prepare|eat)\b)", re.I,
 )

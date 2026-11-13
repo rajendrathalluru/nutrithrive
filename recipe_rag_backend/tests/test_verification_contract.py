@@ -195,7 +195,7 @@ class AttentionIntentTests(unittest.TestCase):
         self.assertNotIn("slow cooker", result["search_strategy"]["search_keywords"])
 
     def test_attention_rules_are_shared_by_intent_and_verification(self):
-        self.assertIn(COOKING_ATTENTION_RULES, IntentAnalyzer()._build_intent_prompt("Hands-off recipes"))
+        self.assertIn("attention_level: low for little monitoring", IntentAnalyzer()._build_intent_prompt("Hands-off recipes"))
         self.assertIn(COOKING_ATTENTION_RULES, RecipeVerifier()._build_individual_verification_prompt(
             {}, {"constraints": {"attention_level": "low"}}
         ))

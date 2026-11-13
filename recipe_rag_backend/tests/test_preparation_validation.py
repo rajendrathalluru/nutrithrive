@@ -197,7 +197,7 @@ class PreparationValidationTests(unittest.TestCase):
         intent = {"constraints": {"preparation_mode": "no_heat"}}
         self.assertIn(PREPARATION_RULES, verifier._build_batch_verification_prompt([], intent))
         self.assertIn(PREPARATION_RULES, verifier._build_individual_verification_prompt({}, intent))
-        self.assertIn(PREPARATION_RULES, IntentAnalyzer()._build_intent_prompt("no heat"))
+        self.assertIn("preparation_mode: no_heat or assembly_only", IntentAnalyzer()._build_intent_prompt("no heat"))
 
     def routing_service(self, candidates):
         constraints = {"preparation_mode": "no_heat"}

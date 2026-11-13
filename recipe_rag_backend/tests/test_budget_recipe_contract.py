@@ -26,6 +26,7 @@ class BudgetRecipeContractTests(unittest.TestCase):
         enhancer.initialize(model, aicr_service)
         result = enhancer.generate_fallback_recipes("Mexican meal under $10", self.fixture.intent(), [])
         self.assertEqual(model.predict.call_args.kwargs["response_format"], budget_recipe_response_format())
+        self.assertTrue(result[0]["_local_generation_checks"])
         self.assertEqual(result[0]["ingredients"], ["100 g dry rice", "425 g canned beans"])
         self.assertEqual(result[0]["servings"], 2)
         self.assertTrue(result[0]["generated_by_llm"])

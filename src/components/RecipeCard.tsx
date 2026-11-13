@@ -115,6 +115,25 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
         )}
 
         {/* Expand/Collapse Button */}
+        {recipe.aiCostEstimate && (
+          <section className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm" aria-label="AI cost estimate">
+            <strong>Rough AI cost estimate</strong>
+            <p>{recipe.aiCostEstimate.currency} {recipe.aiCostEstimate.low.toFixed(2)}–{recipe.aiCostEstimate.high.toFixed(2)} · {
+              recipe.aiCostEstimate.basis === 'per_serving' ? 'per serving' :
+                recipe.aiCostEstimate.basis === 'shopping' ? 'grocery purchases' : 'whole recipe'}</p>
+            <p className="text-xs">Not checked against store prices. Actual costs may differ.</p>
+            {!!recipe.aiCostEstimate.line_items?.length && (
+              <details className="mt-2">
+                <summary className="cursor-pointer">Estimated ingredient costs</summary>
+                <ul className="mt-2 space-y-1">
+                  {recipe.aiCostEstimate.line_items.map((item, index) => (
+                    <li key={index}>{item.ingredient}: {recipe.aiCostEstimate?.currency} {item.low.toFixed(2)}–{item.high.toFixed(2)}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </section>
+        )}
         {recipe.budgetAssessment && (
           <section className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700" aria-label="Budget estimate">
             <strong>{recipe.budgetAssessment.status === 'estimated_within_budget' ? 'Estimated within budget' : 'Budget not confirmed'}</strong>
@@ -151,6 +170,9 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
         {expanded && (
           <div className="mt-5 pt-5 border-t border-slate-200 space-y-4">
             {/* Helpful Tips */}
+            {!helpfulTips.length && (
+              <p className="mb-3 text-sm"><strong>Preparation tip:</strong> Read through the steps and measure the ingredients before you start.</p>
+            )}
             {helpfulTips.length > 0 && (
               <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
                 <h4 className="font-medium text-slate-900 mb-2 flex items-center gap-2">
@@ -248,6 +270,9 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
             )}
             
             {/* Ingredient Adaptations */}
+            {!ingredientAdaptations.length && (
+              <p className="text-sm"><strong>Portion option:</strong> For a smaller serving, prepare the recipe as written and serve a smaller portion. Keep the cooking steps unchanged.</p>
+            )}
             {ingredientAdaptations.length > 0 && (
               <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
                 <h4 className="font-medium text-emerald-900 mb-2 flex items-center gap-2">

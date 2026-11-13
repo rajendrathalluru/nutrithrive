@@ -83,6 +83,16 @@ class FrozenRecipeGenerationTests(unittest.TestCase):
             self.assertNotIn(FROZEN_INGREDIENT_RULES, rules)
         self.assertIn(PREPARATION_RULES, active_recipe_rules({"constraints": {"time_max_minutes": 0}}))
 
+    def test_generated_recipe_keeps_tips_and_adaptations_for_review(self):
+        recipe = frozen_bowl()
+        recipe["helpful_tips"] = ["  Open the steam bags away from your face.  ", None]
+        recipe["ingredient_adaptations"] = ["Use 1 cup frozen peas instead of the frozen vegetable mix; follow package directions."]
+        enhancer = RecipeEnhancer()
+        enhancer.initialize(Mock(predict=Mock(return_value=json.dumps([recipe]))), aicr_service)
+        generated = enhancer.generate_fallback_recipes(QUERY, self.intent, [])[0]
+        self.assertEqual(generated["helpful_tips"], ["Open the steam bags away from your face."])
+        self.assertEqual(generated["ingredient_adaptations"], recipe["ingredient_adaptations"])
+
     def test_frozen_rules_reach_generation_enhancement_repair_and_verification(self):
         model = Mock(predict=Mock(return_value=json.dumps([frozen_bowl(), frozen_bowl()])))
         enhancer = RecipeEnhancer()

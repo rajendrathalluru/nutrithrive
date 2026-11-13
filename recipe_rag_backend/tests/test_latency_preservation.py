@@ -118,12 +118,13 @@ class BudgetLatencyTests(unittest.TestCase):
         queries = [self.query, "Mexican dinner", "Mexican"]
         self.store.similarity_search_by_vector.side_effect = lambda vector, k: matches[int(vector[0]) - 1]
         self.store.similarity_search.side_effect = lambda query, k: matches[queries.index(query)]
-        batched = self.engine.multi_query_search(self.query, self.intent, 8)
+        intent = {key: value for key, value in self.intent.items() if key != "budget_request"}
+        batched = self.engine.multi_query_search(self.query, intent, 8)
         self.embeddings.embed_documents.assert_called_once_with(queries)
         self.store.similarity_search.assert_not_called()
         self.assertEqual(self.store.similarity_search_by_vector.call_count, 3)
-        baseline = self.engine.multi_query_search(self.query, {key: value for key, value in self.intent.items()
-                                                               if key != "budget_request"}, 8)
+        with patch.object(self.engine, "embeddings", None):
+            baseline = self.engine.multi_query_search(self.query, intent, 8)
         self.assertEqual(batched, baseline)
         self.assertEqual(batched, [first, second, third])
         self.assertEqual(self.embeddings.embed_documents.call_count, 1)
@@ -169,6 +170,64 @@ class VerificationLatencyTests(unittest.TestCase):
             self.assertEqual(finalize.call_count, 2)
             self.assertEqual(self.guidelines.validate_recipe_compliance.call_count, 2)
             self.assertTrue(expected[0]["verification_details"]["passes_verification"])
+
+    def test_assessment_reused_when_batch_membership_changes(self):
+        second = {**self.recipe, "name": "Another Bowl"}
+        self.verify([self.recipe, second])
+        calls = self.model.predict.call_count
+        self.verify([second])
+        self.assertEqual(self.model.predict.call_count, calls)
+
+    def test_generated_review_keeps_pass_when_other_candidate_times_out(self):
+        from openai.error import Timeout
+
+        def review(prompt):
+            if "Slow Candidate" in prompt:
+                raise Timeout("Simulated review timeout")
+            return self.response(prompt)
+
+        self.model.predict.side_effect = review
+        self.intent["_independent_final_review"] = True
+        recipes = [self.recipe, {**self.recipe, "name": "Slow Candidate"}]
+        with patch("app.services.recipe_verifier.settings.RECIPE_IO_WORKERS", 2):
+            result = self.verify(recipes)
+        self.assertEqual([recipe["name"] for recipe in result], [self.recipe["name"]])
+        self.assertTrue(result[0]["verification_details"]["passes_verification"])
+        self.assertEqual(self.model.predict.call_count, 2)
+
+    def test_shared_fit_reviews_four_candidates_in_one_call(self):
+        self.intent["_shared_fit_batch"] = True
+        recipes = [{**self.recipe, "name": f"Meal {index}"} for index in range(4)]
+        result = self.verify(recipes)
+        self.assertEqual(len(result), 4)
+        self.assertTrue(all(recipe["verification_details"]["passes_verification"] for recipe in result))
+        self.assertEqual(self.model.predict.call_count, 1)
+
+    def test_shared_fit_malformed_response_does_not_retry_each_recipe(self):
+        self.intent["_shared_fit_batch"] = True
+        self.model.predict.side_effect = None
+        self.model.predict.return_value = "invalid json"
+        self.assertEqual(self.verify(), [])
+        self.assertEqual(self.model.predict.call_count, 1)
+
+    def test_complete_negative_assessment_is_reused_without_retry(self):
+        def rejected(prompt):
+            results = json.loads(self.response(prompt))
+            for result in results:
+                result["relevance"] = "unrelated"
+                result["constraint_checks"]["recipe_request"] = {"status": "fail", "evidence": "Different requested dish"}
+            return json.dumps(results)
+        self.model.predict.side_effect = rejected
+        self.assertFalse(self.verify()[0]["verification_details"]["passes_verification"])
+        self.assertFalse(self.verify()[0]["verification_details"]["passes_verification"])
+        self.assertEqual(self.model.predict.call_count, 1)
+
+    def test_scheduling_flag_does_not_invalidate_identical_assessment(self):
+        expected = self.verify()
+        self.intent["_parallel_catalog_verification"] = True
+        self.assertEqual(self.verify(), expected)
+        self.assertEqual(self.model.predict.call_count, 1)
+        self.assertEqual(self.guidelines.validate_recipe_compliance.call_count, 2)
 
     def test_changed_recipe_intent_and_guideline_policy_require_new_model_assessments(self):
         self.verify()
