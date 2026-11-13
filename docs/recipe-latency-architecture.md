@@ -2,9 +2,10 @@
 
 ## Bounded final-review window
 
-The ordinary model deadline remains 25 seconds by default. Once fallback generation has produced
-candidates, final verification may use a window of up to `RECIPE_FINAL_REVIEW_SECONDS` (default 12),
-bounded by the original deadline plus that setting. The absolute model-work cap is therefore 37 seconds
+The ordinary model deadline is 45 seconds by default, with a 30-second cap per model call.
+Once fallback generation has produced candidates, final verification may use a window of up to
+`RECIPE_FINAL_REVIEW_SECONDS` (default 20), bounded by the original deadline plus that setting.
+The absolute model-work deadline is therefore 65 seconds
 by default, not an end-to-end SLA. Repeated reviews cannot keep extending this limit. No extra window
 is granted outside the request lifecycle, and ordinary generation/retrieval deadlines are unchanged.
 Set the value to zero to disable the extension. This trades a bounded longer wait for fewer discarded
@@ -40,7 +41,7 @@ retrieved candidates. The existing requirement-evidence contract handles both ha
 and relevance; this is not a vector-similarity percentage. Every required check must pass.
 Missing, unknown, malformed, or conflicting assessments are not accepted.
 
-The shared round has a six-second model deadline (or the remaining request deadline if shorter).
+The shared round uses `RECIPE_CATALOG_REVIEW_SECONDS` (default 12 seconds), capped by the remaining request deadline.
 It does not repair missing assessments through extra model calls, retry malformed output per
 candidate, or scan another database batch after failure. The outer request deadline is restored
 before bounded generation, whose safety checks remain in place. Partial accepted results can

@@ -1291,7 +1291,7 @@ class RecipeRAGService:
                 logger.info("No established local match; routing directly to verified generation")
             elif shared_fit_route:
                 deadline = model_deadline.get()
-                fit_deadline = time.monotonic() + 6
+                fit_deadline = time.monotonic() + settings.RECIPE_CATALOG_REVIEW_SECONDS
                 token = model_deadline.set(min(deadline, fit_deadline) if deadline is not None else fit_deadline)
                 try:
                     candidate_recipes = self._verify_candidates(

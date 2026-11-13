@@ -41,10 +41,11 @@ class Settings:
     LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.5
     LLM_MAX_TOKENS: int = 1500
-    LLM_REQUEST_TIMEOUT_SECONDS: float = max(1.0, float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "20")))
+    LLM_REQUEST_TIMEOUT_SECONDS: float = max(1.0, float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "30")))
     LLM_MAX_RETRIES: int = max(0, min(2, int(os.getenv("LLM_MAX_RETRIES", "0"))))
-    RECIPE_MODEL_BUDGET_SECONDS: float = max(1.0, float(os.getenv("RECIPE_MODEL_BUDGET_SECONDS", "25")))
-    RECIPE_FINAL_REVIEW_SECONDS: float = max(0.0, min(20.0, float(os.getenv("RECIPE_FINAL_REVIEW_SECONDS", "12"))))
+    RECIPE_MODEL_BUDGET_SECONDS: float = max(1.0, float(os.getenv("RECIPE_MODEL_BUDGET_SECONDS", "45")))
+    RECIPE_FINAL_REVIEW_SECONDS: float = max(0.0, min(20.0, float(os.getenv("RECIPE_FINAL_REVIEW_SECONDS", "20"))))
+    RECIPE_CATALOG_REVIEW_SECONDS: float = max(1.0, float(os.getenv("RECIPE_CATALOG_REVIEW_SECONDS", "12")))
     RECIPE_IO_WORKERS: int = max(1, min(3, int(os.getenv("RECIPE_IO_WORKERS", "3"))))
     RECIPE_OPTIONAL_ENHANCEMENT: bool = environment_flag("RECIPE_OPTIONAL_ENHANCEMENT", "false")
     RECIPE_RUNTIME_EVIDENCE: bool = environment_flag("RECIPE_RUNTIME_EVIDENCE", "true")
