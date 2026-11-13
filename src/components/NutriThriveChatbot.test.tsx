@@ -217,6 +217,17 @@ test('keeps search analysis available in a disclosure', async () => {
   expect(screen.getByText('Microwave-only recipes prioritized')).toBeVisible();
 });
 
+test('shows an alternatives offer without requiring search analysis fields', async () => {
+  const offer = 'Would you like me to generate alternatives using beans or tofu?';
+  searchRecipes.mockResolvedValue({ recipes: [], backendData: {
+    source: 'recipe_follow_up', response: offer, intent_analysis: {},
+  } });
+  await readyChat();
+  send('Suggest dinner recipes using beef');
+  expect(await screen.findByText(offer)).toBeVisible();
+  expect(screen.queryByText('Search Analysis')).not.toBeInTheDocument();
+});
+
 test('food guidance shows conversational examples without recipe cards or search analysis', async () => {
   const guidance = 'Porridge and soups can be enjoyed comfortably warm. Would you like recipes?';
   searchRecipes.mockResolvedValue({ recipes: [], backendData: {

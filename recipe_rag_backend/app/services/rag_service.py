@@ -62,7 +62,8 @@ def _requests_red_meat(query: str) -> bool:
         + RED_MEAT_TERMS.pattern + r"(?:\s*(?:,|and\b|or\b)\s*" + RED_MEAT_TERMS.pattern + r")*",
         "", query, flags=re.I,
     )
-    return bool(RED_MEAT_TERMS.search(positive) and re.search(r"\b(?:recipes?|cook|prepare|meals?)\b", query, re.I))
+    return bool(RED_MEAT_TERMS.search(positive)
+                and re.search(r"\b(?:recipes?|cook|prepare|meals?|dinner|lunch|breakfast)\b", query, re.I))
 
 
 def _generated_red_meat_conflict(recipe):
@@ -76,6 +77,11 @@ RED_MEAT_ALTERNATIVE_NOTE = (
     "Thrivewell offers alternatives to red and processed meat. Beef and pork are red meat. "
     "AICR recommends limiting red meat and eating little, if any, processed meat for cancer prevention. "
     "Beans, lentils, tofu, fish, or unprocessed poultry can be alternatives, depending on your dietary needs."
+)
+RED_MEAT_ALTERNATIVE_OFFER = (
+    RED_MEAT_ALTERNATIVE_NOTE
+    + "\n\nWould you like me to generate alternatives that keep your other requirements? "
+    "Reply “yes,” or choose beans, lentils, tofu, fish, or poultry."
 )
 
 class RecipeRAGService:
@@ -858,6 +864,23 @@ class RecipeRAGService:
             if self._contains_phi_like_content(query, conversation_history):
                 logger.info("Detected PHI-like content, returning privacy redirect response")
                 return self._build_phi_redirect_response(query, mode, conversation_history)
+            alternative_choice = re.fullmatch(
+                r"\s*(?:yes[, ]+|(?:i(?:['’]d like| prefer)|(?:please )?use|let['’]s go with)\s+)?"
+                r"(yes(?:,? please)?|beans|lentils|tofu|fish|poultry)"
+                r"(?:\s+(?:(?:would be|is|sounds)\s+(?:ok(?:ay)?|good|fine|great)(?:\s+for me)?"
+                r"|works(?:\s+for me)?|please))?[.!]?\s*", query, re.I
+            )
+            confirmed_alternatives = bool(
+                alternative_choice and len(conversation_history) >= 2
+                and conversation_history[-1].get("role") == "assistant"
+                and conversation_history[-1].get("content") == RED_MEAT_ALTERNATIVE_OFFER
+                and conversation_history[-2].get("role") == "user"
+            )
+            if confirmed_alternatives:
+                choice = alternative_choice[1].lower()
+                query = str(conversation_history[-2]["content"])
+                if not choice.startswith("yes"):
+                    query += f" Use {choice} as the alternative protein."
             if re.search(
                 r"\b(?:i\s+(?:have|have got|am having|am running)|i['’]m\s+(?:having|running)|my child has)"
                 r"\s+(?:a\s+)?(?:high\s+)?fever\b", query, re.I
@@ -893,7 +916,7 @@ class RecipeRAGService:
             ))
             recipe_follow_up = resolve_recipe_follow_up(query, recipe_history) is not None
             catalog_recipe_name = matching_recipe_title(query, self.data_loader.recipe_lookup)
-            if (not is_budget_clarification_reply(query, recipe_history)
+            if (not confirmed_alternatives and not is_budget_clarification_reply(query, recipe_history)
                     and self._is_small_talk_query(query, allow_heuristic=not conversation_recipes)
                     and not references_previous_recipe and not recipe_follow_up and not catalog_recipe_name):
                 logger.info("Detected small-talk query, returning conversational response")
@@ -921,6 +944,9 @@ class RecipeRAGService:
             report_progress("understanding")
             meat_request = recipe_request_query
             redirect_red_meat = _requests_red_meat(meat_request)
+            redirect_red_meat = redirect_red_meat or confirmed_alternatives
+            if redirect_red_meat and not confirmed_alternatives and not (is_more_request and conversation_recipes):
+                return self._build_context_reply(query, mode, {}, RED_MEAT_ALTERNATIVE_OFFER)
             intent_query = query
             if redirect_red_meat:
                 intent_query = (
@@ -954,6 +980,14 @@ class RecipeRAGService:
                 )
             if intent_data is None:
                 intent_data = self.intent_analyzer.understand_query_intent_with_context(intent_query, intent_history)
+            required_foods = intent_data.get("constraints", {}).get("ingredients_must_use") or []
+            if (not redirect_red_meat and intent_data.get("query_type") == "recipe_search"
+                    and isinstance(required_foods, list)
+                    and any(RED_MEAT_TERMS.search(str(food)) for food in required_foods)):
+                redirect_red_meat = True
+                combined_candidates = []
+                intent_query = RED_MEAT_TERMS.sub("alternative protein", intent_data.get("resolved_query") or query)
+                intent_query += "\nUse suitable alternatives without red or processed meat. Preserve all other requirements."
             if (not is_more_request and previous_recipe_request and intent_data.get("context_action") == "continue_request"
                     and intent_data.get("query_type") == "recipe_search" and intent_data.get("more_recipes") is True):
                 is_more_request = True
@@ -964,8 +998,26 @@ class RecipeRAGService:
                         "\nGenerate distinct alternatives without red or processed meat. Preserve the original budget and requirements."
                     )
             if redirect_red_meat:
+                if not confirmed_alternatives and not (is_more_request and conversation_recipes):
+                    return self._build_context_reply(query, mode, {}, RED_MEAT_ALTERNATIVE_OFFER)
                 intent_data["red_meat_alternatives"] = True
                 intent_data.setdefault("constraints", {})["avoid_red_meat"] = True
+                for field in ("ingredients_must_use", "ingredients_available"):
+                    foods = intent_data["constraints"].get(field)
+                    if isinstance(foods, list):
+                        intent_data["constraints"][field] = [
+                            food for food in foods if not RED_MEAT_TERMS.search(str(food))
+                        ]
+                if confirmed_alternatives and not choice.startswith("yes"):
+                    required = intent_data["constraints"].get("ingredients_must_use") or []
+                    if isinstance(required, list) and choice not in required:
+                        intent_data["constraints"]["ingredients_must_use"] = [*required, choice]
+                strategy = intent_data.setdefault("search_strategy", {})
+                if isinstance(strategy.get("must_match_criteria"), list):
+                    strategy["must_match_criteria"] = [
+                        RED_MEAT_TERMS.sub("alternative protein", criterion)
+                        for criterion in strategy["must_match_criteria"] if isinstance(criterion, str)
+                    ]
                 intent_data["user_request_context"] = [intent_query]
                 intent_data["resolved_query"] = intent_query
             if intent_data.get("context_resolution_failed"):
@@ -1019,6 +1071,8 @@ class RecipeRAGService:
                     and not any(intent_data.get("cancer_patient_specific", {}).values())):
                 single_pass_dinner = True
                 intent_data.update(generation_recipe_count=3, generation_mode="single_pass")
+                if confirmed_alternatives:
+                    intent_data["_confirmed_alternative_count"] = 1
                 intent_data["exclude_dish_names"] = sorted(excluded_names)[:20]
                 report_progress("generating")
                 combined_candidates = generate_once(self.llm or self.intent_analyzer.llm, intent_query,
@@ -1429,7 +1483,7 @@ class RecipeRAGService:
             response_text = self.response_generator.generate_personalized_response(effective_query, source_docs, intent_data)
             if redirect_red_meat:
                 shortage = (f" I could {'return' if single_pass_dinner else 'verify'} {len(source_docs)} of the three alternatives."
-                            if len(source_docs) < MAX_RECIPES_PER_RESPONSE else "")
+                            if len(source_docs) < MAX_RECIPES_PER_RESPONSE and not confirmed_alternatives else "")
                 response_text = f"{RED_MEAT_ALTERNATIVE_NOTE}{shortage}\n\n{response_text}"
             
             total_time = time.time() - start_time

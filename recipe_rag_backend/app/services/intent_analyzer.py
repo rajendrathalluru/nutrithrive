@@ -173,6 +173,10 @@ Pay special attention to:
   Use recipe_search with the active requirements, not another edit of the selected recipe or an intervening
   question such as "can I freeze it?". Do not select recipe IDs or resume a pending clarification.
 - Preserve flavor requests such as mild but flavorful in preferences.flavor_profiles.
+- When the user asks for a companion dish, such as a dessert to pair with earlier dinners, search for
+  the NEW course. Use the earlier dishes as pairing context, not as required dishes or ingredients.
+  Preserve applicable dietary restrictions and servings, but do not carry over a dinner-only meal type
+  or require a protein selected specifically for the dinner.
 - Resolve pronouns and ordinal references ("it", "those", "the second one") against recipes shown in this chat.
 - Return resolved_query as a self-contained request incorporating active user constraints and the latest changes.
   Replace pronouns with the actual selected foods; do not copy the unresolved template query unchanged.
@@ -508,11 +512,30 @@ Do not narrow a broad request for meals to breakfast or snacks unless the user a
         parsed = json.loads(response)
         if not isinstance(parsed, dict):
             raise ValueError("Intent must be a JSON object")
+        defaults = self._get_fallback_intent_data("")
+        repaired_shape = False
+        for field in ("query_type", "context_action", "recipe_action", "resolved_query", "normalized_request"):
+            if field in parsed and not isinstance(parsed[field], str):
+                parsed.pop(field)
+                repaired_shape = True
         for section in ("constraints", "preferences", "cancer_patient_specific", "search_strategy"):
             supplied = parsed.get(section, {})
             if not isinstance(supplied, dict):
                 raise ValueError(f"Invalid intent section: {section}")
-            parsed[section] = {**self._get_fallback_intent_data("")[section], **supplied}
+            normalized = dict(supplied)
+            for field, default in defaults[section].items():
+                value = normalized.get(field)
+                if isinstance(default, list):
+                    values = value if isinstance(value, list) else [value]
+                    normalized[field] = [item.strip() for item in values if isinstance(item, str) and item.strip()]
+                elif isinstance(value, list) and len(value) == 1 and isinstance(value[0], (str, int, float)):
+                    normalized[field] = value[0]
+                elif isinstance(value, (list, dict)):
+                    normalized[field] = default
+            parsed[section] = {**defaults[section], **normalized}
+            repaired_shape = repaired_shape or any(normalized.get(field) != value for field, value in supplied.items())
+        if repaired_shape and isinstance(parsed.get("requirement_coverage"), dict):
+            parsed["requirement_coverage"]["complete"] = False
         return parsed
     
     def _normalize_query(self, query: str) -> str:

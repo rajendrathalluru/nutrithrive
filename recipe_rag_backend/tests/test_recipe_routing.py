@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from app.services.aicr_guidelines_service import aicr_service
-from app.services.rag_service import RecipeRAGService
+from app.services.rag_service import RecipeRAGService, RED_MEAT_ALTERNATIVE_OFFER
 from app.services.recipe_enhancer import RecipeEnhancer
 from app.services.recipe_verifier import RecipeVerifier
 from app.services.intent_analyzer import IntentAnalyzer
@@ -335,18 +335,31 @@ class RecipeRoutingTests(unittest.TestCase):
                 self.service.recipe_verifier.batch_verify_recipes.assert_called_once()
 
     def test_red_meat_alternatives_use_single_pass_and_filter_generated_conflicts(self):
-        self.service.intent_analyzer.understand_query_intent_with_context.return_value["query_type"] = "recipe_search"
+        intent = self.service.intent_analyzer.understand_query_intent_with_context.return_value
+        intent.update(query_type="recipe_search", constraints={"ingredients_must_use": ["beef", "pork", "spinach"]})
         candidates = [
             {**recipe_record(name, generated=True),
              "verification_details": {"passes_verification": True, "relevance": "match"}}
             for name in ("Beef Dinner", "Lentil Dinner")
         ]
         with patch("app.services.rag_service.generate_once", return_value=candidates) as generate:
-            result = self.ask("I have large quantity of pork and beef can you help me to generate recipes for dinner")
+            candidates[1]["ingredients"].append("1 cup spinach")
+            request = "I have beef and pork can you help me to generate some reciped for dinner for 4 people"
+            offer = self.ask(request)
+            self.assertEqual(offer["response"], RED_MEAT_ALTERNATIVE_OFFER)
+            self.assertEqual(offer["source_documents"], [])
+            generate.assert_not_called()
+            candidates[1]["servings"] = 4
+            result = self.ask("tofu is fine for me", history=[
+                {"role": "user", "content": request},
+                {"role": "assistant", "content": offer["response"]},
+            ])
         generate.assert_called_once()
         self.assertTrue(generate.call_args.args[2]["constraints"]["avoid_red_meat"])
+        self.assertEqual(generate.call_args.args[2]["constraints"]["ingredients_must_use"], ["spinach", "tofu"])
+        self.assertEqual(generate.call_args.args[2]["constraints"]["requested_servings"], 4)
         self.assertEqual([recipe["name"] for recipe in result["source_documents"]], ["Lentil Dinner"])
-        self.assertIn("could return 1", result["response"])
+        self.assertEqual(generate.call_args.args[2]["_confirmed_alternative_count"], 1)
         self.service.search_engine.multi_query_search.assert_not_called()
         self.service.recipe_verifier.batch_verify_recipes.assert_not_called()
         self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
@@ -359,11 +372,26 @@ class RecipeRoutingTests(unittest.TestCase):
             [recipe_record("Lentil Bowl", generated=True), recipe_record("Tofu Skillet", generated=True),
              recipe_record("Chickpea Stew", generated=True)],
         ]
-        result = self.ask("i have large portion of beef and pork can you help me to generate few recipes using this meat")
+        result = self.ask("yes", history=[
+            {"role": "user", "content": "I have beef and pork; suggest dinner recipes"},
+            {"role": "assistant", "content": RED_MEAT_ALTERNATIVE_OFFER},
+        ])
         self.assertEqual([recipe["name"] for recipe in result["source_documents"]],
                          ["Lentil Bowl", "Tofu Skillet", "Chickpea Stew"])
         self.assertIn("AICR recommends limiting red meat", result["response"])
         self.service.search_engine.multi_query_search.assert_not_called()
+
+    def test_intent_normalizes_malformed_list_fields_without_trusting_coverage(self):
+        parsed = IntentAnalyzer()._parse_intent_response(json.dumps({
+            "query_type": ["recipe_search"],
+            "constraints": {"ingredients_must_use": ["tofu", ["beans"]], "preparation_mode": ["no_heat"]},
+            "search_strategy": {"search_keywords": [["tofu"], "dinner"]},
+            "requirement_coverage": {"complete": True, "unresolved": []},
+        }))
+        self.assertEqual(parsed["constraints"]["ingredients_must_use"], ["tofu"])
+        self.assertEqual(parsed["constraints"]["preparation_mode"], "no_heat")
+        self.assertEqual(parsed["search_strategy"]["search_keywords"], ["dinner"])
+        self.assertFalse(parsed["requirement_coverage"]["complete"])
 
     def test_request_already_excluding_red_meat_keeps_normal_route(self):
         self.service.search_engine.multi_query_search.return_value = [recipe_record("Lentil Bowl")]
@@ -381,7 +409,7 @@ class RecipeRoutingTests(unittest.TestCase):
         ]
         result = self.ask("can you give some other extra recipes", history=[
             {"role": "user", "content": "can you help me to prepare a low budget meal under 15 dolalrs with beef or any meat"},
-            {"role": "assistant", "content": "Here are alternatives."},
+            {"role": "assistant", "content": "Here are alternatives.", "recipes": [recipe_record("Prior Dinner")]},
         ])
         self.assertTrue(result["intent_analysis"]["constraints"]["avoid_red_meat"])
         self.assertIn("under 15 dolalrs", result["intent_analysis"]["resolved_query"])
@@ -401,7 +429,7 @@ class RecipeRoutingTests(unittest.TestCase):
             recipe_record("Chicken Dinner", generated=True),
         ]
         result = self.ask(query, history=[{"role": "user", "content": original},
-                                          {"role": "assistant", "content": "Here is an alternative."}])
+                                          {"role": "assistant", "content": "Here is an alternative.", "recipes": [recipe_record("Prior Dinner")]}])
         self.assertEqual(analyzer.call_args.args[1][0]["content"], original)
         self.assertTrue(result["intent_analysis"]["constraints"]["avoid_red_meat"])
         self.assertIn("under $15", result["intent_analysis"]["resolved_query"])

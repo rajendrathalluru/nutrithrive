@@ -3,7 +3,7 @@ import RecipeFollowUp from './RecipeFollowUp';
 
 test('shows the generated question and drafts the selected answer', () => {
   const onDraft = jest.fn();
-  render(<RecipeFollowUp request="Chinese dinner for six under $20" onDraft={onDraft} followUp={{
+  render(<RecipeFollowUp onDraft={onDraft} followUp={{
     question: 'Would you like a make-ahead side?',
     choices: [
       { label: 'Make-ahead side', instruction: 'Suggest a side I can prepare ahead.' },
@@ -14,5 +14,7 @@ test('shows the generated question and drafts the selected answer', () => {
   expect(screen.queryByText('Budget for the whole recipe')).not.toBeInTheDocument();
   expect(onDraft).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Make-ahead side' }));
-  expect(onDraft).toHaveBeenCalledWith('Chinese dinner for six under $20\nKeep my existing requirements. Suggest a side I can prepare ahead.');
+  expect(onDraft).toHaveBeenLastCalledWith('Suggest a side I can prepare ahead.');
+  fireEvent.click(screen.getByRole('button', { name: 'Quick side' }));
+  expect(onDraft).toHaveBeenLastCalledWith('Suggest a side I can prepare quickly.');
 });

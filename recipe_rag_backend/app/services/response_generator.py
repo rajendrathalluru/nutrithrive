@@ -99,7 +99,7 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
             single_pass = intent_data.get("generation_mode") == "single_pass"
             lines = [introduction + (" prepared for your request:" if single_pass else " checked against your request:")]
             lines.extend(f"• {recipe['name']} — serves {recipe['servings']}" for recipe in source_docs)
-            if len(source_docs) < 3:
+            if len(source_docs) < intent_data.get("_confirmed_alternative_count", 3):
                 lines.append("Fewer than three recipes passed the checks; I have not relaxed your requirements.")
             if single_pass:
                 lines.append("Generated with the configured nutrition guidance and local checks; not independently AI-reviewed.")

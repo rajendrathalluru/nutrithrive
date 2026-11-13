@@ -8,7 +8,7 @@ from app.services.budget_service import is_budget_revision
 FOLLOW_UP = re.compile(
     r"^(?:and|also|but)\b|\b(?:more|another|other|similar) (?:recipes?|meals?|options?|ones?)\b|"
     r"\b(?:what else|follow[- ]?up|same (?:requirements?|restrictions?|ingredients?|recipes?|meals?))\b|"
-    r"\b(?:those|these|that|this|previous|above) (?:ingredients?|foods?|recipes?|meals?|ones?|options?)\b|"
+    r"\b(?:those|these|that|this|previous|above) (?:ingredients?|foods?|recipes?|meals?|dinners?|lunch(?:es)?|breakfasts?|ones?|options?)\b|"
     r"\b(?:with|using|use) (?:those|these|them)\b|"
     r"\bversions? of (?:these|those|it|them)\b|"
     r"\b(?:make|change|adapt|modify|freeze|reheat|store) (?:it|them|that|this)\b"

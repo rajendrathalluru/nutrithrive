@@ -11,6 +11,9 @@ interface MessageProps {
 const Message: React.FC<MessageProps> = ({ message }) => {
   const cleanedContent = cleanBackendText(message.content);
   const isSafetyRedirect = Boolean(message.backendData?.safety_redirect);
+  const intent = message.backendData?.intent_analysis;
+  const searchFocus = intent?.search_strategy?.primary_focus;
+  const microwaveOnly = intent?.constraints?.equipment_only?.includes('microwave');
 
   return (
     <article className={`tw-message tw-message-${message.role}`} aria-label={`${message.role === 'user' ? 'Your' : 'Thrivewell'} message`}>
@@ -69,13 +72,11 @@ const Message: React.FC<MessageProps> = ({ message }) => {
         </div>
         
         {/* Display backend analysis if available */}
-        {message.backendData?.intent_analysis && message.backendData?.source !== 'food_guidance' && (
+        {(searchFocus || microwaveOnly) && message.backendData?.source !== 'food_guidance' && (
           <details className="tw-search-analysis">
             <summary>Search Analysis</summary>
-            <div className="text-slate-600 mt-2">
-              {cleanBackendText(message.backendData.intent_analysis.search_strategy.primary_focus)}
-            </div>
-            {message.backendData.intent_analysis.constraints.equipment_only?.includes('microwave') && (
+            {searchFocus && <div className="text-slate-600 mt-2">{cleanBackendText(searchFocus)}</div>}
+            {microwaveOnly && (
               <div className="text-slate-700 mt-2">Microwave-only recipes prioritized</div>
             )}
           </details>
