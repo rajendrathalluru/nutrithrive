@@ -152,6 +152,16 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.assertEqual(result["matches_found"], 3, result)
         model.predict.assert_not_called()
 
+        starter = service.ask_question(
+            "Show dinners that take 30 minutes or less.",
+            conversation_history=[{"role": "assistant", "content": "Welcome! Ask for recipes."}],
+        )
+        self.assertEqual(starter["matches_found"], 3, starter)
+        self.assertEqual(starter["intent_analysis"]["preferences"]["meal_types"], ["dinner"])
+        for recipe in starter["source_documents"]:
+            self.assertLessEqual(recipe["verification_details"]["time_check"]["total_minutes"], 30)
+        model.predict.assert_not_called()
+
         lunch = service.ask_question("help me to generate recipes that take 20 minutes or less for lunch")
         self.assertGreater(lunch["matches_found"], 0, lunch)
         for recipe in lunch["source_documents"]:
@@ -163,3 +173,4 @@ class RuntimeEvidenceTests(unittest.TestCase):
         self.assertIsNone(simple_catalog_intent(
             "help me get recipes that take 30 minutes or less for dinner without peanuts"
         ))
+        self.assertIsNone(simple_catalog_intent("Show dinners that take 30 minutes or less without peanuts."))

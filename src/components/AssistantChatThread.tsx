@@ -8,7 +8,7 @@ import {
   useExternalStoreRuntime,
   useMessage,
 } from '@assistant-ui/react';
-import { ArrowDown, ArrowUpRight, Leaf } from 'lucide-react';
+import { ArrowDown, ArrowRight, Soup, Leaf, CookingPot } from 'lucide-react';
 import { Message } from '../types';
 import MessageComponent from './Message';
 import RecipeFollowUp from './RecipeFollowUp';
@@ -44,9 +44,9 @@ const ThreadMessage: React.FC = () => {
 };
 
 const suggestions = [
-  { title: 'Quick & easy', detail: 'For a busy day', prompt: 'Show recipes that take 30 minutes or less.' },
-  { title: 'Plant-based ideas', detail: 'Something colorful', prompt: 'Show me some vegetarian dinner recipes.' },
-  { title: 'Use what I have', detail: 'Start with my ingredients', prompt: 'Help me find recipes using the ingredients I have.' },
+  { icon: Soup, prompt: 'Find a cozy one-pot dinner I can make tonight.' },
+  { icon: Leaf, prompt: 'Show me a Mediterranean dinner with roasted vegetables.' },
+  { icon: CookingPot, prompt: 'What can I make with chickpeas, spinach, and rice?' },
 ];
 
 const AssistantChatThread: React.FC<AssistantChatThreadProps> = ({
@@ -87,14 +87,15 @@ const AssistantChatThread: React.FC<AssistantChatThreadProps> = ({
               <ThreadPrimitive.Messages components={{ Message: ThreadMessage }} />
             </div>
             {isWelcome && (
-              <div className="tw-suggestions" aria-label="Recipe conversation starters">
-                {suggestions.map(suggestion => (
-                  <button key={suggestion.title} type="button" onClick={() => onSuggestion(suggestion.prompt)}>
-                    <span>{suggestion.title}<ArrowUpRight size={15} aria-hidden="true" /></span>
-                    <small>{suggestion.detail}</small>
+              <section className="tw-suggestions" aria-label="Recipe conversation starters">
+                <h3>Try a recipe prompt</h3>
+                {suggestions.map(({ icon: Icon, prompt }) => (
+                  <button key={prompt} type="button" disabled={disabled || isRunning} onClick={() => { void onSend(prompt); }}>
+                    <Icon size={17} aria-hidden="true" />
+                    <span>{prompt}</span><ArrowRight size={16} aria-hidden="true" />
                   </button>
                 ))}
-              </div>
+              </section>
             )}
             {!disabled && canRefine && latest.backendData?.follow_up && (
               <RecipeFollowUp key={latest.id} onDraft={onSuggestion} followUp={latest.backendData.follow_up}

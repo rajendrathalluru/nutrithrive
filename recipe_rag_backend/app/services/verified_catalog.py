@@ -24,7 +24,7 @@ def normalize_request_framing(query):
 def simple_timed_intent(query):
     text = normalize_request_framing(query)
     match = re.fullmatch(
-        r"(?:please )?(?:show|give)(?: me)? (?P<kind>recipes|meals) that take "
+        r"(?:please )?(?:show|give)(?: me)? (?P<kind>recipes|meals|dinners|lunches|breakfasts) that take "
         r"(?:(?P<under>under|less than) )?(?P<minutes>\d{1,3}) minutes"
         r"(?P<inclusive> or less)?(?: for (?P<meal>dinner|lunch|breakfast))?", text
     )
@@ -34,18 +34,23 @@ def simple_timed_intent(query):
     if not 1 <= minutes <= 180:
         return None
     exclusive = bool(match["under"])
-    canonical = f"Show {match['kind']} that take {'less than ' if exclusive else ''}{minutes} minutes"
+    implied_meal = {"dinners": "dinner", "lunches": "lunch", "breakfasts": "breakfast"}.get(match["kind"])
+    if implied_meal and match["meal"] and implied_meal != match["meal"]:
+        return None
+    meal = match["meal"] or implied_meal
+    kind = "recipes" if implied_meal else match["kind"]
+    canonical = f"Show {kind} that take {'less than ' if exclusive else ''}{minutes} minutes"
     canonical += "" if exclusive else " or less"
-    if match["meal"]:
-        canonical += f" for {match['meal']}"
+    if meal:
+        canonical += f" for {meal}"
     constraints = {"time_max_minutes": minutes, "time_limit_exclusive": exclusive}
-    if match["meal"] or match["kind"] == "meals":
+    if meal or kind == "meals":
         constraints["meal_suitability"] = "meal"
     return {
         "query_type": "recipe_search", "context_action": "new_request",
         "resolved_query": canonical, "recipe_request": canonical, "user_request_context": [canonical],
         "referenced_recipe_ids": [], "constraints": constraints,
-        "preferences": {"meal_types": [match["meal"]] if match["meal"] else []},
+        "preferences": {"meal_types": [meal] if meal else []},
         "cancer_patient_specific": {},
         "search_strategy": {"primary_focus": canonical, "enhanced_query": canonical,
                             "search_keywords": [canonical], "must_match_criteria": []},

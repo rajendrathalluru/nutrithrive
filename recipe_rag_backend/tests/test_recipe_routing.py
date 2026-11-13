@@ -1631,8 +1631,9 @@ class GenerationAndVerificationTests(unittest.TestCase):
         self.assertIn('"ingredient_storage": "shelf_stable_only"', llm.predict.call_args.args[0])
         generator = ResponseGenerator()
         generator.initialize(llm)
+        llm.predict.reset_mock()
         generator.generate_personalized_response("pantry meals", [recipe_record("Bean Bowl")], {})
-        self.assertIn(INGREDIENT_STORAGE_RULES, llm.predict.call_args.args[0])
+        llm.predict.assert_not_called()
 
     def test_recipe_summary_uses_actual_recipe_not_unverified_assessment_claims(self):
         recipe = recipe_record("Bean Soup")
@@ -1641,13 +1642,11 @@ class GenerationAndVerificationTests(unittest.TestCase):
         generator = ResponseGenerator()
         model = Mock(predict=Mock(return_value="Here is a soup recipe; texture may still change slightly."))
         generator.initialize(model)
-        generator.generate_personalized_response("What foods reheat well?", [recipe], {})
-        prompt = model.predict.call_args.args[0]
-        self.assertIn(recipe["instructions"][0], prompt)
-        self.assertIn(recipe["ingredients"][0], prompt)
-        self.assertNotIn(recipe["verification_details"]["reasoning"], prompt)
-        self.assertIn("do not promise zero change", prompt)
-        self.assertIn("explain how each fits the actual request", prompt)
+        response = generator.generate_personalized_response("What foods reheat well?", [recipe], {})
+        model.predict.assert_not_called()
+        self.assertIn("I found 1 recipe", response)
+        self.assertIn("Bean Soup", response)
+        self.assertNotIn(recipe["verification_details"]["reasoning"], response)
 
     def test_semantic_pantry_search_terms_survive_intent_processing(self):
         analyzer = IntentAnalyzer()

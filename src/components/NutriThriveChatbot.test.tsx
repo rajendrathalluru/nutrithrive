@@ -194,12 +194,13 @@ test('preserves Enter sending and Shift+Enter for multiline drafts', async () =>
   expect(searchRecipes).toHaveBeenCalledTimes(1);
 });
 
-test('suggestion cards fill and focus the draft without sending a request', async () => {
+test('clicking a visible starter prompt sends that exact request', async () => {
   await readyChat();
-  fireEvent.click(screen.getByRole('button', { name: /Quick & easy/ }));
-  expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Show recipes that take 30 minutes or less.');
-  expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus();
-  expect(searchRecipes).not.toHaveBeenCalled();
+  const prompt = 'Find a cozy one-pot dinner I can make tonight.';
+  fireEvent.click(screen.getByRole('button', { name: prompt }));
+  await screen.findByText('Here is a bean soup.');
+  expect(searchRecipes).toHaveBeenCalledTimes(1);
+  expect(searchRecipes.mock.calls[0][0]).toBe(prompt);
 });
 
 test('keeps search analysis available in a disclosure', async () => {
