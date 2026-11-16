@@ -3,6 +3,7 @@ from app.services.model_latency import predict_with_budget
 
 import logging
 import math
+import re
 from copy import copy
 
 from app.services.budget_service import declared_recipe_servings
@@ -16,8 +17,51 @@ from app.services.serving_temperature import audit_serving_temperature
 
 from app.services.model_errors import raise_if_model_unavailable
 from app.services.recipe_prompt_rules import active_recipe_rules
+from app.services.local_recipe_evidence import active_fields
 
 logger = logging.getLogger(__name__)
+
+READY_TO_EAT_ENTRY = re.compile(
+    r"\d+(?:[./]\d+)?\s+(?:cups?|tbsp|tablespoons?|tsp|teaspoons?)\s+"
+    r"(?:canned (?:chickpeas|black beans|white beans|corn), drained|olive oil|bottled lemon juice)",
+    re.I,
+)
+SIMPLE_ASSEMBLY_STEPS = {
+    ("combine all listed ingredients in a bowl", "serve immediately"),
+    ("mix all listed ingredients in a bowl", "serve immediately"),
+}
+
+
+def check_simple_generated_assembly(recipe, intent, guidelines):
+    coverage = intent.get("requirement_coverage")
+    constraints = active_fields(intent.get("constraints", {}))
+    if (not recipe.get("generated_by_llm") or intent.get("query_type") != "recipe_search"
+            or intent.get("budget_request") or intent.get("adaptation_request")
+            or not isinstance(coverage, dict) or coverage.get("complete") is not True
+            or coverage.get("unresolved") != []
+            or set(constraints) - {"preparation_mode", "ingredients_must_use"}
+            or constraints.get("preparation_mode") not in ("assembly_only", "no_heat")
+            or active_fields(intent.get("preferences", {}))
+            or active_fields(intent.get("cancer_patient_specific", {}))
+            or intent.get("search_strategy", {}).get("must_match_criteria")
+            or any(recipe.get(field) for field in ("helpful_tips", "ingredient_adaptations",
+                                                  "storage_instructions", "storage_evidence", "source_notes"))):
+        return None
+    ingredients = recipe.get("ingredients")
+    steps = recipe.get("instructions")
+    if (not isinstance(ingredients, list) or not ingredients
+            or not all(isinstance(line, str) and READY_TO_EAT_ENTRY.fullmatch(line.strip()) for line in ingredients)
+            or not any("canned " in line.lower() for line in ingredients)
+            or not isinstance(steps, list) or not all(isinstance(step, str) for step in steps)
+            or tuple(step.strip().lower().rstrip(".") for step in steps) not in SIMPLE_ASSEMBLY_STEPS):
+        return None
+    checked = check_generated_recipe(dict(recipe), {
+        **intent, "constraints": {key: value for key, value in constraints.items() if key != "preparation_mode"},
+    }, guidelines)
+    if not checked["verification_details"]["passes_verification"]:
+        return None
+    checked["verification_details"]["method"] = "local_assembly_evidence"
+    return checked
 
 
 def schema_from_example(value, field=""):

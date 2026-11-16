@@ -137,6 +137,33 @@ class BudgetLatencyTests(unittest.TestCase):
         self.store.similarity_search_by_vector.assert_not_called()
 
 class VerificationLatencyTests(unittest.TestCase):
+    def test_local_assembly_requires_positive_evidence_and_no_unchecked_guidance(self):
+        from app.services.single_pass_generation import check_simple_generated_assembly
+
+        recipe = {
+            "generated_by_llm": True,
+            "ingredients": ["1 cup canned chickpeas, drained", "1 tsp olive oil"],
+            "instructions": ["Combine all listed ingredients in a bowl.", "Serve immediately."],
+        }
+        intent = {
+            "query_type": "recipe_search",
+            "constraints": {"preparation_mode": "assembly_only"},
+            "requirement_coverage": {"complete": True, "unresolved": []},
+        }
+        checked = check_simple_generated_assembly(recipe, intent, self.guidelines)
+        self.assertTrue(checked["verification_details"]["passes_verification"])
+        self.assertFalse(checked["verification_details"]["independent_model_review"])
+        for change in (
+            {"ingredients": ["1 cup raw chickpeas"]},
+            {"instructions": ["Cook all ingredients.", "Serve immediately."]},
+            {"ingredient_adaptations": ["Try raw beans instead."]},
+        ):
+            self.assertIsNone(check_simple_generated_assembly({**recipe, **change}, intent, self.guidelines))
+        for constraint in ({"allergens_to_avoid": ["peanuts"]}, {"time_max_minutes": 5}):
+            self.assertIsNone(check_simple_generated_assembly(
+                recipe, {**intent, "constraints": {**intent["constraints"], **constraint}}, self.guidelines
+            ))
+
     def setUp(self):
         self.intent = {"recipe_request": "Show bean bowls", "constraints": {}}
         self.recipe = {"name": "Bean Bowl", "type": "Main Dish", "ingredients": ["1 can beans"],

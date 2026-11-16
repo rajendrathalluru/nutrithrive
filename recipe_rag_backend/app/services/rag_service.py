@@ -33,7 +33,7 @@ from app.services.budget_service import declared_recipe_servings, requested_serv
 from app.services.recipe_progress import report_progress, RecipeRequestCancelled
 from app.services.verified_catalog import catalog_matches, local_catalog_matches, simple_timed_intent
 from app.services.recipe_router import requests_catalog_source, requests_composed_dinner
-from app.services.single_pass_generation import check_generated_recipe, generate_once
+from app.services.single_pass_generation import check_generated_recipe, check_simple_generated_assembly, generate_once
 
 logger = logging.getLogger(__name__)
 STREET_ADDRESS_DISCLOSURE = re.compile(
@@ -338,7 +338,11 @@ class RecipeRAGService:
                 check_generated_recipe(recipe, intent_data, aicr_service)
                 verified.append(recipe)
             else:
-                pending.append(recipe)
+                checked = check_simple_generated_assembly(recipe, intent_data, aicr_service)
+                if checked is not None:
+                    verified.append(checked)
+                else:
+                    pending.append(recipe)
         if pending:
             verified.extend(self.recipe_verifier.batch_verify_recipes(pending, intent_data, aicr_service))
         return budget_service.annotate(verified, intent_data) + deferred + timing_rejections + yield_rejections
