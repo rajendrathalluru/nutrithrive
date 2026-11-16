@@ -164,6 +164,105 @@ class VerificationLatencyTests(unittest.TestCase):
                 recipe, {**intent, "constraints": {**intent["constraints"], **constraint}}, self.guidelines
             ))
 
+    def test_local_generated_evidence_enforces_aicr_and_safe_cooking_endpoints(self):
+        from app.services.single_pass_generation import check_simple_generated_assembly
+
+        recipe = {
+            "name": "Herb Chicken and Bean Skillet",
+            "type": "Main Dish",
+            "generated_by_llm": True,
+            "total_time": "20 minutes",
+            "ingredients": ["8 oz chicken breast", "1 cup canned black beans, drained", "1 tbsp olive oil"],
+            "instructions": [
+                "Heat oil and cook chicken to 165°F internal temperature: 12 minutes.",
+                "Add drained black beans and heat through: 5 minutes.",
+                "Serve warm: 1 minute.",
+            ],
+        }
+        intent = {
+            "query_type": "recipe_search",
+            "constraints": {
+                "time_max_minutes": 25,
+                "ingredients_must_use": ["chicken"],
+                "max_ingredients": 5,
+                "avoid_red_meat": True,
+            },
+            "preferences": {"meal_types": ["dinner"]},
+            "requirement_coverage": {"complete": True, "unresolved": []},
+        }
+        checked = check_simple_generated_assembly(recipe, intent, self.guidelines)
+        self.assertIsNotNone(checked)
+        self.assertTrue(checked["verification_details"]["passes_verification"])
+        self.assertEqual(checked["verification_details"]["method"], "local_generated_evidence")
+        # Unsafe poultry instructions without 165F/74C endpoint must not pass locally
+        unsafe_poultry = {**recipe, "instructions": ["Cook chicken for 10 minutes: 10 minutes.", "Serve: 1 minute."]}
+        self.assertIsNone(check_simple_generated_assembly(unsafe_poultry, intent, self.guidelines))
+        # Exceeding max_ingredients must not pass locally
+        self.assertIsNone(check_simple_generated_assembly(
+            recipe, {**intent, "constraints": {**intent["constraints"], "max_ingredients": 2}}, self.guidelines
+        ))
+        # AICR warnings must prevent local pass
+        self.guidelines.validate_recipe_compliance.return_value = {
+            "overall_compliant": True, "score": 85, "warnings": ["High sodium ingredient detected"],
+        }
+        self.assertIsNone(check_simple_generated_assembly(recipe, intent, self.guidelines))
+
+    def test_generated_fallback_recipes_with_tips_and_servings_pass_locally_without_llm_review(self):
+        from app.services.single_pass_generation import check_simple_generated_assembly
+
+        recipe = {
+            "name": "Lentil and Spinach Soup",
+            "type": "Soup",
+            "servings": 8,
+            "generated_by_llm": True,
+            "ingredients": ["4 cups cooked lentils", "4 cups fresh spinach", "8 cups low-sodium vegetable broth"],
+            "instructions": ["Simmer lentils and broth for 10 minutes.", "Stir in spinach until wilted and serve warm."],
+            "helpful_tips": ["Serve with lemon wedges for extra brightness."],
+            "ingredient_adaptations": ["Use kale in place of spinach."],
+        }
+        intent = {
+            "query_type": "recipe_search",
+            "constraints": {
+                "requested_servings": 8,
+                "avoid_red_meat": True,
+                "dietary_restrictions": ["avoid red meat", "vegetarian"],
+                "ingredients_available": ["lentils", "tofu"],
+            },
+            "preferences": {"meal_types": ["dinner"], "nutritional_goals": ["high protein"]},
+            "requirement_coverage": {"complete": True, "unresolved": []},
+        }
+        checked = check_simple_generated_assembly(recipe, intent, self.guidelines)
+        self.assertIsNotNone(checked)
+        self.assertTrue(checked["verification_details"]["passes_verification"])
+        self.assertEqual(checked["verification_details"]["method"], "local_generated_evidence")
+        # If a tip introduces a conflict (e.g. red meat), it is stripped and the core compliant recipe still passes
+        with_bad_tip = {**recipe, "helpful_tips": ["Top with crispy bacon bits if desired."]}
+        stripped = check_simple_generated_assembly(with_bad_tip, intent, self.guidelines)
+        self.assertIsNotNone(stripped)
+        self.assertNotIn("helpful_tips", stripped)
+
+    def test_prefilters_reject_invalid_candidates_before_enrichment_llm_calls(self):
+        from app.services.rag_service import RecipeRAGService
+
+        service = RecipeRAGService()
+        service.recipe_enhancer.prepare_recipes_for_verification = Mock(side_effect=lambda recipes, intent: recipes)
+        service.recipe_verifier.batch_verify_recipes = Mock(return_value=[])
+        over_time = {
+            "name": "Slow Roast", "database_record_found": True,
+            "total_time": "60 minutes", "ingredients": [], "instructions": [],
+        }
+        red_meat_gen = {
+            "name": "Beef Bowl", "generated_by_llm": True,
+            "ingredients": ["1 lb beef"], "instructions": [],
+        }
+        results = service._verify_candidates(
+            [over_time, red_meat_gen], {"constraints": {"time_max_minutes": 30}}
+        )
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(not r["verification_details"]["passes_verification"] for r in results))
+        service.recipe_enhancer.prepare_recipes_for_verification.assert_not_called()
+        service.recipe_verifier.batch_verify_recipes.assert_not_called()
+
     def setUp(self):
         self.intent = {"recipe_request": "Show bean bowls", "constraints": {}}
         self.recipe = {"name": "Bean Bowl", "type": "Main Dish", "ingredients": ["1 can beans"],

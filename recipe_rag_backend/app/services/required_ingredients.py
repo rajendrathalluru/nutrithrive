@@ -10,6 +10,11 @@ ALIASES = {
     "aubergine": "eggplant",
     "courgette": "zucchini",
 }
+CATEGORY_MEMBERS = {
+    "poultry": ("poultry", "chicken", "turkey", "duck"),
+    "fish": ("fish", "salmon", "tuna", "cod", "tilapia", "halibut", "trout", "sardine", "haddock", "snapper", "mahi", "catfish", "flounder", "sole"),
+    "bean": ("bean", "chickpea", "edamame"),
+}
 
 
 def normalize_ingredient(text: str) -> str:
@@ -46,7 +51,7 @@ def ingredient_present(ingredient: str, lines: List[str]) -> bool:
     return False
 
 
-def recipe_ingredient_present(ingredient: str, lines: List[str]) -> bool:
+def _single_ingredient_present(ingredient: str, lines: List[str]) -> bool:
     required = normalize_ingredient(ingredient)
     modifiers = {"fresh", "frozen", "canned", "dried", "cooked", "raw", "chopped", "sliced", "diced",
                  "minced", "shredded", "ground", "whole", "white", "brown", "black", "red", "green",
@@ -63,14 +68,20 @@ def recipe_ingredient_present(ingredient: str, lines: List[str]) -> bool:
             modifier_words = set(text.split()) - {"cup", "tbsp", "tsp", "oz", "ounce", "pound", "lb", "gram", "g", "kg", "of"}
             if modifier_words and modifier_words <= modifiers:
                 continue
-            text = re.sub(r"\b" + re.escape(required) + r"\s+(?:(?:flavored|flavoured)\s+)?(?:broth|stock|bouillon|flavor|flavour|seasoning|extract)\b", "derivative", text)
-            if required in {"chicken", "turkey", "beef", "pork", "fish", "shrimp"}:
+            text = re.sub(r"\b" + re.escape(required) + r"\s+(?:(?:flavored|flavoured)\s+)?(?:broth|stock|bouillon|flavor|flavour|seasoning|extract|sauce)\b", "derivative", text)
+            if required in {"chicken", "turkey", "duck", "poultry", "beef", "pork", "fish", "salmon", "tuna", "shrimp"}:
                 text = re.sub(r"\b(?:vegan|vegetarian|plant based|meatless|mock|imitation)\s+(?:\w+\s+){0,2}" + re.escape(required) + r"\b", "substitute", text)
             if not ingredient_present(ingredient, [text]):
                 supported = False
         if supported:
             return True
     return False
+
+
+def recipe_ingredient_present(ingredient: str, lines: List[str]) -> bool:
+    required = normalize_ingredient(ingredient)
+    members = CATEGORY_MEMBERS.get(required, (ingredient,))
+    return any(_single_ingredient_present(member, lines) for member in members)
 
 
 def missing_required_ingredients(recipe: Dict[str, Any], required: List[str]) -> List[str]:

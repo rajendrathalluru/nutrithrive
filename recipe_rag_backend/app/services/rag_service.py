@@ -83,6 +83,56 @@ RED_MEAT_ALTERNATIVE_OFFER = (
     + "\n\nWould you like me to generate alternatives that keep your other requirements? "
     "Reply “yes,” or choose beans, lentils, tofu, fish, or poultry."
 )
+PLACEHOLDER_PROTEIN_TERMS = re.compile(
+    r"^\s*(?:(?:suitable|alternative|other|replacement|substitute)\s+)?proteins?\s*$"
+    r"|\b(?:alternative|suitable|replacement|substitute)\s+proteins?\b|\bmeats?\b",
+    re.I,
+)
+ALTERNATIVE_PROTEIN_NAMES = r"(?:beans|lentils|chickpeas|tofu|tempeh|fish|salmon|tuna|cod|poultry|chicken|turkey)"
+ALTERNATIVE_YES_REPLY = re.compile(
+    r"^\s*(?:yes(?:,?\s*please)?|sure|ok(?:ay)?|sounds?\s+good)[.!]?\s*$", re.I,
+)
+ALTERNATIVE_PROTEIN_REPLY = re.compile(
+    rf"^\s*(?:yes[, ]+)?(?:(?:i(?:\s+am|['’]m)?\s+(?:ok(?:ay)?|fine|good)\s+with|"
+    rf"i(?:['’]d\s+(?:like|prefer)|(?:\s+would)?\s+prefer|\s+want|\s+can\s+use)|"
+    rf"(?:please\s+)?(?:use|try)|let['’]s\s+(?:go\s+with|use|try)|either|how\s+about)\s+)?"
+    rf"(?P<choices>{ALTERNATIVE_PROTEIN_NAMES}(?:\s*(?:,|\bor\b|\band\b)\s*{ALTERNATIVE_PROTEIN_NAMES})*)"
+    rf"(?:\s+(?:(?:would\s+be|is|are|sounds?)\s+(?:ok(?:ay)?|good|fine|great)(?:\s+for\s+me)?"
+    rf"|works?(?:\s+for\s+me)?|please|instead))?[.!]?\s*$",
+    re.I,
+)
+
+
+def _parse_alternative_protein_reply(query: str, conversation_history: Optional[List[Dict[str, Any]]]):
+    history = conversation_history or []
+    if len(history) < 2 or history[-1].get("role") != "assistant":
+        return None
+    last_assistant = str(history[-1].get("content") or "")
+    if last_assistant != RED_MEAT_ALTERNATIVE_OFFER and not (
+        last_assistant.startswith(RED_MEAT_ALTERNATIVE_NOTE) and not history[-1].get("recipes")
+    ):
+        return None
+    original_request = next(
+        (str(msg.get("content", "")) for msg in reversed(history[:-1])
+         if msg.get("role") == "user" and _requests_red_meat(str(msg.get("content", "")))),
+        str(history[-2].get("content", "")) if history[-2].get("role") == "user" else "",
+    )
+    if not original_request:
+        return None
+    if ALTERNATIVE_YES_REPLY.fullmatch(query):
+        return {"choice": "yes", "proteins": [], "is_or": False, "original_request": original_request}
+    match = ALTERNATIVE_PROTEIN_REPLY.fullmatch(query)
+    if not match:
+        return None
+    proteins = list(dict.fromkeys(re.findall(ALTERNATIVE_PROTEIN_NAMES, match["choices"].lower())))
+    is_or = len(proteins) > 1 and bool(re.search(r"\b(?:or|either)\b", query, re.I))
+    joiner = " or " if is_or else " and "
+    return {
+        "choice": joiner.join(proteins),
+        "proteins": proteins,
+        "is_or": is_or,
+        "original_request": original_request,
+    }
 
 class RecipeRAGService:
     def __init__(self):
@@ -254,14 +304,47 @@ class RecipeRAGService:
         recipes = eligible
         if not recipes:
             return yield_rejections
-        if recipes:
-            report_progress("verifying")
-        prepared = self.recipe_enhancer.prepare_recipes_for_verification(recipes, intent_data)
         timing_rejections = []
         constraints = intent_data.get("constraints", {})
         required_ingredients = constraints.get("ingredients_must_use") or []
         if isinstance(required_ingredients, str):
             required_ingredients = [required_ingredients]
+        has_time_limit = self._has_valid_time_limit(intent_data)
+        prefiltered = []
+        for recipe in recipes:
+            conflicts = []
+            if _generated_red_meat_conflict(recipe):
+                conflicts.append("Generated recipe conflicts with ThriveWell's red and processed meat policy.")
+            if recipe.get("database_record_found") and recipe.get("ingredients") and recipe.get("instructions"):
+                if missing_required_ingredients(recipe, required_ingredients):
+                    conflicts.append("Catalog recipe does not contain all required ingredients.")
+                conflicts.extend(audit_equipment(recipe, constraints))
+            if conflicts:
+                recipe["verification_details"] = {
+                    "passes_verification": False, "relevance": "adaptable", "constraint_violations": conflicts,
+                    "catalog_preflight_mismatch": bool(recipe.get("database_record_found")),
+                }
+                timing_rejections.append(recipe)
+            elif constraints.get("digestive_comfort") == "gentle" and recipe.get("ingredients") and recipe.get("instructions") and audit_digestive_comfort(recipe, constraints):
+                recipe["verification_details"] = {
+                    "passes_verification": False, "relevance": "adaptable",
+                    "constraint_violations": audit_digestive_comfort(recipe, constraints),
+                }
+                timing_rejections.append(recipe)
+            elif has_time_limit and time_candidate_rank(recipe, constraints) == 0:
+                recipe["verification_details"] = {
+                    "passes_verification": False,
+                    "relevance": "adaptable",
+                    "constraint_violations": ["Declared total preparation time exceeds the requested limit"],
+                    "catalog_preflight_mismatch": bool(recipe.get("database_record_found")),
+                }
+                timing_rejections.append(recipe)
+            else:
+                prefiltered.append(recipe)
+        if not prefiltered:
+            return timing_rejections + yield_rejections
+        report_progress("verifying")
+        prepared = self.recipe_enhancer.prepare_recipes_for_verification(prefiltered, intent_data)
         compatible = []
         for recipe in prepared:
             conflicts = []
@@ -295,7 +378,7 @@ class RecipeRAGService:
                     compatible.append(recipe)
             logger.info("Gentle-food prefilter: %s retained, %s conflicts rejected", len(compatible), len(timing_rejections))
             prepared = sorted(compatible, key=lambda recipe: len(digestive_tolerance_cautions(recipe)))
-        if self._has_valid_time_limit(intent_data):
+        if has_time_limit:
             eligible = []
             for recipe in prepared:
                 if time_candidate_rank(recipe, constraints) == 0:
@@ -868,21 +951,11 @@ class RecipeRAGService:
             if self._contains_phi_like_content(query, conversation_history):
                 logger.info("Detected PHI-like content, returning privacy redirect response")
                 return self._build_phi_redirect_response(query, mode, conversation_history)
-            alternative_choice = re.fullmatch(
-                r"\s*(?:yes[, ]+|(?:i(?:['’]d like| prefer)|(?:please )?use|let['’]s go with)\s+)?"
-                r"(yes(?:,? please)?|beans|lentils|tofu|fish|poultry)"
-                r"(?:\s+(?:(?:would be|is|sounds)\s+(?:ok(?:ay)?|good|fine|great)(?:\s+for me)?"
-                r"|works(?:\s+for me)?|please))?[.!]?\s*", query, re.I
-            )
-            confirmed_alternatives = bool(
-                alternative_choice and len(conversation_history) >= 2
-                and conversation_history[-1].get("role") == "assistant"
-                and conversation_history[-1].get("content") == RED_MEAT_ALTERNATIVE_OFFER
-                and conversation_history[-2].get("role") == "user"
-            )
+            alternative_reply = _parse_alternative_protein_reply(query, conversation_history)
+            confirmed_alternatives = alternative_reply is not None
             if confirmed_alternatives:
-                choice = alternative_choice[1].lower()
-                query = str(conversation_history[-2]["content"])
+                choice = alternative_reply["choice"]
+                query = alternative_reply["original_request"]
                 if not choice.startswith("yes"):
                     query += f" Use {choice} as the alternative protein."
             if re.search(
@@ -1010,12 +1083,31 @@ class RecipeRAGService:
                     foods = intent_data["constraints"].get(field)
                     if isinstance(foods, list):
                         intent_data["constraints"][field] = [
-                            food for food in foods if not RED_MEAT_TERMS.search(str(food))
+                            food for food in foods
+                            if not RED_MEAT_TERMS.search(str(food)) and not PLACEHOLDER_PROTEIN_TERMS.search(str(food))
                         ]
-                if confirmed_alternatives and not choice.startswith("yes"):
-                    required = intent_data["constraints"].get("ingredients_must_use") or []
-                    if isinstance(required, list) and choice not in required:
-                        intent_data["constraints"]["ingredients_must_use"] = [*required, choice]
+                if confirmed_alternatives and alternative_reply["proteins"]:
+                    if alternative_reply["is_or"]:
+                        required = intent_data["constraints"].get("ingredients_must_use") or []
+                        if isinstance(required, list):
+                            intent_data["constraints"]["ingredients_must_use"] = [
+                                food for food in required if str(food).lower() not in alternative_reply["proteins"]
+                            ]
+                        available = intent_data["constraints"].get("ingredients_available") or []
+                        if isinstance(available, list):
+                            for protein in alternative_reply["proteins"]:
+                                if protein not in available:
+                                    available.append(protein)
+                            intent_data["constraints"]["ingredients_available"] = available
+                    else:
+                        required = intent_data["constraints"].get("ingredients_must_use") or []
+                        if isinstance(required, list):
+                            for protein in alternative_reply["proteins"]:
+                                if protein not in required:
+                                    required.append(protein)
+                            intent_data["constraints"]["ingredients_must_use"] = required
+                if confirmed_alternatives:
+                    intent_data["context_action"] = "continue_request"
                 strategy = intent_data.setdefault("search_strategy", {})
                 if isinstance(strategy.get("must_match_criteria"), list):
                     strategy["must_match_criteria"] = [
@@ -1219,11 +1311,20 @@ class RecipeRAGService:
                             "local checks only" if catalog_recipes else "generate without speculative catalog reviews")
             
             # Step 2: Multi-query search
-            should_search = not (is_recipe_adaptation or lookup_record or generate_first or catalog_recipes)
+            base_search = not (is_recipe_adaptation or lookup_record or generate_first or catalog_recipes)
             bounded_gentle_search = bool(
-                should_search and query_type == "recipe_search" and not intent_data.get("budget_request")
+                base_search and query_type == "recipe_search" and not intent_data.get("budget_request")
                 and intent_data.get("constraints", {}).get("digestive_comfort") == "gentle"
             )
+            shared_fit_route = bool(
+                query_type == "recipe_search" and not is_recipe_adaptation and not lookup_record
+                and not catalog_recipes and not single_pass_dinner and not generate_first
+                and not bounded_gentle_search
+                and not intent_data.get("budget_request")
+                and isinstance(intent_data.get("requirement_coverage"), dict)
+            )
+            direct_shared_generation = shared_fit_route and not requests_catalog_source(recipe_request_query)
+            should_search = base_search and not direct_shared_generation
             normalized_recipe_request = self._normalize_recipe_request(recipe_request_query)
             local_candidates = []
             docs = []
@@ -1281,16 +1382,10 @@ class RecipeRAGService:
                 logger.info("Gentle recipe route: reviewing %s of %s locally shortlisted candidates",
                             len(candidate_recipes), len(pool))
 
-            shared_fit_route = bool(
-                query_type == "recipe_search" and not is_recipe_adaptation and not lookup_record
-                and not catalog_recipes and not single_pass_dinner and not generate_first
-                and not intent_data.get("budget_request")
-                and isinstance(intent_data.get("requirement_coverage"), dict)
-            )
             # Step 4.5: Fill missing ingredients/instructions before verification
             if catalog_recipes or single_pass_dinner:
                 pass
-            elif shared_fit_route and not requests_catalog_source(recipe_request_query):
+            elif direct_shared_generation:
                 candidate_recipes = []
                 logger.info("No established local match; routing directly to verified generation")
             elif shared_fit_route:

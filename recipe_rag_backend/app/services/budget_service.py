@@ -27,10 +27,11 @@ SERVING_WORDS = dict(zip(
     range(21),
 ))
 SERVING_NUMBER = r"(?:\d+|" + "|".join(SERVING_WORDS) + r")"
+APPROX_SERVING = r"(?:(?:around|arounf|aroud|about|roughly|approximately|approx\.?|nearly|almost|like|at least|up to)\s+)?"
 SERVING_COUNT = re.compile(
-    rf"\b(?:(?:for|serves?|serving|feeds?)\s+(?P<count>{SERVING_NUMBER})\s+(?:people|persons?|servings?|adults?|portions?|(?:family\s+)?members?)\b"
-    rf"|(?P<yield>{SERVING_NUMBER})\s+(?:servings?|portions?)"
-    rf"|(?:serves?|feeds?)\s+(?P<standalone>{SERVING_NUMBER}))\b", re.I,
+    rf"\b(?:(?:for|serves?|serving|feeds?)\s+{APPROX_SERVING}(?P<count>{SERVING_NUMBER})\s+(?:people|persons?|servings?|adults?|portions?|(?:family\s+)?members?|guests?)\b"
+    rf"|{APPROX_SERVING}(?P<yield>{SERVING_NUMBER})\s+(?:servings?|portions?)"
+    rf"|(?:serves?|feeds?)\s+{APPROX_SERVING}(?P<standalone>{SERVING_NUMBER}))\b", re.I,
 )
 
 

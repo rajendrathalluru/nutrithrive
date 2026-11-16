@@ -427,9 +427,17 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
             preferences = intent_data.get("preferences", {})
             constraints = intent_data.get("constraints", {})
             timed_request = constraints.get("time_max_minutes") is not None and intent_data.get("query_type") != "recipe_adaptation"
-            focused_generation = (timed_request or constraints.get("requested_servings") is not None or intent_data.get("budget_request") or constraints.get("ingredient_storage") in {"canned_only", "frozen_only"}
-                                  or constraints.get("digestive_comfort") == "gentle" or constraints.get("preparation_effort") == "low")
-            recipe_count = "exactly ONE complete recipe" if focused_generation else "2-3 recipes"
+            focused_generation = (
+                timed_request or constraints.get("requested_servings") is not None or intent_data.get("budget_request")
+                or constraints.get("ingredient_storage") in {"canned_only", "frozen_only"}
+                or constraints.get("digestive_comfort") == "gentle" or constraints.get("preparation_effort") == "low"
+                or constraints.get("chewing_effort") == "low" or constraints.get("preparation_position") == "seated"
+                or constraints.get("hand_effort") == "low"
+                or constraints.get("preparation_mode") in {"no_heat", "assembly_only"}
+                or bool(constraints.get("serving_temperature"))
+                or bool(constraints.get("avoid_steam") or constraints.get("avoid_splatter"))
+            )
+            recipe_count = "exactly ONE complete recipe" if focused_generation else "2 concise recipes"
             generation_limit = 1 if focused_generation else 3
             budget_alternatives = bool(intent_data.get("budget_request") and intent_data.get("red_meat_alternatives")
                                        and not intent_data.get("adaptation_request"))
@@ -572,6 +580,7 @@ OUTPUT FORMAT (valid JSON only):
 
 Return only the JSON array. Use JSON numbers for calories and protein_grams, with no comments, placeholders, or markdown fences.
 Generate practical, safe, nutrition-optimized recipes that meet ALL constraints and AICR guidelines.
+Keep JSON concise for low latency: use 3-5 short instruction steps, keep description and nutrition_benefits under 12 words each, keep storage_instructions to 1 short sentence, and use [] for helpful_tips and ingredient_adaptations unless essential.
 Optional tips and adaptations must preserve every restriction, including allergens, time, ingredient forms,
 and equipment. Never replace a required ingredient or shorten a safety step. Use [] if no suitable option exists.
 {time_limit_generation_guidance(constraints)}

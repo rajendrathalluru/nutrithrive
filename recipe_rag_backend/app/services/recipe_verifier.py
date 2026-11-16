@@ -822,11 +822,9 @@ Verify ALL {len(recipes_for_verification)} recipes.
 
     def _fallback_individual_verification(self, recipes: List[Dict[str, Any]], intent_data: Dict[str, Any], aicr_service) -> List[Dict[str, Any]]:
         """Fallback: verify recipes individually if batch fails"""
-        for recipe in recipes:
+        def verify_one(recipe):
             verification_result = self.verify_recipe_against_constraints(recipe, intent_data)
             recipe["verification_details"] = verification_result
-            
-            # Add AICR validation
             if verification_result.get("passes_verification"):
                 aicr_compliance = aicr_service.validate_recipe_compliance(recipe)
                 recipe["aicr_compliance"] = aicr_compliance
@@ -835,7 +833,13 @@ Verify ALL {len(recipes_for_verification)} recipes.
                     recipe["verification_details"]["meets_preferences"] = False
                     recipe["verification_details"]["verification_score"] = 0
                     recipe["verification_details"]["constraint_violations"].extend(aicr_compliance.get("warnings", []))
-        return recipes
+            return recipe
+
+        if len(recipes) > 1 and settings.RECIPE_IO_WORKERS > 1:
+            with ThreadPoolExecutor(max_workers=min(settings.RECIPE_IO_WORKERS, len(recipes))) as executor:
+                futures = [executor.submit(copy_context().run, verify_one, recipe) for recipe in recipes]
+                return [future.result() for future in futures]
+        return [verify_one(recipe) for recipe in recipes]
 
     def verify_recipe_against_constraints(self, recipe_data: Dict[str, Any], intent_data: Dict[str, Any]) -> Dict[str, Any]:
         """

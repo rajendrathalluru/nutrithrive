@@ -151,7 +151,7 @@ Pay special attention to:
   unless the user explicitly links it to the earlier request. Do not inherit time limits, dietary preferences,
   preparation restrictions, or ingredients from a different task.
 - Return context_action='new_request' for a new task or 'continue_request' for a follow-up/reference.
-  If this is a new task, the backend will analyze it independently of this history.
+  If this is a new task, set requirement_coverage.scope='current_request'; the backend will analyze it independently of this history.
 - Set more_recipes=true when the user wants additional distinct recipes under the active request,
   regardless of phrasing. Keep all unchanged constraints, including budget, and exclude already shown dishes.
 - Changing the spending limit for the active recipe search is a search refinement, not a recipe edit.

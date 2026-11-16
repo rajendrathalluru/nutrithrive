@@ -174,3 +174,56 @@ class RuntimeEvidenceTests(unittest.TestCase):
             "help me get recipes that take 30 minutes or less for dinner without peanuts"
         ))
         self.assertIsNone(simple_catalog_intent("Show dinners that take 30 minutes or less without peanuts."))
+
+    def test_equipment_ingredient_limits_red_meat_and_leftover_evidence_match_locally(self):
+        intent = deepcopy(self.intent)
+        intent["constraints"].update({
+            "equipment_required": ["air fryer"],
+            "max_ingredients": 4,
+            "min_ingredients": 1,
+            "avoid_red_meat": True,
+            "leftover_friendly": True,
+        })
+        recipe = {
+            **self.recipe,
+            "instructions": ["Air-fry the beans at 180 C for 8 minutes until crisp and serve."],
+            "content": "Store leftovers in an airtight container in the refrigerator for up to 3 days.",
+        }
+        self.assertTrue(supports_local_matching(intent))
+        self.assertEqual(assess_local_recipe(recipe, intent)["status"], "pass")
+        self.assertEqual(assess_local_recipe({**recipe, "instructions": ["Mix and serve."]}, intent)["status"], "fail")
+        self.assertEqual(assess_local_recipe({**recipe, "ingredients": ["1 lb beef"]}, intent)["status"], "fail")
+        self.assertEqual(assess_local_recipe({**recipe, "content": ""}, intent)["status"], "unknown")
+
+    def test_available_ingredients_red_meat_diet_and_protein_goals_match_locally(self):
+        intent = deepcopy(self.intent)
+        intent["constraints"].update({
+            "ingredients_available": ["tofu", "beans"],
+            "dietary_restrictions": ["avoid red meat"],
+            "avoid_red_meat": True,
+        })
+        intent["preferences"]["nutritional_goals"] = ["high protein"]
+        self.assertTrue(supports_local_matching(intent))
+        self.assertEqual(assess_local_recipe(self.recipe, intent)["status"], "pass")
+        no_protein = {**self.recipe, "ingredients": ["1 cup sliced cucumber"]}
+        self.assertEqual(assess_local_recipe(no_protein, intent)["status"], "fail")
+
+    def test_direct_shared_generation_skips_vector_search_while_gentle_search_retains_it(self):
+        service = RecipeRAGService()
+        service.is_initialized = True
+        service._contains_phi_like_content = Mock(return_value=False)
+        service._is_small_talk_query = Mock(return_value=False)
+        intent = {
+            "query_type": "recipe_search", "context_action": "new_request",
+            "resolved_query": "Show Chicago dinner recipes",
+            "recipe_request": "Show Chicago dinner recipes",
+            "requirement_coverage": {"complete": True, "unresolved": []},
+            "constraints": {}, "preferences": {"cuisine_types": ["Chicago"], "meal_types": ["dinner"]},
+            "search_strategy": {},
+        }
+        service.intent_analyzer.understand_query_intent_with_context = Mock(return_value=intent)
+        service.search_engine.multi_query_search = Mock(side_effect=AssertionError("Should skip wasted vector search"))
+        with patch.object(service, "_generate_verified_fallback_recipes", return_value=[]) as generate, \
+                patch("app.services.rag_service.safety_service.should_intercept", return_value=False):
+            service.ask_question("Show Chicago dinner recipes")
+        generate.assert_called_once()

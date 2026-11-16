@@ -364,6 +364,50 @@ class RecipeRoutingTests(unittest.TestCase):
         self.service.recipe_verifier.batch_verify_recipes.assert_not_called()
         self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
 
+    def test_red_meat_yes_and_multi_protein_replies_strip_placeholders_and_keep_around_servings(self):
+        request = "i have large portiosn of beef and pork can you help me to make some recipes for dinner for arounf 8 people"
+        intent = self.service.intent_analyzer.understand_query_intent_with_context.return_value
+        intent.update(
+            query_type="recipe_search",
+            constraints={"ingredients_must_use": ["alternative protein", "beef", "pork"]},
+        )
+        chicken_dinner = {
+            **recipe_record("Lemon Herb Chicken Dinner", generated=True),
+            "servings": 8,
+            "ingredients": ["2 lbs boneless skinless chicken breast", "4 cups cooked quinoa", "4 cups spinach"],
+            "instructions": ["Cook chicken to 165°F internal temperature and serve with quinoa and spinach."],
+        }
+        from app.services.single_pass_generation import check_generated_recipe
+        with patch("app.services.rag_service.generate_once", side_effect=lambda model, q, i, v, g: [
+            check_generated_recipe(copy.deepcopy(chicken_dinner), i, g)
+        ]) as generate:
+            offer = self.ask(request)
+            self.assertEqual(offer["response"], RED_MEAT_ALTERNATIVE_OFFER)
+            yes_result = self.ask("yes", history=[
+                {"role": "user", "content": request},
+                {"role": "assistant", "content": offer["response"]},
+            ])
+            self.assertEqual(yes_result["matches_found"], 1)
+            self.assertEqual(yes_result["source_documents"][0]["servings"], 8)
+            self.assertEqual(generate.call_args.args[2]["constraints"]["ingredients_must_use"], [])
+            self.assertEqual(generate.call_args.args[2]["constraints"]["requested_servings"], 8)
+            self.assertEqual(yes_result["intent_analysis"]["context_action"], "continue_request")
+
+            # Also verify replying "i am okay with tofu or poultry" after a shortage or offer
+            shortage = self.service._recipe_shortage_message({"red_meat_alternatives": True})
+            intent["constraints"] = {"ingredients_must_use": ["tofu", "poultry"]}
+            choice_result = self.ask("i am okay with tofu or poultry", history=[
+                {"role": "user", "content": request},
+                {"role": "assistant", "content": offer["response"]},
+                {"role": "user", "content": "yes"},
+                {"role": "assistant", "content": shortage},
+            ])
+            self.assertEqual(choice_result["matches_found"], 1)
+            self.assertEqual(choice_result["source_documents"][0]["servings"], 8)
+            self.assertEqual(generate.call_args.args[2]["constraints"]["ingredients_must_use"], [])
+            self.assertEqual(generate.call_args.args[2]["constraints"]["ingredients_available"], ["tofu", "poultry"])
+            self.assertEqual(generate.call_args.args[2]["constraints"]["requested_servings"], 8)
+
     @patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", False)
     def test_red_meat_request_explains_and_collects_three_verified_alternatives(self):
         rejected = {**recipe_record("Vegetable Bowl", generated=True), "ingredients": ["Beef broth"]}
