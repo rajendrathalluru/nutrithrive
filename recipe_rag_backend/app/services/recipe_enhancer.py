@@ -427,8 +427,13 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
             preferences = intent_data.get("preferences", {})
             constraints = intent_data.get("constraints", {})
             timed_request = constraints.get("time_max_minutes") is not None and intent_data.get("query_type") != "recipe_adaptation"
+            singular_request = bool(re.search(
+                r"\b(?:show|give|make|prepare|cook|suggest|find|create|generate)\s+(?:me\s+)?(?:a|an|one)\s+"
+                r"(?:[a-z-]+\s+){0,3}(?:recipe|meal|dinner|lunch|breakfast|dish|bowl|salad|soup)\b",
+                query, re.I,
+            ))
             focused_generation = (
-                timed_request or constraints.get("requested_servings") is not None or intent_data.get("budget_request")
+                timed_request or singular_request or constraints.get("requested_servings") is not None or intent_data.get("budget_request")
                 or constraints.get("ingredient_storage") in {"canned_only", "frozen_only"}
                 or constraints.get("digestive_comfort") == "gentle" or constraints.get("preparation_effort") == "low"
                 or constraints.get("chewing_effort") == "low" or constraints.get("preparation_position") == "seated"
@@ -517,7 +522,7 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
 USER QUERY: "{query}"
 
 USER REQUIREMENTS:
-{json.dumps(intent_data, indent=2)}
+{json.dumps(intent_data)}
 {failure_context}
 
 {active_recipe_rules(intent_data)}
@@ -533,7 +538,7 @@ YOUR TASK:
 RECIPE REQUIREMENTS:
 - Include protein source (see AICR protein sources above - aim for 20-30g)
 - Follow food safety rules; for no-heat requests use appropriate ready-to-eat ingredients, not raw foods that require cooking.
-- Include cooking temperatures only when cooking is permitted by the user.
+- Include explicit safe cooking endpoints when cooking poultry (165°F), fish (145°F or flakes easily), or eggs (firm).
 - Address digestive comfort if mentioned (see AICR guidelines above)
 - Avoid foods to limit (processed meats, high sodium)
 - Meet all user constraints (max/min ingredients, dietary restrictions, equipment, etc.)
@@ -578,7 +583,7 @@ OUTPUT FORMAT (valid JSON only):
     }}
 ]
 
-Return only the JSON array. Use JSON numbers for calories and protein_grams, with no comments, placeholders, or markdown fences.
+Return only a single-line minified JSON array (no indentation or extra whitespace). Use JSON numbers for calories and protein_grams, with no comments, placeholders, or markdown fences.
 Generate practical, safe, nutrition-optimized recipes that meet ALL constraints and AICR guidelines.
 Keep JSON concise for low latency: use 3-5 short instruction steps, keep description and nutrition_benefits under 12 words each, keep storage_instructions to 1 short sentence, and use [] for helpful_tips and ingredient_adaptations unless essential.
 Optional tips and adaptations must preserve every restriction, including allergens, time, ingredient forms,

@@ -1,4 +1,4 @@
-from app.services.model_latency import ModelBudgetExhausted, predict_with_budget
+from app.services.model_latency import ModelBudgetExhausted, get_io_executor, predict_with_budget
 from openai.error import Timeout
 
 import logging
@@ -621,20 +621,20 @@ The backend will retain existing failures and independently validate this eviden
             if settings.RECIPE_IO_WORKERS == 1:
                 return [recipe for batch in batches
                         for recipe in self.batch_verify_recipes(batch, intent_data, aicr_service)]
-            with ThreadPoolExecutor(max_workers=min(settings.RECIPE_IO_WORKERS, len(batches))) as executor:
-                assessments = [
-                    executor.submit(copy_context().run, self.batch_verify_recipes, batch, intent_data, aicr_service)
-                    for batch in batches
-                ]
-                completed = []
-                for batch in assessments:
-                    try:
-                        completed.extend(batch.result())
-                    except RecipeModelUnavailable as error:
-                        if not isinstance(error, ModelBudgetExhausted) and not isinstance(error.__cause__, Timeout):
-                            raise
-                        logger.info("Skipped unfinished recipe review; retaining completed reviews")
-                return completed
+            executor = get_io_executor(min(settings.RECIPE_IO_WORKERS, len(batches)))
+            assessments = [
+                executor.submit(copy_context().run, self.batch_verify_recipes, batch, intent_data, aicr_service)
+                for batch in batches
+            ]
+            completed = []
+            for batch in assessments:
+                try:
+                    completed.extend(batch.result())
+                except RecipeModelUnavailable as error:
+                    if not isinstance(error, ModelBudgetExhausted) and not isinstance(error.__cause__, Timeout):
+                        raise
+                    logger.info("Skipped unfinished recipe review; retaining completed reviews")
+            return completed
         
         try:
             recipes_for_verification = []
@@ -836,9 +836,9 @@ Verify ALL {len(recipes_for_verification)} recipes.
             return recipe
 
         if len(recipes) > 1 and settings.RECIPE_IO_WORKERS > 1:
-            with ThreadPoolExecutor(max_workers=min(settings.RECIPE_IO_WORKERS, len(recipes))) as executor:
-                futures = [executor.submit(copy_context().run, verify_one, recipe) for recipe in recipes]
-                return [future.result() for future in futures]
+            executor = get_io_executor(min(settings.RECIPE_IO_WORKERS, len(recipes)))
+            futures = [executor.submit(copy_context().run, verify_one, recipe) for recipe in recipes]
+            return [future.result() for future in futures]
         return [verify_one(recipe) for recipe in recipes]
 
     def verify_recipe_against_constraints(self, recipe_data: Dict[str, Any], intent_data: Dict[str, Any]) -> Dict[str, Any]:

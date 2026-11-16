@@ -13,7 +13,44 @@ ALIASES = {
 CATEGORY_MEMBERS = {
     "poultry": ("poultry", "chicken", "turkey", "duck"),
     "fish": ("fish", "salmon", "tuna", "cod", "tilapia", "halibut", "trout", "sardine", "haddock", "snapper", "mahi", "catfish", "flounder", "sole"),
+    "seafood": ("seafood", "fish", "salmon", "tuna", "cod", "tilapia", "halibut", "trout", "sardine", "haddock", "snapper", "shrimp", "prawn", "scallop", "crab", "lobster", "clam", "mussel"),
     "bean": ("bean", "chickpea", "edamame"),
+    "legume": ("legume", "bean", "chickpea", "lentil", "pea", "edamame", "tofu", "tempeh", "hummus"),
+    "vegetable": (
+        "vegetable", "veggie", "broccoli", "spinach", "kale", "zucchini", "bell pepper", "pepper",
+        "carrot", "cauliflower", "asparagus", "eggplant", "tomato", "cucumber", "onion", "mushroom",
+        "cabbage", "brussel sprout", "green bean", "pea", "celery", "squash", "sweet potato", "potato",
+        "corn", "beet", "artichoke", "leek", "chard", "bok choy", "arugula", "lettuce", "radish",
+        "turnip", "parsnip", "fennel", "okra",
+    ),
+    "green": ("green", "spinach", "kale", "chard", "arugula", "collard", "romaine", "lettuce", "bok choy", "mixed green"),
+    "leafy green": ("spinach", "kale", "chard", "arugula", "collard", "romaine", "lettuce", "bok choy", "mixed green"),
+    "grain": ("grain", "quinoa", "rice", "brown rice", "wild rice", "oat", "oatmeal", "barley", "farro", "bulgur", "millet", "buckwheat", "whole wheat", "couscous", "polenta", "pasta"),
+    "whole grain": ("quinoa", "brown rice", "wild rice", "oat", "oatmeal", "barley", "farro", "bulgur", "millet", "buckwheat", "whole wheat", "whole grain"),
+    "fruit": ("fruit", "berry", "blueberry", "strawberry", "raspberry", "blackberry", "apple", "banana", "orange", "lemon", "lime", "peach", "pear", "mango", "pineapple", "grape", "cherry", "melon", "avocado", "pomegranate", "fig", "date", "apricot", "plum"),
+    "berry": ("berry", "blueberry", "strawberry", "raspberry", "blackberry", "cranberry"),
+    "nut": ("nut", "almond", "walnut", "pecan", "cashew", "pistachio", "peanut", "hazelnut", "macadamia", "pine nut"),
+    "seed": ("seed", "chia", "flax", "flaxseed", "hemp", "pumpkin seed", "pepita", "sunflower seed", "sesame"),
+}
+PREPARATION_PREFIX_RE = re.compile(
+    r"^(?:(?:roasted|roast|grilled|grill|baked|bake|steamed|steam|sauteed|sautéed|saute|pan[- ]seared|seared|"
+    r"broiled|poached|boiled|braised|stewed|mashed|pureed|raw|fresh|mixed|assorted|seasonal|colorful|"
+    r"warm|hot|cold|chilled|crispy|tender|seasoned|marinated|spiced|herbed|mediterranean)\s+)+",
+    re.I,
+)
+COOKING_METHOD_STEMS = {
+    "roasted": ("roast", "bake", "oven"),
+    "roast": ("roast", "bake", "oven"),
+    "grilled": ("grill",),
+    "grill": ("grill",),
+    "baked": ("bake", "roast", "oven"),
+    "bake": ("bake", "roast", "oven"),
+    "steamed": ("steam",),
+    "steam": ("steam",),
+    "sauteed": ("saute", "sauté", "skillet", "pan"),
+    "sautéed": ("saute", "sauté", "skillet", "pan"),
+    "mashed": ("mash",),
+    "pureed": ("puree", "purée", "blend"),
 }
 
 
@@ -80,7 +117,13 @@ def _single_ingredient_present(ingredient: str, lines: List[str]) -> bool:
 
 def recipe_ingredient_present(ingredient: str, lines: List[str]) -> bool:
     required = normalize_ingredient(ingredient)
-    members = CATEGORY_MEMBERS.get(required, (ingredient,))
+    members = CATEGORY_MEMBERS.get(required)
+    if not members:
+        stripped = normalize_ingredient(PREPARATION_PREFIX_RE.sub("", str(ingredient)))
+        if stripped and stripped != required:
+            members = CATEGORY_MEMBERS.get(stripped, (ingredient, stripped))
+        else:
+            members = (ingredient,)
     return any(_single_ingredient_present(member, lines) for member in members)
 
 
@@ -88,7 +131,21 @@ def missing_required_ingredients(recipe: Dict[str, Any], required: List[str]) ->
     lines = recipe.get("ingredients") or []
     if isinstance(lines, str):
         lines = lines.splitlines()
-    return [ingredient for ingredient in required if not recipe_ingredient_present(ingredient, lines)]
+    missing = []
+    recipe_context_text = " ".join([
+        str(recipe.get("name") or ""),
+        " ".join(str(line) for line in lines),
+        " ".join(str(step) for step in (recipe.get("instructions") or [])),
+    ]).lower()
+    for ingredient in required:
+        if not recipe_ingredient_present(ingredient, lines):
+            missing.append(ingredient)
+            continue
+        first_word = str(ingredient or "").strip().split()[0].lower() if str(ingredient or "").strip() else ""
+        stems = COOKING_METHOD_STEMS.get(first_word)
+        if stems and recipe.get("instructions") and not any(stem in recipe_context_text for stem in stems):
+            missing.append(ingredient)
+    return missing
 
 
 def _ingredient_list(text: str, candidates: List[str]) -> List[str]:

@@ -241,6 +241,94 @@ class VerificationLatencyTests(unittest.TestCase):
         self.assertIsNotNone(stripped)
         self.assertNotIn("helpful_tips", stripped)
 
+    def test_aicr_protein_synonyms_recognize_chickpeas_salmon_and_egg(self):
+        from app.services.aicr_guidelines_service import aicr_service
+
+        for ingredient, expected_source in (
+            ("1 cup cooked chickpeas", "beans"),
+            ("6 oz wild salmon fillet", "fish"),
+            ("1 large hard-boiled egg", "eggs"),
+            ("1 cup plain yogurt", "greek yogurt"),
+        ):
+            report = aicr_service.validate_recipe_compliance({"ingredients": [ingredient, "1 cup spinach"]})
+            self.assertTrue(report["overall_compliant"], ingredient)
+            self.assertEqual(report["score"], 100, ingredient)
+            self.assertEqual(report["details"]["protein_source"], expected_source)
+
+    def test_persistent_connection_pool_and_reusable_io_executor(self):
+        import openai
+        import requests
+        from app.core.config import settings
+        from app.services.model_latency import configure_openai_connection_pool, get_io_executor
+
+        session = configure_openai_connection_pool()
+        self.assertIsInstance(session, requests.Session)
+        self.assertIs(openai.requestssession, session)
+        self.assertIs(get_io_executor(2), get_io_executor(2))
+        self.assertEqual(settings.EMBEDDING_MODEL, "text-embedding-3-small")
+
+    def test_luna_model_uses_max_completion_tokens_and_stage_reasoning_effort(self):
+        from app.services.model_latency import (
+            build_chat_model_kwargs, is_luna_or_reasoning_model, predict_with_budget,
+        )
+
+        self.assertTrue(is_luna_or_reasoning_model("gpt-6-luna"))
+        self.assertTrue(is_luna_or_reasoning_model("gpt-5.6-luna"))
+        self.assertFalse(is_luna_or_reasoning_model("gpt-4o-mini"))
+        luna_kwargs = build_chat_model_kwargs("gpt-6-luna", 1500, 0.5, "low")
+        self.assertIsNone(luna_kwargs["max_tokens"])
+        self.assertEqual(luna_kwargs["temperature"], 1.0)
+        self.assertEqual(luna_kwargs["model_kwargs"], {"max_completion_tokens": 1500, "reasoning_effort": "low"})
+
+        luna_model = Mock(model_name="gpt-6-luna", predict=Mock(return_value="{}"))
+        predict_with_budget(luna_model, "extract intent", stage="intent", max_tokens=600)
+        self.assertEqual(
+            luna_model.predict.call_args.kwargs,
+            {"max_completion_tokens": 600, "reasoning_effort": "none"},
+        )
+        luna_model.predict.reset_mock()
+        predict_with_budget(luna_model, "generate recipe", stage="recipe", max_tokens=3600)
+        self.assertEqual(
+            luna_model.predict.call_args.kwargs,
+            {"max_completion_tokens": 3600, "reasoning_effort": "low"},
+        )
+
+    def test_mediterranean_dinner_with_roasted_vegetables_passes_locally_without_false_rejection(self):
+        from app.services.required_ingredients import missing_required_ingredients
+        from app.services.single_pass_generation import check_simple_generated_assembly
+
+        salad = {
+            "name": "Mediterranean Chickpea and Roasted Vegetable Salad",
+            "type": "Main Dish",
+            "generated_by_llm": True,
+            "ingredients": ["1 cup diced zucchini", "1 red bell pepper, chopped", "1 cup cooked chickpeas", "1 tbsp olive oil"],
+            "instructions": ["Roast the zucchini and bell pepper at 400°F for 20 minutes.", "Toss with chickpeas and serve warm."],
+            "helpful_tips": ["Add fresh lemon juice before serving."],
+            "ingredient_adaptations": ["Swap zucchini for eggplant."],
+        }
+        chicken_bowl = {
+            "name": "Mediterranean Roasted Vegetable and Chicken Bowl",
+            "type": "Main Dish",
+            "generated_by_llm": True,
+            "ingredients": ["6 oz chicken breast", "1 cup broccoli florets", "1 cup cherry tomatoes", "1 tbsp olive oil"],
+            "instructions": ["Roast broccoli and tomatoes in the oven until tender.", "Cook chicken until cooked through and serve."],
+        }
+        intent = {
+            "query_type": "recipe_search",
+            "recipe_request": "Show me a Mediterranean dinner with roasted vegetables.",
+            "constraints": {"ingredients_must_use": ["roasted vegetables"], "meal_suitability": "meal"},
+            "preferences": {"cuisine_types": ["Mediterranean"], "meal_types": ["dinner"]},
+            "requirement_coverage": {"complete": True, "unresolved": []},
+        }
+        self.assertEqual(missing_required_ingredients(salad, ["roasted vegetables"]), [])
+        self.assertEqual(missing_required_ingredients(chicken_bowl, ["roasted vegetables"]), [])
+        for candidate in (salad, chicken_bowl):
+            checked = check_simple_generated_assembly(candidate, intent, self.guidelines)
+            self.assertIsNotNone(checked, candidate["name"])
+            self.assertTrue(checked["verification_details"]["passes_verification"])
+        raw_only = {**salad, "name": "Raw Salad", "instructions": ["Toss raw zucchini and bell pepper with chickpeas."]}
+        self.assertEqual(missing_required_ingredients(raw_only, ["roasted vegetables"]), ["roasted vegetables"])
+
     def test_prefilters_reject_invalid_candidates_before_enrichment_llm_calls(self):
         from app.services.rag_service import RecipeRAGService
 

@@ -84,7 +84,7 @@ def _has_safe_cooking_endpoints(recipe):
     for line in ingredients:
         lower = line.lower()
         if POULTRY_TERMS.search(lower) and not re.search(r"\b(?:cooked|canned|rotisserie|broth|stock)\b", lower):
-            if not re.search(r"\b(?:165\s*°?\s*f|74\s*°?\s*c)\b", instructions_text, re.I):
+            if not re.search(r"\b(?:165\s*°?\s*f|74\s*°?\s*c|cooked\s+through|no\s+longer\s+pink|juices\s+run\s+clear)\b", instructions_text, re.I):
                 return False
         if FISH_TERMS.search(lower) and not re.search(r"\b(?:cooked|canned|pouch|smoked)\b", lower):
             if not re.search(r"\b(?:145\s*°?\s*f|63\s*°?\s*c|flakes?\s+easily|opaque)\b", instructions_text, re.I):

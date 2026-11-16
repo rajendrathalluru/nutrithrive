@@ -25,7 +25,10 @@ from app.services.recipe_follow_up import resolve_recipe_follow_up, is_more_reci
 from app.services.local_recipe_evidence import supports_local_matching, assess_local_recipe
 from app.services.required_ingredients import missing_required_ingredients
 from app.services.model_errors import RecipeModelUnavailable
-from app.services.model_latency import ModelBudgetExhausted, model_deadline, final_review_limit, final_review_window
+from app.services.model_latency import (
+    ModelBudgetExhausted, build_chat_model_kwargs, configure_openai_connection_pool,
+    final_review_limit, final_review_window, get_io_executor, model_deadline,
+)
 from openai.error import Timeout
 from app.services.budget_service import budget_service, budget_clarification, budget_no_results, is_budget_clarification_reply
 from app.services.budget_recipe_contract import UNLISTED_ADDITION_ISSUE, UNRESOLVED_INGREDIENT_ISSUE
@@ -835,6 +838,8 @@ class RecipeRAGService:
                 from langchain.vectorstores import FAISS
                 from langchain.text_splitter import RecursiveCharacterTextSplitter
                 from langchain.chat_models import ChatOpenAI
+
+                configure_openai_connection_pool()
                 
                 self.embeddings = OpenAIEmbeddings(
                     model=settings.EMBEDDING_MODEL,
@@ -842,12 +847,12 @@ class RecipeRAGService:
                 )
                 
                 self.llm = ChatOpenAI(
-                    model_name=settings.LLM_MODEL,
-                    temperature=settings.LLM_TEMPERATURE,
-                    max_tokens=settings.LLM_MAX_TOKENS,
-                    request_timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
-                    max_retries=settings.LLM_MAX_RETRIES,
-                    openai_api_key=settings.OPENAI_API_KEY
+                    **build_chat_model_kwargs(
+                        settings.LLM_MODEL,
+                        settings.LLM_MAX_TOKENS,
+                        settings.LLM_TEMPERATURE,
+                        settings.LLM_REASONING_EFFORT,
+                    )
                 )
                 self.llm.predict("Reply with OK only.")
                 
@@ -860,10 +865,38 @@ class RecipeRAGService:
                 )
                 split_docs = text_splitter.split_documents(documents)
                 
-                logger.info(f"Creating vector store with {len(split_docs)} document chunks")
-                self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
+                faiss_cache_dir = None
+                if settings.data_file_path.is_file() and type(self.embeddings) is OpenAIEmbeddings:
+                    csv_hash = hashlib.sha256(settings.data_file_path.read_bytes()).hexdigest()[:16]
+                    cache_id = f"{settings.EMBEDDING_MODEL}_{settings.CHUNK_SIZE}_{settings.CHUNK_OVERLAP}_{csv_hash}"
+                    faiss_cache_dir = settings.data_file_path.parent / ".faiss_cache" / cache_id
+                if faiss_cache_dir and (faiss_cache_dir / "index.faiss").is_file():
+                    logger.info(f"Loading cached FAISS vector store from {faiss_cache_dir}")
+                    self.vector_store = FAISS.load_local(str(faiss_cache_dir), self.embeddings)
+                else:
+                    logger.info(f"Creating vector store with {len(split_docs)} document chunks")
+                    self.vector_store = FAISS.from_documents(split_docs, self.embeddings)
+                    if faiss_cache_dir and hasattr(self.vector_store, "save_local"):
+                        try:
+                            faiss_cache_dir.mkdir(parents=True, exist_ok=True)
+                            self.vector_store.save_local(str(faiss_cache_dir))
+                        except Exception as cache_err:
+                            logger.warning(f"Failed to persist FAISS cache: {cache_err}")
 
-                self.intent_analyzer.initialize(self.llm, recipe_names=self.data_loader.recipe_lookup)
+                intent_model_name = settings.INTENT_LLM_MODEL or settings.LLM_MODEL
+                intent_llm = self.llm if (
+                    intent_model_name == settings.LLM_MODEL
+                    and settings.INTENT_REASONING_EFFORT == settings.LLM_REASONING_EFFORT
+                ) else ChatOpenAI(
+                    **build_chat_model_kwargs(
+                        intent_model_name,
+                        600,
+                        0.0,
+                        settings.INTENT_REASONING_EFFORT,
+                    )
+                )
+
+                self.intent_analyzer.initialize(intent_llm, recipe_names=self.data_loader.recipe_lookup)
                 self.recipe_verifier.initialize(self.llm)
                 self.recipe_enhancer.initialize(self.llm, aicr_service)
                 self.search_engine.initialize(self.vector_store, self.llm, self.embeddings)
@@ -1032,8 +1065,12 @@ class RecipeRAGService:
                     "Preserve all other requirements; do not assume the alternatives are already available."
                 )
             intent_data, combined_candidates = None, []
+            has_active_history = any(
+                message.get("role") == "user" or message.get("recipes") or message.get("recipe_context")
+                for message in intent_history
+            )
             composed_dinner = (
-                not redirect_red_meat and not intent_history and not catalog_recipe_name
+                not redirect_red_meat and not has_active_history and not catalog_recipe_name
                 and not is_more_request and not references_previous_recipe and not recipe_follow_up
                 and requests_composed_dinner(query)
             )
@@ -1049,7 +1086,7 @@ class RecipeRAGService:
                 report_progress("generating")
                 combined_candidates = generate_once(self.llm or self.intent_analyzer.llm, query, intent_data,
                                                     self.recipe_verifier, aicr_service)
-            elif (not redirect_red_meat and not intent_history and not catalog_recipe_name and not is_more_request
+            elif (not redirect_red_meat and not has_active_history and not catalog_recipe_name and not is_more_request
                     and (composed_dinner or re.search(r"\b(?:generate|create|invent)\s+(?:me\s+)?an?\s+(?:original\s+)?recipe\b", query, re.I))):
                 report_progress("generating")
                 intent_data, combined_candidates = self.intent_analyzer.interpret_and_generate(
@@ -1331,13 +1368,13 @@ class RecipeRAGService:
             if should_search:
                 report_progress("searching")
                 if bounded_gentle_search and settings.RECIPE_IO_WORKERS > 1:
-                    with ThreadPoolExecutor(max_workers=2) as executor:
-                        shortlist = executor.submit(
-                            self._get_database_search_candidates, normalized_recipe_request, intent_data, set(),
-                            settings.SEARCH_K, excluded_names=excluded_names
-                        )
-                        docs = self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
-                        local_candidates = shortlist.result()
+                    executor = get_io_executor(2)
+                    shortlist = executor.submit(
+                        self._get_database_search_candidates, normalized_recipe_request, intent_data, set(),
+                        settings.SEARCH_K, excluded_names=excluded_names
+                    )
+                    docs = self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
+                    local_candidates = shortlist.result()
                 else:
                     docs = self.search_engine.multi_query_search(effective_query, intent_data, k=settings.SEARCH_K * 2)
                     if bounded_gentle_search:

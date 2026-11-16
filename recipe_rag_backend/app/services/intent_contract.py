@@ -4,7 +4,7 @@ import json
 EXTRACTION_RULES = """Interpret meaning, not keyword matches. Correct obvious typos but never guess ambiguous foods,
 allergens, numbers, negation, or personal medical details. Only user messages establish requirements.
 Do not generate recipes, certify safety, evaluate database coverage, or provide nutrition advice here.
-Return compact JSON, omit unused fields and explanations. Retain every requirement; unsupported concepts
+Return compact single-line minified JSON (no indentation or newlines), omit unused/null/empty/false fields and explanations. Retain every requirement; unsupported concepts
 belong in search_strategy.must_match_criteria rather than disappearing.
 Use NESTED objects, not dotted keys or top-level preference fields. Required output shape:
 {"query_type":"recipe_search","recipe_action":"find","context_action":"new_request",

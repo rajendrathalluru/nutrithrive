@@ -404,6 +404,20 @@ preparation, storage and overall nutritional suitability, not just ingredient na
                 has_protein = True
                 compliance_report["details"]["protein_source"] = protein_source
                 break
+
+        if not has_protein:
+            protein_synonyms = {
+                "beans": ("chickpea", "garbanzo", "edamame", "black-eyed pea", "bean"),
+                "fish": ("salmon", "tuna", "cod", "tilapia", "halibut", "trout", "sardine", "shrimp", "prawn"),
+                "eggs": ("egg",),
+                "greek yogurt": ("yogurt", "kefir"),
+                "lentils": ("lentil", "split pea", "quinoa"),
+            }
+            for canonical_source, terms in protein_synonyms.items():
+                if any(term in ing for ing in ingredients_lower for term in terms):
+                    has_protein = True
+                    compliance_report["details"]["protein_source"] = canonical_source
+                    break
         
         if not has_protein:
             compliance_report["recommendations"].append(
