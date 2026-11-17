@@ -322,7 +322,7 @@ Use the intent fields above inside intent. Include constraints.requested_serving
 when the user specifies how many people to feed (including informal wording); otherwise omit it.
 Set {output_key} to {'an empty array' if recipe_count == 3 else 'null'} unless this is a clear request for a new recipe
 that needs neither clarification nor budget pricing. Do not assume unstated requirements.
-Otherwise provide {'exactly three distinct complete dinner recipes in the recipes array' if recipe_count == 3 else 'one recipe'} with name, type, description, integer servings, ingredients,
+Otherwise provide {'exactly three distinct complete dinner recipes in the recipes array' if recipe_count == 3 else 'one recipe'} with name, type, description, integer servings, calories, protein_grams, carbs, fat (numeric per-serving estimates), ingredients,
 instructions, total_time and storage_instructions. Ingredients and instructions must be arrays
 of nonempty strings. Size the quantities for the requested yield and include safe cooking endpoints.
 Preserve the requested cuisine, occasion, allergies and all other requirements. Each recipe must feed the
@@ -369,7 +369,8 @@ The top-level JSON MUST contain "intent" and "{output_key}". Put the intent temp
                        for field in ("ingredients", "instructions")):
                     continue
                 candidate = {key: recipe[key] for key in (
-                    "name", "type", "description", "servings", "ingredients", "instructions", "total_time", "storage_instructions"
+                    "name", "type", "description", "servings", "calories", "protein_grams", "carbs", "fat",
+                    "ingredients", "instructions", "total_time", "storage_instructions"
                 ) if key in recipe}
                 candidate.update(generated_by_llm=True, generation_basis="ai_only")
                 candidates.append(candidate)

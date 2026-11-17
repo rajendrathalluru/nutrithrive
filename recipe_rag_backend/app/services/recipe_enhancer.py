@@ -561,6 +561,8 @@ OUTPUT FORMAT (valid JSON only):
         "type": "Main Dish|Side Dish|Soup|Smoothie|Breakfast|Snack",
         "calories": 420,
         "protein_grams": 24,
+        "carbs": 45,
+        "fat": 14,
         "servings": {constraints.get("requested_servings") or 2},
         "total_time": "Total elapsed time with units, or empty if not established",
         "ingredients": [
@@ -583,7 +585,7 @@ OUTPUT FORMAT (valid JSON only):
     }}
 ]
 
-Return only a single-line minified JSON array (no indentation or extra whitespace). Use JSON numbers for calories and protein_grams, with no comments, placeholders, or markdown fences.
+Return only a single-line minified JSON array (no indentation or extra whitespace). Use JSON numbers for calories, protein_grams, carbs, and fat (per-serving grams), with no comments, placeholders, or markdown fences.
 Generate practical, safe, nutrition-optimized recipes that meet ALL constraints and AICR guidelines.
 Keep JSON concise for low latency: use 3-5 short instruction steps, keep description and nutrition_benefits under 12 words each, keep storage_instructions to 1 short sentence, and use [] for helpful_tips and ingredient_adaptations unless essential.
 Optional tips and adaptations must preserve every restriction, including allergens, time, ingredient forms,
@@ -612,7 +614,7 @@ Each instruction must include its numeric estimated duration, even a short mixin
 Keep sequential step durations within total_time and use safe cooking endpoints, not a rushed timer alone.
 Return only a valid JSON array with one object containing:
 name, type, ingredients (quantified strings), instructions (complete strings with durations),
-total_time (e.g. '20 minutes', numeric units), calories and protein_grams (numeric estimates),
+total_time (e.g. '20 minutes', numeric units), calories, protein_grams, carbs, and fat (numeric per-serving estimates),
 description, nutrition_benefits, storage_instructions, helpful_tips, ingredient_adaptations.
 Use at most one short tip and one substitution with quantities and changed steps. Each option must meet
 the same total time, safety and other restrictions. Use [] when no compatible option exists.
@@ -682,6 +684,8 @@ The finished recipe undergoes independent timing, user-requirement, and guidelin
                     "type": recipe.get("type", "CUSTOM"),
                     "calories": recipe.get("calories", 0),
                     "protein_grams": recipe.get("protein_grams", 0),
+                    "carbs": recipe.get("carbs", 0),
+                    "fat": recipe.get("fat", 0),
                     **({"servings": recipe.get("servings")} if intent_data.get("budget_request") or constraints.get("requested_servings") is not None else {}),
                     "ingredients": recipe.get("ingredients", []),
                     "instructions": recipe.get("instructions", []),
@@ -820,7 +824,7 @@ NUTRITION AND FOOD SAFETY GUIDANCE:
 Return a valid JSON array with exactly {len(request['references'])} complete adapted recipe(s), one per selected reference.
 Each object needs description, name (retain recognizable dish identity), type, ingredients (array of quantified STRINGS,
 never objects), instructions (array of complete step STRINGS), total_time (realistic elapsed time with units),
-calories and protein_grams (numeric estimates),
+calories, protein_grams, carbs, and fat (numeric per-serving estimates),
 storage_instructions.
 Before writing the ingredients, use description to identify the specific new ingredient forms or cooking actions.
 Do not merely say the recipe is 'transformed', 'adapted' or 'creamier': name the physical changes you will make.
@@ -976,7 +980,7 @@ NUTRITION AND FOOD SAFETY GUIDELINES:
 {guidelines}
 
 Return a valid JSON array containing exactly ONE complete corrected recipe with these keys:
-name, type, calories (number), protein_grams (number), ingredients (array of ingredient lines),
+name, type, calories (number), protein_grams (number), carbs (number), fat (number), ingredients (array of ingredient lines),
 instructions (array of complete steps), total_time (elapsed time with units), description, nutrition_benefits, storage_instructions.
 Update the instructions to use the corrected ingredients; include all ingredients required by the steps.
 Do not add helpful tips or further adaptations. No markdown, comments, trailing commas, or placeholders.
@@ -1049,14 +1053,29 @@ The output will undergo the same independent verification as every other recipe.
         try:
             payload = json.loads(cleaned)
         except json.JSONDecodeError:
-            match = re.search(r"\[\s*\{.*\}\s*\]", cleaned, re.DOTALL)
-            if match:
-                payload = json.loads(match.group(0))
-            else:
-                object_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-                if not object_match:
-                    raise
-                payload = json.loads(object_match.group(0))
+            # Salvage common LLM JSON syntax mistakes (trailing commas) or truncated multi-recipe arrays
+            repaired = re.sub(r",\s*([\]}])", r"\1", cleaned)
+            try:
+                payload = json.loads(repaired)
+            except json.JSONDecodeError:
+                match = re.search(r"\[\s*\{.*\}\s*\]", repaired, re.DOTALL)
+                if match:
+                    try:
+                        payload = json.loads(match.group(0))
+                    except json.JSONDecodeError:
+                        payload = self._salvage_complete_json_objects(repaired)
+                        if not payload:
+                            raise
+                else:
+                    object_match = re.search(r"\{.*\}", repaired, re.DOTALL)
+                    if not object_match:
+                        raise
+                    try:
+                        payload = json.loads(object_match.group(0))
+                    except json.JSONDecodeError:
+                        payload = self._salvage_complete_json_objects(repaired)
+                        if not payload:
+                            raise
 
         if isinstance(payload, list):
             return [recipe for recipe in payload if isinstance(recipe, dict)]
@@ -1071,6 +1090,24 @@ The output will undergo the same independent verification as every other recipe.
                 return [payload]
 
         return []
+
+    def _salvage_complete_json_objects(self, text: str) -> List[Dict[str, Any]]:
+        decoder = json.JSONDecoder()
+        objects: List[Dict[str, Any]] = []
+        idx = 0
+        length = len(text)
+        while idx < length:
+            brace = text.find("{", idx)
+            if brace == -1:
+                break
+            try:
+                obj, end = decoder.raw_decode(text, brace)
+                if isinstance(obj, dict) and obj.get("name") and isinstance(obj.get("ingredients"), list):
+                    objects.append(obj)
+                idx = end
+            except json.JSONDecodeError:
+                idx = brace + 1
+        return objects
 
     def generate_helpful_no_results_message(self, query: str, intent_data: Dict[str, Any]) -> str:
         """Generate a helpful message when no recipes can be found or generated"""

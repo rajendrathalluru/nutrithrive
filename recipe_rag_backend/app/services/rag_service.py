@@ -1511,12 +1511,12 @@ class RecipeRAGService:
             
             # Step 6: Generate fallback if needed with AICR guidelines
             source_docs = verified_recipes
-            if (shared_fit_route and 0 < len(source_docs) < MAX_RECIPES_PER_RESPONSE
+            if (shared_fit_route and not single_pass_dinner and 0 < len(source_docs) < MAX_RECIPES_PER_RESPONSE
                     and not requests_catalog_source(recipe_request_query)):
                 source_docs = self._complete_composed_dinner(
                     normalized_recipe_request, intent_data, source_docs, failed_recipes
                 )
-            if (not catalog_recipes and 0 < len(source_docs) < MAX_RECIPES_PER_RESPONSE
+            if (not catalog_recipes and not single_pass_dinner and 0 < len(source_docs) < MAX_RECIPES_PER_RESPONSE
                     and intent_data == simple_timed_intent(intent_data.get("resolved_query", ""))):
                 report_progress("generating")
                 existing_names = {self._normalize_recipe_name(recipe["name"]) for recipe in source_docs}

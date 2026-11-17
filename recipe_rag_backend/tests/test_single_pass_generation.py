@@ -51,7 +51,8 @@ class SinglePassGenerationTests(unittest.TestCase):
         intent = json.JSONDecoder().raw_decode(prompt.split("ACTIVE REQUIREMENTS: ", 1)[1])[0]
         recipes = [{
             "name": f"Chinese Bean Dinner {index}", "type": "Main Dish", "description": "Chinese-inspired dinner.",
-            "servings": 6, "ingredients": ["6 cups cooked beans", "6 cups cooked brown rice"],
+            "servings": 6, "calories": 410, "protein_grams": 18, "carbs": 56, "fat": 11,
+            "ingredients": ["6 cups cooked beans", "6 cups cooked brown rice"],
             "instructions": ["Heat beans thoroughly and serve with the rice."],
             "total_time": "10 minutes", "storage_instructions": "Refrigerate leftovers promptly.",
             "assessment": {
@@ -92,6 +93,10 @@ class SinglePassGenerationTests(unittest.TestCase):
         self.assertTrue(all(recipe["source_label"] == "AI Generated" for recipe in result["source_documents"]))
         self.assertTrue(all(recipe["verification_details"]["independent_model_review"] is False
                             for recipe in result["source_documents"]))
+        self.assertTrue(all(
+            (recipe["calories"], recipe["protein_grams"], recipe["carbs"], recipe["fat"]) == (410, 18, 56, 11)
+            for recipe in result["source_documents"]
+        ))
         self.assertIsNone(result["intent_analysis"]["constraints"]["time_max_minutes"])
         self.assertEqual(self.model.predict.call_args.kwargs["response_format"]["type"], "json_schema")
 
@@ -142,3 +147,35 @@ class SinglePassGenerationTests(unittest.TestCase):
         result = generate_once(model, QUERY, intent, verifier, aicr_service)
         model.predict.assert_called_once()
         self.assertFalse(result[0]["verification_details"]["passes_verification"])
+
+    def test_single_pass_after_shared_fit_route_does_not_trigger_redundant_fallback_call(self):
+        self.service.intent_analyzer.understand_query_intent_with_context = Mock(return_value={
+            "query_type": "recipe_search",
+            "context_action": "new_request",
+            "constraints": {"requested_servings": 6},
+            "preferences": {"meal_types": ["dinner"]},
+            "search_strategy": {},
+            "requirement_coverage": {"complete": True, "unresolved": []},
+        })
+        def two_valid_one_wrong_yield(recipes):
+            recipes[2]["servings"] = 2
+            return recipes
+        self.mutate = two_valid_one_wrong_yield
+        with patch("app.services.rag_service.settings.RECIPE_SINGLE_PASS_DINNER", True), \
+                patch("app.services.rag_service.safety_service.should_intercept", return_value=False):
+            result = self.service.ask_question("Find dinner recipes for 6 people")
+        self.assertEqual(result["matches_found"], 2)
+        self.model.predict.assert_called_once()
+        self.service.recipe_enhancer.generate_fallback_recipes.assert_not_called()
+
+    def test_enhancer_salvages_valid_recipes_from_partially_malformed_json_array(self):
+        from app.services.recipe_enhancer import RecipeEnhancer
+        enhancer = RecipeEnhancer()
+        malformed = (
+            '[{"name": "Lentil Soup", "type": "Soup", "ingredients": ["1 cup lentils"], '
+            '"instructions": ["1. Simmer lentils."],}, '
+            '{"name": "Truncated Recipe", "ingredients": ["1 cup'
+        )
+        parsed = enhancer._parse_generated_recipe_response(malformed)
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(parsed[0]["name"], "Lentil Soup")

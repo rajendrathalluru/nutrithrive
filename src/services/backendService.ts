@@ -230,9 +230,9 @@ export class BackendService {
           difficulty: doc.difficulty || undefined,
           nutrition: {
             calories: doc.calories ? parseFloat(doc.calories) : 0,
-            protein: doc.protein || undefined,
-            carbs: doc.carbs || undefined,
-            fat: doc.fat || undefined
+            protein: doc.protein ?? doc.protein_grams ?? undefined,
+            carbs: doc.carbs ?? doc.carbohydrates_grams ?? undefined,
+            fat: doc.fat ?? doc.fat_grams ?? undefined
           }
         };
 

@@ -79,12 +79,22 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
           )}
         </div>
         
-        {/* Calories */}
-        {recipe.calories > 0 && (
-          <div className="mb-3">
-            <span className="bg-slate-100 text-slate-700 text-sm px-3 py-1 rounded-full border border-slate-200">
-              {recipe.calories} calories
-            </span>
+        {/* Calories & Macros */}
+        {(recipe.calories > 0 || nutritionItems.length > 0) && (
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            {recipe.calories > 0 && (
+              <span className="bg-slate-100 text-slate-700 text-sm px-3 py-1 rounded-full border border-slate-200">
+                {recipe.calories} calories
+              </span>
+            )}
+            {nutritionItems.map((item) => (
+              <span
+                key={item.label}
+                className="bg-slate-100 text-slate-700 text-sm px-3 py-1 rounded-full border border-slate-200"
+              >
+                {item.value} {item.label}
+              </span>
+            ))}
           </div>
         )}
         
@@ -287,21 +297,6 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
                     </li>
                   ))}
                 </ul>
-              </div>
-            )}
-            
-            {/* Nutrition Information */}
-            {nutritionItems.length > 0 && (
-              <div>
-                <h4 className="font-medium mb-2">Nutrition (per serving)</h4>
-                <div className="grid grid-cols-3 gap-2 text-sm">
-                  {nutritionItems.map((item) => (
-                    <div key={item.label} className="text-center p-2 bg-slate-50 rounded-2xl border border-slate-200">
-                      <div className="font-semibold">{item.value}</div>
-                      <div className="text-slate-500 text-xs">{item.label}</div>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
           </div>
