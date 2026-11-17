@@ -82,6 +82,24 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
             logger.exception("Unable to answer recipe follow-up")
             return "I couldn't answer that recipe question right now. Please try again."
     
+    def _format_recipe_bullet(self, recipe: Dict[str, Any], include_servings: bool = False) -> str:
+        name = str(recipe.get("name", "Recipe")).strip()
+        servings_part = (
+            f" (serves {recipe['servings']})"
+            if include_servings and recipe.get("servings")
+            else ""
+        )
+        desc = str(recipe.get("description") or "").strip()
+        benefits = str(recipe.get("nutrition_benefits") or "").strip()
+        summary = desc
+        if not summary or summary.lower() in {"a dinner recipe.", "custom generated recipe for optimal nutrition"}:
+            summary = benefits
+        if summary and len(summary) > 160:
+            summary = summary[:157].rstrip() + "..."
+        if summary:
+            return f"• {name}{servings_part} — {summary}"
+        return f"• {name}{servings_part}"
+
     def generate_personalized_response(self, query: str, source_docs: List[Dict], intent_data: Dict[str, Any]) -> str:
         """
         Generate sensitive response focusing on nutrition without emphasizing cancer
@@ -92,13 +110,18 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                 and all(recipe.get("verification_details", {}).get("method") == "catalog_label_local_checks"
                         for recipe in source_docs)):
             return "\n".join(["Here are matching recipes from the catalog:", *(
-                f"• {recipe['name']}" for recipe in source_docs
+                self._format_recipe_bullet(recipe) for recipe in source_docs
             ), "Open a card for ingredients, steps, and the original source."])
         if intent_data.get("generation_recipe_count") == 3 and not intent_data.get("budget_request"):
             introduction = "Here is one AI-generated recipe" if len(source_docs) == 1 else f"Here are {len(source_docs)} AI-generated recipes"
             single_pass = intent_data.get("generation_mode") == "single_pass"
             lines = [introduction + (" prepared for your request:" if single_pass else " checked against your request:")]
-            lines.extend(f"• {recipe['name']} — serves {recipe['servings']}" for recipe in source_docs)
+            lines.extend(
+                (f"• {recipe['name']} — serves {recipe['servings']}"
+                 + (f". {recipe['description'].strip()}" if str(recipe.get("description") or "").strip()
+                    and str(recipe.get("description") or "").strip().lower() not in {"a dinner recipe.", "custom generated recipe for optimal nutrition"} else ""))
+                for recipe in source_docs
+            )
             if len(source_docs) < intent_data.get("_confirmed_alternative_count", 3):
                 lines.append("Fewer than three recipes passed the checks; I have not relaxed your requirements.")
             if single_pass:
@@ -135,7 +158,7 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                 noun = "recipe" if recipe_count == 1 else "recipes"
                 focus = "mildly seasoned, lower-effort" if gentle and low_exertion else "mildly seasoned" if gentle else "lower-effort"
                 lines = [f"Here {'is' if recipe_count == 1 else 'are'} {recipe_count} {focus} {noun} to consider:"]
-                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.extend(self._format_recipe_bullet(recipe) for recipe in source_docs[:3])
                 lines.append("Open a card for the ingredients, starting ingredient forms, and preparation steps.")
                 lines.extend(self._preparation_cautions(constraints))
                 return "\n".join(lines)
@@ -194,14 +217,14 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
             if constraints.get("ingredient_storage") == "canned_only":
                 noun = "recipe" if recipe_count == 1 else "recipes"
                 lines = [f"I found {recipe_count} {noun} using only explicitly canned food ingredients:"]
-                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.extend(self._format_recipe_bullet(recipe) for recipe in source_docs[:3])
                 lines.append("Open a recipe card for the ingredients and preparation steps. Canned-only does not necessarily mean no cooking.")
                 return "\n".join(lines)
 
             if constraints.get("ingredient_storage") == "frozen_only":
                 noun = "recipe" if recipe_count == 1 else "recipes"
                 lines = [f"Here {'is' if recipe_count == 1 else 'are'} {recipe_count} {noun} made with ingredients supplied frozen:"]
-                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.extend(self._format_recipe_bullet(recipe) for recipe in source_docs[:3])
                 lines.append("Open a recipe card for the ingredients and complete preparation steps. Frozen ingredients may still require cooking or reheating.")
                 return "\n".join(lines)
             
@@ -210,7 +233,7 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                 equipment_text = " and ".join(required_equipment)
                 noun = "recipe" if recipe_count == 1 else "recipes"
                 lines = [f"I found {recipe_count} {noun} that use your {equipment_text}:"]
-                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.extend(self._format_recipe_bullet(recipe) for recipe in source_docs[:3])
                 lines.append("Open a recipe card for ingredients and the complete preparation steps.")
                 return "\n".join(lines)
 
@@ -220,12 +243,12 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
                     return "I couldn't confirm that these recipes include all your required ingredients."
                 ingredient_text = ", ".join(required_ingredients[:-1]) + " and " + required_ingredients[-1] if len(required_ingredients) > 1 else required_ingredients[0]
                 lines = [f"Here {'is' if recipe_count == 1 else 'are'} {recipe_count} {'recipe' if recipe_count == 1 else 'recipes'} using {ingredient_text}:"]
-                lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+                lines.extend(self._format_recipe_bullet(recipe) for recipe in source_docs[:3])
                 lines.append("Open a recipe card for the ingredients and preparation steps.")
                 return "\n".join(lines)
 
             lines = [f"I found {recipe_count} {'recipe' if recipe_count == 1 else 'recipes'} for your request:"]
-            lines.extend(f"• {recipe['name']}" for recipe in source_docs[:3])
+            lines.extend(self._format_recipe_bullet(recipe) for recipe in source_docs[:3])
             lines.append("Open a recipe card for ingredients and steps.")
             if intent_data.get("cancer_patient_specific", {}).get("symptoms") or constraints.get("health_conditions"):
                 lines.append("Food tolerance and needs vary; follow your care team's dietary guidance.")

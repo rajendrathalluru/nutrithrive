@@ -87,10 +87,10 @@ def _has_safe_cooking_endpoints(recipe):
             if not re.search(r"\b(?:165\s*°?\s*f|74\s*°?\s*c|cooked\s+through|no\s+longer\s+pink|juices\s+run\s+clear)\b", instructions_text, re.I):
                 return False
         if FISH_TERMS.search(lower) and not re.search(r"\b(?:cooked|canned|pouch|smoked)\b", lower):
-            if not re.search(r"\b(?:145\s*°?\s*f|63\s*°?\s*c|flakes?\s+easily|opaque)\b", instructions_text, re.I):
+            if not re.search(r"\b(?:145\s*°?\s*f|63\s*°?\s*c|flakes?\s+easily|opaque|cooked\s+through)\b", instructions_text, re.I):
                 return False
         if EGG_TERMS.search(lower) and not re.search(r"\b(?:hard[- ]boiled|cooked|pasteurized)\b", lower):
-            if not re.search(r"\b(?:firm|fully\s+set|160\s*°?\s*f|71\s*°?\s*c|hard[- ]boil)\b", instructions_text, re.I):
+            if not re.search(r"\b(?:firm|fully\s+set|160\s*°?\s*f|71\s*°?\s*c|hard[- ]boil|cooked\s+through)\b", instructions_text, re.I):
                 return False
     return True
 
