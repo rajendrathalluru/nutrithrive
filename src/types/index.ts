@@ -50,6 +50,7 @@ export interface Recipe {
     line_items?: Array<{ ingredient: string; used_cost: string | null; purchase_cost: string; packages_to_buy: number; source_url: string; observed_on?: string; region?: string; product?: string; price_basis?: string; listing_evidence?: string }>;
   };
   difficulty?: string;
+  imageUrl?: string;
   nutrition?: {
     calories: number;
     protein?: number;

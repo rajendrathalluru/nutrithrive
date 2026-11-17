@@ -179,3 +179,19 @@ class SinglePassGenerationTests(unittest.TestCase):
         parsed = enhancer._parse_generated_recipe_response(malformed)
         self.assertEqual(len(parsed), 1)
         self.assertEqual(parsed[0]["name"], "Lentil Soup")
+
+    def test_recipe_image_service_generates_and_caches_base64_image(self):
+        from app.services.recipe_image_service import RecipeImageService
+
+        image_service = RecipeImageService()
+        mock_response = Mock(ok=True, json=Mock(return_value={"data": [{"b64_json": "aGVsbG8="}]}))
+        with patch("app.services.recipe_image_service.settings.OPENAI_API_KEY", "test-key"), \
+                patch("app.services.recipe_image_service.requests.post", return_value=mock_response) as post:
+            first = image_service.generate_recipe_image("Baked Salmon Burger", "Omega-3 rich burger", ["6 oz salmon", "1 avocado"])
+            second = image_service.generate_recipe_image("Baked Salmon Burger", "Omega-3 rich burger", ["6 oz salmon", "1 avocado"])
+        self.assertEqual(first["image_url"], "data:image/png;base64,aGVsbG8=")
+        self.assertEqual(second["image_url"], "data:image/png;base64,aGVsbG8=")
+        post.assert_called_once()
+        prompt = post.call_args.kwargs["json"]["prompt"]
+        self.assertIn("Baked Salmon Burger", prompt)
+        self.assertIn("6 oz salmon", prompt)

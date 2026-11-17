@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Zap, AlertCircle, FileText, Hash, Users, Clock, ExternalLink } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Zap, AlertCircle, FileText, Hash, Users, Clock, ExternalLink, Sparkles, ZoomIn, X } from 'lucide-react';
 import { Recipe } from '../types';
 import { groupIngredients } from '../utils/ingredientGroups';
+import { BackendService } from '../services/backendService';
 
 interface RecipeCardProps {
   recipe: Recipe;
@@ -9,6 +10,9 @@ interface RecipeCardProps {
 
 const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
   const [expanded, setExpanded] = useState(false);
+  const [imageUrl, setImageUrl] = useState<string | null>(recipe.imageUrl || null);
+  const [imageLoading, setImageLoading] = useState(false);
+  const [imageModalOpen, setImageModalOpen] = useState(false);
   const helpfulTips = Array.isArray(recipe.helpfulTips) ? recipe.helpfulTips.filter(Boolean) : [];
   const ingredients = Array.isArray(recipe.ingredients) ? recipe.ingredients.filter(Boolean) : [];
   const ingredientEntries = groupIngredients(ingredients);
@@ -18,6 +22,59 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
     : [];
   const isAiGenerated = recipe.source === 'llm_generated';
   const sourceLabel = recipe.sourceLabel || (isAiGenerated ? 'AI Generated' : 'Sourced from AICR');
+
+  useEffect(() => {
+    if (!imageModalOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setImageModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [imageModalOpen]);
+
+  useEffect(() => {
+    if (recipe.imageUrl) {
+      setImageUrl(recipe.imageUrl);
+      return;
+    }
+    if (!isAiGenerated || !recipe.title || typeof globalThis.fetch !== 'function') {
+      return;
+    }
+    const service = BackendService.getInstance() as {
+      generateRecipeImage?: (title: string, description?: string, ingredients?: string[]) => Promise<string | null>;
+    };
+    if (typeof service.generateRecipeImage !== 'function') {
+      return;
+    }
+    const promise = service.generateRecipeImage(recipe.title, recipe.description || '', ingredients);
+    if (!promise || typeof promise.then !== 'function') {
+      return;
+    }
+    let cancelled = false;
+    setImageLoading(true);
+    promise
+      .then((url) => {
+        if (!cancelled) {
+          if (url) {
+            setImageUrl(url);
+            recipe.imageUrl = url;
+          }
+          setImageLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setImageLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAiGenerated, recipe.id, recipe.title, recipe.description, recipe.imageUrl]);
   const sourceUrl = typeof recipe.sourceUrl === 'string' && /^https?:\/\//i.test(recipe.sourceUrl)
     ? recipe.sourceUrl
     : '';
@@ -42,59 +99,136 @@ const RecipeCard: React.FC<RecipeCardProps> = ({ recipe }) => {
   return (
     <div className="tw-recipe-card overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_18px_50px_rgba(15,23,42,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_22px_60px_rgba(15,23,42,0.12)]">
       <div className="p-5">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-3">
-          <h3 className="font-semibold text-slate-900 text-xl leading-tight">{recipe.title}</h3>
-          <div className="flex flex-col items-end gap-1">
-            {isAiGenerated ? (
-              <span className="bg-violet-50 text-violet-700 text-xs px-2.5 py-1 rounded-full flex items-center gap-1 border border-violet-100">
-                <Zap className="w-3 h-3" />
-                {sourceLabel}
-              </span>
-            ) : null}
-          </div>
-        </div>
-        
-        {/* Description */}
-        {recipe.description && (
-          <p className="text-slate-600 text-sm mb-4 leading-6">{recipe.description}</p>
-        )}
-        
-        {/* Metadata */}
-        <div className="flex items-center gap-4 text-sm text-slate-500 mb-4">
-          {recipe.cookTime && (
-            <span className="flex items-center gap-1">
-              <Clock className="w-4 h-4" />
-              {recipe.cookTime}
-            </span>
-          )}
-          {recipe.servings && (
-            <span className="flex items-center gap-1">
-              <Users className="w-4 h-4" />
-              {recipe.servings} servings
-            </span>
-          )}
-          {recipe.difficulty && (
-            <span>{recipe.difficulty}</span>
-          )}
-        </div>
-        
-        {/* Calories & Macros */}
-        {(recipe.calories > 0 || nutritionItems.length > 0) && (
-          <div className="flex flex-wrap items-center gap-2 mb-3">
-            {recipe.calories > 0 && (
-              <span className="bg-slate-100 text-slate-700 text-sm px-3 py-1 rounded-full border border-slate-200">
-                {recipe.calories} calories
-              </span>
+        <div className="flex flex-col sm:flex-row sm:items-start gap-4 mb-3">
+          <div className="flex-1 min-w-0">
+            {/* Header */}
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <h3 className="font-semibold text-slate-900 text-xl leading-tight">{recipe.title}</h3>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                {isAiGenerated ? (
+                  <span className="bg-violet-50 text-violet-700 text-xs px-2.5 py-1 rounded-full flex items-center gap-1 border border-violet-100">
+                    <Zap className="w-3 h-3" />
+                    {sourceLabel}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            
+            {/* Description */}
+            {recipe.description && (
+              <p className="text-slate-600 text-sm mb-3 leading-6">{recipe.description}</p>
             )}
-            {nutritionItems.map((item) => (
-              <span
-                key={item.label}
-                className="bg-slate-100 text-slate-700 text-sm px-3 py-1 rounded-full border border-slate-200"
+            
+            {/* Metadata */}
+            {(recipe.cookTime || recipe.servings || recipe.difficulty) && (
+              <div className="flex items-center gap-4 text-sm text-slate-500 mb-3">
+                {recipe.cookTime && (
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-4 h-4" />
+                    {recipe.cookTime}
+                  </span>
+                )}
+                {recipe.servings && (
+                  <span className="flex items-center gap-1">
+                    <Users className="w-4 h-4" />
+                    {recipe.servings} servings
+                  </span>
+                )}
+                {recipe.difficulty && (
+                  <span>{recipe.difficulty}</span>
+                )}
+              </div>
+            )}
+            
+            {/* Calories & Macros */}
+            {(recipe.calories > 0 || nutritionItems.length > 0) && (
+              <div className="flex flex-wrap items-center gap-2">
+                {recipe.calories > 0 && (
+                  <span className="bg-slate-100 text-slate-700 text-sm px-3 py-1 rounded-full border border-slate-200">
+                    {recipe.calories} calories
+                  </span>
+                )}
+                {nutritionItems.map((item) => (
+                  <span
+                    key={item.label}
+                    className="bg-slate-100 text-slate-700 text-sm px-3 py-1 rounded-full border border-slate-200"
+                  >
+                    {item.value} {item.label}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {isAiGenerated && (imageUrl || imageLoading) && (
+            <figure className="relative group h-44 w-full sm:h-36 sm:w-36 shrink-0 overflow-hidden rounded-2xl bg-slate-100 border border-slate-200">
+              {imageUrl ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setImageModalOpen(true)}
+                    aria-label={`Enlarge image of ${recipe.title}`}
+                    className="block h-full w-full cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  >
+                    <img
+                      src={imageUrl}
+                      alt={`AI-created illustration of ${recipe.title}`}
+                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                      loading="lazy"
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImageModalOpen(true)}
+                    aria-label="Magnify dish image"
+                    className="absolute top-1.5 right-1.5 rounded-full bg-slate-900/75 p-1.5 text-white shadow-sm backdrop-blur-sm transition hover:bg-slate-900"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                  <figcaption className="pointer-events-none absolute bottom-1.5 right-1.5 rounded-full bg-slate-900/75 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
+                    AI-created image
+                  </figcaption>
+                </>
+              ) : (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 px-2 text-center text-[11px] font-medium text-slate-500 animate-pulse">
+                  <Sparkles className="w-4 h-4 text-violet-500" />
+                  <span>Generating preview…</span>
+                </div>
+              )}
+            </figure>
+          )}
+        </div>
+
+        {imageModalOpen && imageUrl && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Enlarged image of ${recipe.title}`}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm"
+            onClick={() => setImageModalOpen(false)}
+          >
+            <div
+              className="relative max-h-[90vh] max-w-2xl w-full overflow-hidden rounded-3xl bg-white shadow-2xl border border-slate-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setImageModalOpen(false)}
+                aria-label="Close enlarged image"
+                className="absolute top-3 right-3 z-10 rounded-full bg-slate-900/80 p-2 text-white shadow hover:bg-slate-900"
               >
-                {item.value} {item.label}
-              </span>
-            ))}
+                <X className="w-4 h-4" />
+              </button>
+              <img
+                src={imageUrl}
+                alt={`Enlarged AI-created illustration of ${recipe.title}`}
+                className="max-h-[80vh] w-full object-contain bg-slate-50"
+              />
+              <div className="flex items-center justify-between px-4 py-3 text-sm text-slate-700 border-t border-slate-200">
+                <span className="font-medium text-slate-900 truncate">{recipe.title}</span>
+                <span className="text-xs text-slate-500 shrink-0 ml-3">AI-created image</span>
+              </div>
+            </div>
           </div>
         )}
         

@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import RecipeCard from './RecipeCard';
 import { Recipe } from '../types';
+import { BackendService } from '../services/backendService';
 
 const recipe: Recipe = {
   id: 'rice-bowl', title: 'Rice Bowl', description: 'A rice bowl.', type: 'Main Dish',
@@ -9,6 +10,14 @@ const recipe: Recipe = {
   ingredients: ['1 cup rice', 'Sauce:', '1 tbsp tamari', 'Garnishes:', '1 tsp sesame seeds'],
   instructions: ['Cook rice and add sauce and garnishes.'],
 };
+
+beforeEach(() => {
+  jest.spyOn(BackendService.getInstance(), 'generateRecipeImage').mockImplementation(() => undefined as any);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 test('only shows budget details when provided by the backend', () => {
   const { rerender } = render(<RecipeCard recipe={recipe} />);
@@ -121,4 +130,33 @@ test('does not present source notes for AI recipes or unsafe reference links', (
   expect(screen.queryByRole('link', { name: /Unsafe/ })).not.toBeInTheDocument();
   rerender(<RecipeCard recipe={{ ...recipe, source: 'database_exact', ...annotations }} />);
   expect(screen.queryByRole('link', { name: /Unsafe/ })).not.toBeInTheDocument();
+});
+
+test('loads and displays an AI-created image only for AI-generated recipes', async () => {
+  const service = BackendService.getInstance();
+  const spy = jest.spyOn(service, 'generateRecipeImage').mockResolvedValue('data:image/png;base64,iVBORw0KGgo=');
+
+  const { rerender } = render(<RecipeCard recipe={{ ...recipe, source: 'database_exact' }} />);
+  expect(spy).not.toHaveBeenCalled();
+  expect(screen.queryByText('AI-created image')).not.toBeInTheDocument();
+
+  rerender(<RecipeCard recipe={{ ...recipe, source: 'llm_generated' }} />);
+  expect(await screen.findByAltText('AI-created illustration of Rice Bowl')).toHaveAttribute(
+    'src',
+    'data:image/png;base64,iVBORw0KGgo='
+  );
+  expect(screen.getByText('AI-created image')).toBeInTheDocument();
+  expect(spy).toHaveBeenCalledWith('Rice Bowl', 'A rice bowl.', recipe.ingredients);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Magnify dish image' }));
+  const dialog = screen.getByRole('dialog', { name: 'Enlarged image of Rice Bowl' });
+  expect(dialog).toBeInTheDocument();
+  expect(within(dialog).getByAltText('Enlarged AI-created illustration of Rice Bowl')).toHaveAttribute(
+    'src',
+    'data:image/png;base64,iVBORw0KGgo='
+  );
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close enlarged image' }));
+  expect(screen.queryByRole('dialog', { name: 'Enlarged image of Rice Bowl' })).not.toBeInTheDocument();
+
+  spy.mockRestore();
 });

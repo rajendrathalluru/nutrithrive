@@ -56,6 +56,7 @@ class Settings:
     RECIPE_LLM_RERANKING: bool = environment_flag("RECIPE_LLM_RERANKING", "false")
     RECIPE_SINGLE_PASS_DINNER: bool = environment_flag("RECIPE_SINGLE_PASS_DINNER", "true")
     RECIPE_AI_COST_ESTIMATES: bool = environment_flag("RECIPE_AI_COST_ESTIMATES", "true")
+    RECIPE_IMAGE_MODEL: str = os.getenv("RECIPE_IMAGE_MODEL", "gpt-image-2.6-flare").strip() or "gpt-image-2.6-flare"
     RECIPE_VERIFIED_CATALOG_PATH: str = os.getenv("RECIPE_VERIFIED_CATALOG_PATH", str(BASE_DIR / "app/data/verified_catalog.json"))
     RECIPE_VERIFIED_CATALOG_TTL_SECONDS: int = max(0, int(os.getenv("RECIPE_VERIFIED_CATALOG_TTL_SECONDS", "604800")))
     RECIPE_REQUEST_WORKERS: int = max(1, min(4, int(os.getenv("RECIPE_REQUEST_WORKERS", "2"))))

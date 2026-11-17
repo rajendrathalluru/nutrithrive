@@ -150,6 +150,35 @@ export class BackendService {
     return this.baseUrl;
   }
 
+  async generateRecipeImage(
+    title: string,
+    description: string = '',
+    ingredients: string[] = []
+  ): Promise<string | null> {
+    try {
+      const response = await apiFetch(`${this.baseUrl}/recipe/image`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title,
+          description,
+          ingredients: ingredients.slice(0, 6),
+        }),
+      });
+      if (!response.ok) {
+        return null;
+      }
+      const data = await response.json();
+      return typeof data?.image_url === 'string' && data.image_url.trim()
+        ? data.image_url.trim()
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   getWebSocketUrl(path: string): string {
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
     const url = new URL(this.baseUrl);
@@ -228,6 +257,7 @@ export class BackendService {
           budgetAssessment: doc.budget_assessment || undefined,
           aiCostEstimate: doc.ai_cost_estimate || undefined,
           difficulty: doc.difficulty || undefined,
+          imageUrl: typeof doc.image_url === 'string' ? doc.image_url : undefined,
           nutrition: {
             calories: doc.calories ? parseFloat(doc.calories) : 0,
             protein: doc.protein ?? doc.protein_grams ?? undefined,

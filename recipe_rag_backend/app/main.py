@@ -23,6 +23,7 @@ from app.core.access_control import AccessControl, AccessControlMiddleware
 from app.services.rag_service import rag_service
 from app.services.safety_service import safety_service
 from app.services.recipe_progress import run_recipe_work, stream_recipe_work
+from app.services.recipe_image_service import recipe_image_service
 import openai
 import requests
 
@@ -62,6 +63,20 @@ class ChatMessage(BaseModel):
 class ConversationQueryRequest(RecipeRequest):
     """Extended request with conversation history"""
     conversation_history: Optional[List[ChatMessage]] = None
+
+
+class RecipeImageRequest(BaseModel):
+    title: str
+    description: Optional[str] = ""
+    ingredients: Optional[List[str]] = None
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Recipe title must not be empty.")
+        return normalized[:160]
 
 # ============= END NEW MODELS =============
 
@@ -405,7 +420,26 @@ async def cache_stats():
 async def clear_cache():
     """Clear all caches (useful for testing)"""
     rag_service.clear_caches()
+    recipe_image_service.cache.clear()
     return {"message": "All caches cleared successfully"}
+
+
+@app.post("/recipe/image")
+async def generate_recipe_image(request: RecipeImageRequest):
+    """Generate an AI food illustration for an AI-generated recipe."""
+    try:
+        result = await asyncio.to_thread(
+            recipe_image_service.generate_recipe_image,
+            request.title,
+            request.description or "",
+            request.ingredients or [],
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.warning(f"Recipe image generation error: {exc}")
+        raise HTTPException(status_code=502, detail="Unable to generate recipe image right now.")
 
 
 @app.post("/realtime/session")
