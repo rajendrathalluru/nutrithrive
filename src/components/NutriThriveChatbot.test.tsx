@@ -203,18 +203,20 @@ test('clicking a visible starter prompt sends that exact request', async () => {
   expect(searchRecipes.mock.calls[0][0]).toBe(prompt);
 });
 
-test('keeps search analysis available in a disclosure', async () => {
+test('does not render search analysis disclosure and formats bulleted recipe summaries cleanly', async () => {
   searchRecipes.mockResolvedValue({ recipes: [], backendData: {
-    response: 'Matching your requirements.',
+    response: 'I found 1 recipe for your request:\n• Cozy One-Pot Chicken and Rice — Tender chicken and vegetables · High protein\nOpen a recipe card for ingredients and steps.',
     intent_analysis: { search_strategy: { primary_focus: 'Easy microwave meals' }, constraints: { equipment_only: ['microwave'] } },
   } });
   await readyChat();
   send('Microwave meals');
-  const summary = await screen.findByText('Search Analysis');
-  fireEvent.click(summary);
-  expect(summary.closest('details')).toHaveAttribute('open');
-  expect(screen.getByText('Easy microwave meals')).toBeVisible();
-  expect(screen.getByText('Microwave-only recipes prioritized')).toBeVisible();
+  const highlights = await screen.findByRole('list', { name: 'Recipe highlights' });
+  expect(within(highlights).getByText('Cozy One-Pot Chicken and Rice').tagName).toBe('STRONG');
+  expect(within(highlights).getByText(/Tender chicken and vegetables · High protein/)).toBeInTheDocument();
+  expect(screen.getByText('Open a recipe card for ingredients and steps.')).toBeInTheDocument();
+  expect(screen.queryByText('Search Analysis')).not.toBeInTheDocument();
+  expect(screen.queryByText('Easy microwave meals')).not.toBeInTheDocument();
+  expect(screen.queryByText('Microwave-only recipes prioritized')).not.toBeInTheDocument();
 });
 
 test('shows an alternatives offer without requiring search analysis fields', async () => {

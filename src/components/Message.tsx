@@ -8,12 +8,105 @@ interface MessageProps {
   message: MessageType;
 }
 
+const splitBullet = (raw: string): { title: string; detail: string } => {
+  const emDashIdx = raw.indexOf(' — ');
+  const colonIdx = raw.indexOf(': ');
+  let sepIdx = -1;
+  let sepLen = 0;
+
+  if (emDashIdx !== -1 && (colonIdx === -1 || emDashIdx < colonIdx)) {
+    sepIdx = emDashIdx;
+    sepLen = 3;
+  } else if (colonIdx !== -1) {
+    sepIdx = colonIdx;
+    sepLen = 2;
+  }
+
+  if (sepIdx === -1) {
+    return { title: raw, detail: '' };
+  }
+
+  return {
+    title: raw.slice(0, sepIdx),
+    detail: raw.slice(sepIdx + sepLen),
+  };
+};
+
+const renderFormattedContent = (content: string): React.ReactNode => {
+  const lines = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.some((line) => line.startsWith('• '))) {
+    return <p className="whitespace-pre-wrap leading-7 text-[15px]">{content}</p>;
+  }
+
+  const blocks: React.ReactNode[] = [];
+  let bulletBuffer: string[] = [];
+  let seenBullets = false;
+
+  const flushBullets = (keyPrefix: string) => {
+    if (bulletBuffer.length === 0) return;
+    blocks.push(
+      <ul key={`${keyPrefix}-list`} className="my-2.5 space-y-2" aria-label="Recipe highlights">
+        {bulletBuffer.map((rawBullet, idx) => {
+          const { title, detail } = splitBullet(rawBullet);
+          return (
+            <li
+              key={idx}
+              className="flex items-start gap-2.5 rounded-xl border border-[#e2e9dc] bg-[#f4f7f1] px-3.5 py-2.5 text-[14px] leading-6"
+            >
+              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#56774e]" aria-hidden="true" />
+              <div>
+                <strong className="font-semibold text-slate-900">{title}</strong>
+                {detail && <span className="text-slate-600"> — {detail}</span>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    );
+    bulletBuffer = [];
+  };
+
+  lines.forEach((line, idx) => {
+    if (line.startsWith('• ')) {
+      seenBullets = true;
+      bulletBuffer.push(line.slice(2).trim());
+      return;
+    }
+
+    flushBullets(`block-${idx}`);
+    if (!seenBullets) {
+      blocks.push(
+        <p key={`intro-${idx}`} className="text-[15px] font-medium text-slate-800 mb-2.5">
+          {line}
+        </p>
+      );
+    } else if (line.startsWith('Open ')) {
+      blocks.push(
+        <p key={`outro-${idx}`} className="mt-2 text-xs text-slate-500">
+          {line}
+        </p>
+      );
+    } else {
+      blocks.push(
+        <p key={`note-${idx}`} className="mt-2 text-sm text-slate-600 leading-6">
+          {line}
+        </p>
+      );
+    }
+  });
+
+  flushBullets('end');
+
+  return <div>{blocks}</div>;
+};
+
 const Message: React.FC<MessageProps> = ({ message }) => {
   const cleanedContent = cleanBackendText(message.content);
   const isSafetyRedirect = Boolean(message.backendData?.safety_redirect);
-  const intent = message.backendData?.intent_analysis;
-  const searchFocus = intent?.search_strategy?.primary_focus;
-  const microwaveOnly = intent?.constraints?.equipment_only?.includes('microwave');
 
   return (
     <article className={`tw-message tw-message-${message.role}`} aria-label={`${message.role === 'user' ? 'Your' : 'Thrivewell'} message`}>
@@ -39,7 +132,7 @@ const Message: React.FC<MessageProps> = ({ message }) => {
               <span>{message.progressMessage || 'Waiting for the recipe service…'}</span>
             </div>
           ) : (
-            <p className="whitespace-pre-wrap leading-7 text-[15px]">{cleanedContent}</p>
+            renderFormattedContent(cleanedContent)
           )}
 
           {isSafetyRedirect && !message.isLoading && (
@@ -70,17 +163,6 @@ const Message: React.FC<MessageProps> = ({ message }) => {
             </div>
           )}
         </div>
-        
-        {/* Display backend analysis if available */}
-        {(searchFocus || microwaveOnly) && message.backendData?.source !== 'food_guidance' && (
-          <details className="tw-search-analysis">
-            <summary>Search Analysis</summary>
-            {searchFocus && <div className="text-slate-600 mt-2">{cleanBackendText(searchFocus)}</div>}
-            {microwaveOnly && (
-              <div className="text-slate-700 mt-2">Microwave-only recipes prioritized</div>
-            )}
-          </details>
-        )}
         
         {!message.isLoading && message.recipes && message.recipes.length > 0 && (
           <div className="tw-recipes mt-5">
