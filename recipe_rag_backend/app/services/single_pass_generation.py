@@ -308,9 +308,9 @@ for a revision, preserve the selected dish and all unchanged constraints.""" if 
         f"REQUIRED SERVINGS: Every recipe MUST set integer servings to {requested_yield} and scale all ingredient quantities for {requested_yield} people.\n"
         if requested_yield is not None else ""
     )
-    concise_rules = """Keep every field concise for low latency while preserving all safety and constraint rules:
-- Use 4-8 quantified ingredients per recipe.
-- Use 3-5 clear, complete preparation steps per recipe (1-2 short sentences each, including required cooking endpoints).
+    concise_rules = """Keep wording clear and concise while preserving full culinary quality, safety, and all user constraints:
+- Include a complete, realistic quantified ingredient list (honoring any user-requested min/max ingredient limits).
+- Provide clear, complete step-by-step preparation instructions with required cooking endpoints.
 - Keep description and storage_instructions to 1 short sentence each (under 15 words).
 - Include 1 short practical tip in helpful_tips and 1 compatible substitution in ingredient_adaptations (under 15 words each; use [] only if a strict constraint prevents safe options).
 - Keep follow_up question and choice instructions under 12 words."""

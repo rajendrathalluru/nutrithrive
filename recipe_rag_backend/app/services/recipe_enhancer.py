@@ -587,7 +587,7 @@ OUTPUT FORMAT (valid JSON only):
 
 Return only a single-line minified JSON array (no indentation or extra whitespace). Use JSON numbers for calories, protein_grams, carbs, and fat (per-serving grams), with no comments, placeholders, or markdown fences.
 Generate practical, safe, nutrition-optimized recipes that meet ALL constraints and AICR guidelines.
-Keep JSON concise for low latency: use 4-7 quantified ingredients and 3-4 short instruction steps (1 sentence each, including safe cooking endpoints), keep description and nutrition_benefits under 12 words each, keep storage_instructions to 1 short sentence, and include 1 short practical tip in helpful_tips and 1 compatible substitution in ingredient_adaptations (under 15 words each; use [] only if a strict constraint such as canned_only or frozen_only prevents safe options).
+Keep wording clear and concise: use complete quantified ingredient lists and clear step-by-step instructions (including safe cooking endpoints), keep description and nutrition_benefits under 12 words each, keep storage_instructions to 1 short sentence, and include 1 short practical tip in helpful_tips and 1 compatible substitution in ingredient_adaptations (under 15 words each; use [] only if a strict constraint such as canned_only or frozen_only prevents safe options).
 Optional tips and adaptations must preserve every restriction, including allergens, time, ingredient forms,
 and equipment. Never replace a required ingredient or shorten a safety step. Use [] if no suitable option exists.
 {time_limit_generation_guidance(constraints)}
