@@ -9,6 +9,8 @@ test('presents recipe inspiration with clear source and AI distinctions', () => 
   ['AICR', 'ACS', 'AHA'].forEach(source => {
     expect(within(sources).getByText(source)).toBeInTheDocument();
   });
+  expect(within(sources).getByText(/ThriveWell recipes are based on nutrition recommendations from trusted cancer health organizations/)).toBeInTheDocument();
+  expect(within(sources).getByText(/Simple habits like eating more fruits and vegetables, whole grains, and fiber/)).toBeInTheDocument();
   expect(screen.getByText('AI Generated')).toBeInTheDocument();
   expect(screen.getByText('Meal inspiration · AI-created image')).toBeInTheDocument();
   expect(screen.getByText('Source attribution does not imply endorsement of Thrivewell.')).toBeInTheDocument();

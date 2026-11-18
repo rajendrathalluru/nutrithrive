@@ -99,10 +99,120 @@ const LandingPage: React.FC<LandingPageProps> = ({ onGetStarted, onLogout }) => 
         </section>
 
         <section className="home-sources home-container" aria-label="Recipe database sources">
-          <p>Familiar sources.<br /><strong>A thoughtful starting point.</strong></p>
-          <div><span>AICR</span><small>American Institute for<br />Cancer Research</small></div>
-          <div><span>ACS</span><small>American<br />Cancer Society</small></div>
-          <div><span>AHA</span><small>American<br />Heart Association</small></div>
+          <div className="home-sources-bar">
+            <div className="home-sources-lead">
+              <p className="home-eyebrow"><span /> Evidence-informed nutrition</p>
+              <p className="home-sources-heading">Familiar sources.<br /><strong>A thoughtful starting point.</strong></p>
+            </div>
+            <div className="home-source-org">
+              <div className="home-org-crest home-org-crest-sage" aria-hidden="true">
+                <svg viewBox="0 0 32 32" width="22" height="22" fill="none">
+                  <path d="M16 5C11.5 9.5 9.5 14.2 11 19.5C12.2 23.6 15.8 26 16 26C16.2 26 19.8 23.6 21 19.5C22.5 14.2 20.5 9.5 16 5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                  <path d="M16 11V25M16 17L19.5 14M16 20.5L12.5 17.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </div>
+              <div className="home-org-text">
+                <span>AICR</span>
+                <small>World Cancer Research Fund /<br />American Institute for Cancer Research</small>
+              </div>
+            </div>
+            <div className="home-source-org">
+              <div className="home-org-crest home-org-crest-wheat" aria-hidden="true">
+                <svg viewBox="0 0 32 32" width="22" height="22" fill="none">
+                  <circle cx="16" cy="16" r="10.5" stroke="currentColor" strokeWidth="1.6" />
+                  <path d="M16 10.5V21.5M10.5 16H21.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                  <circle cx="16" cy="16" r="3" fill="currentColor" fillOpacity="0.18" />
+                </svg>
+              </div>
+              <div className="home-org-text">
+                <span>ACS</span>
+                <small>American<br />Cancer Society</small>
+              </div>
+            </div>
+            <div className="home-source-org">
+              <div className="home-org-crest home-org-crest-terra" aria-hidden="true">
+                <svg viewBox="0 0 32 32" width="22" height="22" fill="none">
+                  <path d="M16 25.5C16 25.5 7 19.8 7 13.2C7 9.9 9.5 7.5 12.4 7.5C14.2 7.5 15.5 8.5 16 9.8C16.5 8.5 17.8 7.5 19.6 7.5C22.5 7.5 25 9.9 25 13.2C25 19.8 16 25.5 16 25.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                  <path d="M11.5 15.5H13.8L15.2 12.8L16.9 18L18.3 15.5H20.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+              <div className="home-org-text">
+                <span>AHA</span>
+                <small>American<br />Heart Association</small>
+              </div>
+            </div>
+          </div>
+
+          <div className="home-sources-story">
+            <div className="home-sources-narrative">
+              <p>
+                ThriveWell recipes are based on nutrition recommendations from trusted cancer health organizations, including the World Cancer Research Fund / American Institute for Cancer Research and the American Cancer Society. These organizations study how food, exercise, and other healthy habits can help people stay well and lower their risk of cancer.
+              </p>
+              <p>
+                Simple habits like eating more fruits and vegetables, whole grains, and fiber, and limiting processed sugar and meat can help lower cancer risk, improve heart health, and support general well-being.
+              </p>
+            </div>
+
+            <div className="home-sources-graphics" aria-hidden="true">
+              <div className="home-pillar-card home-pillar-sage">
+                <span className="home-pillar-icon">
+                  <svg viewBox="0 0 36 36" width="26" height="26" fill="none">
+                    <circle cx="15.5" cy="20.5" r="7.5" fill="currentColor" fillOpacity="0.14" stroke="currentColor" strokeWidth="1.6" />
+                    <path d="M15.5 13C15.5 9.5 18 7.5 21.5 7.5C21.5 10.8 19.2 13 15.5 13Z" fill="currentColor" fillOpacity="0.22" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                    <path d="M23 15.5C25.8 15.5 28 17.7 28 20.5C28 23.8 25.3 26.5 22 26.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                    <circle cx="13" cy="18.5" r="1.2" fill="currentColor" />
+                  </svg>
+                </span>
+                <div>
+                  <strong>Fruits &amp; Vegetables</strong>
+                  <small>Colorful plants &amp; phytonutrients</small>
+                </div>
+              </div>
+
+              <div className="home-pillar-card home-pillar-wheat">
+                <span className="home-pillar-icon">
+                  <svg viewBox="0 0 36 36" width="26" height="26" fill="none">
+                    <path d="M18 28V10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                    <path d="M18 15C14.2 14.8 12 12.5 12.2 9.2C15.5 9.4 17.8 11.7 18 15Z" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                    <path d="M18 15C21.8 14.8 24 12.5 23.8 9.2C20.5 9.4 18.2 11.7 18 15Z" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                    <path d="M18 21.5C14.2 21.3 12 19 12.2 15.7C15.5 15.9 17.8 18.2 18 21.5Z" fill="currentColor" fillOpacity="0.14" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                    <path d="M18 21.5C21.8 21.3 24 19 23.8 15.7C20.5 15.9 18.2 18.2 18 21.5Z" fill="currentColor" fillOpacity="0.14" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <div>
+                  <strong>Whole Grains &amp; Fiber</strong>
+                  <small>Nourishing grains, beans &amp; legumes</small>
+                </div>
+              </div>
+
+              <div className="home-pillar-card home-pillar-terra">
+                <span className="home-pillar-icon">
+                  <svg viewBox="0 0 36 36" width="26" height="26" fill="none">
+                    <circle cx="18" cy="18" r="9.5" fill="currentColor" fillOpacity="0.12" stroke="currentColor" strokeWidth="1.6" />
+                    <path d="M13 18H23" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                    <path d="M15.2 13.8H20.8M15.2 22.2H20.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeOpacity="0.55" />
+                  </svg>
+                </span>
+                <div>
+                  <strong>Mindful Limits</strong>
+                  <small>Less processed sugar &amp; meat</small>
+                </div>
+              </div>
+
+              <div className="home-pillar-card home-pillar-sky">
+                <span className="home-pillar-icon">
+                  <svg viewBox="0 0 36 36" width="26" height="26" fill="none">
+                    <path d="M18 27.5C18 27.5 9.5 22 9.5 15.5C9.5 12.3 12 10 14.8 10C16.5 10 17.6 11 18 12.2C18.4 11 19.5 10 21.2 10C24 10 26.5 12.3 26.5 15.5C26.5 22 18 27.5 18 27.5Z" fill="currentColor" fillOpacity="0.16" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                    <path d="M13.5 17.5H15.8L17.1 14.8L18.8 20L20.1 17.5H22.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+                <div>
+                  <strong>Whole-Body Well-Being</strong>
+                  <small>Lower cancer risk &amp; heart health</small>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section id="how-it-works" className="home-section home-container" aria-labelledby="home-how-heading">

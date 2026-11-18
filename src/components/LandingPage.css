@@ -59,12 +59,32 @@
 .thrive-home .home-meal-note > span { display: grid; place-items: center; width: 43px; height: 43px; border-radius: 50%; color: #6a8356; background: #f0f3e8; }
 .thrive-home .home-meal-note strong { font-size: 14px; font-weight: 500; color: var(--home-ink); }
 .thrive-home .home-hero-art figcaption { position: absolute; bottom: 0; right: 0; font-size: 10px; color: var(--home-muted); }
-.thrive-home .home-sources { display: grid; grid-template-columns: 1.3fr repeat(3, 1fr); align-items: center; gap: 25px; padding-block: 27px; border-block: 1px solid var(--home-line); }
-.thrive-home .home-sources > p { color: var(--home-muted); font-size: 12px; line-height: 1.8; }
-.thrive-home .home-sources strong { font-weight: 500; color: #56634e; }
-.thrive-home .home-sources > div { display: flex; align-items: center; gap: 13px; }
-.thrive-home .home-sources > div > span { font-family: Georgia, 'Times New Roman', serif; font-size: 30px; letter-spacing: -.6px; color: #67775d; }
-.thrive-home .home-sources small { font-size: 10px; color: var(--home-muted); line-height: 1.6; }
+.thrive-home .home-sources { display: flex; flex-direction: column; gap: 26px; padding-block: 38px 42px; border-block: 1px solid var(--home-line); }
+.thrive-home .home-sources-bar { display: grid; grid-template-columns: 1.25fr repeat(3, minmax(0, 1fr)); align-items: center; gap: 18px; }
+.thrive-home .home-sources-lead .home-eyebrow { margin-bottom: 8px; }
+.thrive-home .home-sources-heading { color: var(--home-muted); font-size: 13px; line-height: 1.75; }
+.thrive-home .home-sources-heading strong { font-weight: 500; color: var(--home-ink); }
+.thrive-home .home-source-org { display: flex; align-items: center; gap: 13px; padding: 14px 16px; border: 1px solid #e6eadf; border-radius: 14px; background: #f5f6ee; }
+.thrive-home .home-org-crest { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px; }
+.thrive-home .home-org-crest-sage { color: #4d6c45; background: #e8efe1; }
+.thrive-home .home-org-crest-wheat { color: #8c743d; background: #f3ecda; }
+.thrive-home .home-org-crest-terra { color: #9c624d; background: #f4e6df; }
+.thrive-home .home-org-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.thrive-home .home-org-text > span { font-family: Georgia, 'Times New Roman', serif; font-size: 24px; line-height: 1.1; letter-spacing: -.5px; color: #364b3b; }
+.thrive-home .home-org-text small { font-size: 10.5px; color: var(--home-muted); line-height: 1.45; }
+
+.thrive-home .home-sources-story { display: grid; grid-template-columns: 1.15fr 1fr; align-items: center; gap: 36px; padding: 34px 38px; border: 1px solid #dfe5d7; border-radius: 22px; background: linear-gradient(135deg, #f3f5ec 0%, #faf8f1 100%); }
+.thrive-home .home-sources-narrative { display: flex; flex-direction: column; gap: 16px; padding-left: 20px; border-left: 2px solid #9bb08b; }
+.thrive-home .home-sources-narrative p { font-size: 14.5px; line-height: 1.85; color: #425344; }
+.thrive-home .home-sources-graphics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.thrive-home .home-pillar-card { display: flex; align-items: flex-start; gap: 12px; padding: 16px; border: 1px solid #e3e7db; border-radius: 14px; background: #fffffc; box-shadow: 0 4px 16px #253e3106; }
+.thrive-home .home-pillar-icon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px; }
+.thrive-home .home-pillar-sage .home-pillar-icon { color: #537447; background: #eaf1e3; }
+.thrive-home .home-pillar-wheat .home-pillar-icon { color: #8c733d; background: #f6efde; }
+.thrive-home .home-pillar-terra .home-pillar-icon { color: #9c624d; background: #f6e9e2; }
+.thrive-home .home-pillar-sky .home-pillar-icon { color: #3d6d68; background: #e8f1ee; }
+.thrive-home .home-pillar-card strong { display: block; font-size: 13px; font-weight: 600; color: var(--home-ink); line-height: 1.35; }
+.thrive-home .home-pillar-card small { display: block; margin-top: 3px; font-size: 11px; line-height: 1.45; color: var(--home-muted); }
 
 .thrive-home .home-section { padding-block: 90px; }
 .thrive-home .home-section-heading { text-align: center; }
@@ -144,8 +164,9 @@
   .thrive-home .home-hero { gap: 30px; padding-top: 42px; }
   .thrive-home h1 { font-size: 47px; }
   .thrive-home .home-hero-actions { gap: 13px; }
-  .thrive-home .home-sources { gap: 20px; }
-  .thrive-home .home-sources > div { flex-direction: column; align-items: flex-start; gap: 5px; }
+  .thrive-home .home-sources-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .thrive-home .home-sources-lead { grid-column: 1 / -1; }
+  .thrive-home .home-sources-story { grid-template-columns: 1fr; gap: 24px; padding: 26px; }
   .thrive-home .home-inspiration { padding: 32px; }
   .thrive-home .home-inspiration-card { padding: 22px 18px; }
   .thrive-home .home-steps { gap: 30px; }
@@ -182,12 +203,15 @@
   .thrive-home .home-meal-frame img { aspect-ratio: 1.16; }
   .thrive-home .home-meal-note { left: 12px; bottom: 43px; padding: 12px 16px 12px 12px; font-size: 11px; gap: 10px; }
   .thrive-home .home-meal-note strong { font-size: 13px; }
-  .thrive-home .home-sources { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 12px; padding-block: 24px; }
-  .thrive-home .home-sources > p { grid-column: 1 / -1; text-align: center; }
-  .thrive-home .home-sources > p br { display: none; }
-  .thrive-home .home-sources strong { margin-left: 5px; }
-  .thrive-home .home-sources > div { align-items: center; text-align: center; }
-  .thrive-home .home-sources > div > span { font-size: 28px; }
+  .thrive-home .home-sources { gap: 20px; padding-block: 28px; }
+  .thrive-home .home-sources-bar { grid-template-columns: 1fr; gap: 12px; }
+  .thrive-home .home-sources-lead .home-eyebrow { justify-content: flex-start; }
+  .thrive-home .home-sources-heading br { display: none; }
+  .thrive-home .home-sources-heading strong { margin-left: 5px; }
+  .thrive-home .home-sources-story { padding: 22px 18px; border-radius: 18px; gap: 20px; }
+  .thrive-home .home-sources-narrative { padding-left: 14px; }
+  .thrive-home .home-sources-narrative p { font-size: 14px; line-height: 1.75; }
+  .thrive-home .home-sources-graphics { grid-template-columns: 1fr; gap: 10px; }
   .thrive-home .home-section { padding-block: 57px; }
   .thrive-home h2 { font-size: 34px; }
   .thrive-home .home-steps { grid-template-columns: 1fr; gap: 27px; margin-top: 33px; }
