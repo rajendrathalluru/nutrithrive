@@ -496,3 +496,17 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
         stats["protein_sources"] = list(stats["protein_sources"])
         
         return stats
+
+    def build_default_follow_up(self, source_docs: List[Dict], intent_data: Dict[str, Any]) -> Dict[str, Any]:
+        if not source_docs:
+            return {}
+        first_name = str(source_docs[0].get("name") or "the first recipe").strip()
+        choices = [
+            {"label": "More recipes", "instruction": "Show me more recipes with these requirements."},
+            {"label": "Make it simpler", "instruction": f"Simplify {first_name} to reduce preparation steps."},
+            {"label": "Storage tips", "instruction": f"How can I store or reheat leftovers for {first_name}?"},
+        ]
+        return {
+            "question": "Would you like to explore more options or adjust a recipe?",
+            "choices": choices,
+        }

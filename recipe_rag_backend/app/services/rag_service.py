@@ -1624,7 +1624,7 @@ class RecipeRAGService:
             
             total_time = time.time() - start_time
             logger.info(f"TOTAL TIME: {total_time:.2f}s")
-            follow_up = intent_data.pop("_generated_follow_up", None)
+            follow_up = intent_data.pop("_generated_follow_up", None) or self.response_generator.build_default_follow_up(source_docs, intent_data)
             
             return {
                 "query": query,
