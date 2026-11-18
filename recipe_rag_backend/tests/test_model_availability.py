@@ -62,7 +62,7 @@ class ModelAvailabilityTests(unittest.TestCase):
         self.assertEqual(intent["constraints"]["time_max_minutes"], 30)
 
     def test_configurable_model_and_environment_precedence(self):
-        for configured, expected in ((None, "gpt-4o-mini"), ("custom-deployment", "custom-deployment"), (" ", "gpt-4o-mini")):
+        for configured, expected in ((None, "gpt-6-luna"), ("custom-deployment", "custom-deployment"), (" ", "gpt-6-luna")):
             environment = {} if configured is None else {"LLM_MODEL": configured}
             with patch.dict("os.environ", environment, clear=True), patch("dotenv.load_dotenv") as dotenv:
                 settings = runpy.run_path(str(Path(__file__).parents[1] / "app/core/config.py"))["settings"]

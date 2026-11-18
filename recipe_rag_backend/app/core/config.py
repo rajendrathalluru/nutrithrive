@@ -38,8 +38,8 @@ class Settings:
     APP_COOKIE_SECURE: bool = environment_flag("APP_COOKIE_SECURE", "true")
     
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small").strip() or "text-embedding-3-small"
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
-    INTENT_LLM_MODEL: str = os.getenv("INTENT_LLM_MODEL", "").strip()
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-6-luna").strip() or "gpt-6-luna"
+    INTENT_LLM_MODEL: str = os.getenv("INTENT_LLM_MODEL", "gpt-6-luna").strip() or "gpt-6-luna"
     LLM_REASONING_EFFORT: str = os.getenv("LLM_REASONING_EFFORT", "low").strip().lower() or "low"
     INTENT_REASONING_EFFORT: str = os.getenv("INTENT_REASONING_EFFORT", "none").strip().lower() or "none"
     LLM_TEMPERATURE: float = 0.5

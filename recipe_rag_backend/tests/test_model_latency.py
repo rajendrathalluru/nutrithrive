@@ -38,3 +38,13 @@ class ModelLatencyTests(unittest.TestCase):
             with self.assertRaises(ModelBudgetExhausted):
                 predict_with_budget(model, "repair")
         model.predict.assert_called_once_with("intent", request_timeout=3)
+
+    def test_connection_drop_resets_pool_and_retries_once(self):
+        from openai.error import APIConnectionError
+
+        model = Mock(predict=Mock(side_effect=[APIConnectionError("Connection reset"), "ok"]))
+        with patch("app.services.model_latency.configure_openai_connection_pool") as reset_pool:
+            result = predict_with_budget(model, "intent")
+        self.assertEqual(result, "ok")
+        self.assertEqual(model.predict.call_count, 2)
+        reset_pool.assert_called_once_with(force_reset=True)

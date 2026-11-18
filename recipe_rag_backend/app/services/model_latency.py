@@ -6,6 +6,7 @@ import logging
 import threading
 
 import openai
+from openai.error import APIConnectionError
 import requests
 from requests.adapters import HTTPAdapter
 
@@ -17,20 +18,43 @@ final_review_limit = ContextVar("recipe_final_review_limit", default=None)
 logger = logging.getLogger(__name__)
 _pool_lock = threading.Lock()
 _io_executors = {}
+_last_pool_use = 0.0
+_IDLE_POOL_RESET_SECONDS = 120.0
 
 
-def configure_openai_connection_pool() -> requests.Session:
-    if isinstance(getattr(openai, "requestssession", None), requests.Session):
+def configure_openai_connection_pool(force_reset: bool = False) -> requests.Session:
+    global _last_pool_use
+    if not force_reset and isinstance(getattr(openai, "requestssession", None), requests.Session):
+        if not _last_pool_use:
+            _last_pool_use = perf_counter()
         return openai.requestssession
     with _pool_lock:
-        if isinstance(getattr(openai, "requestssession", None), requests.Session):
-            return openai.requestssession
+        existing = getattr(openai, "requestssession", None)
+        if not force_reset and isinstance(existing, requests.Session):
+            if not _last_pool_use:
+                _last_pool_use = perf_counter()
+            return existing
+        if isinstance(existing, requests.Session):
+            try:
+                existing.close()
+            except Exception:
+                pass
         session = requests.Session()
         adapter = HTTPAdapter(pool_connections=16, pool_maxsize=32, max_retries=0)
         session.mount("https://", adapter)
         session.mount("http://", adapter)
         openai.requestssession = session
+        _last_pool_use = perf_counter()
         return session
+
+
+def _refresh_idle_connection_pool() -> None:
+    global _last_pool_use
+    now = perf_counter()
+    if _last_pool_use and (now - _last_pool_use) >= _IDLE_POOL_RESET_SECONDS:
+        logger.info("Resetting idle OpenAI connection pool after %.1fs idle", now - _last_pool_use)
+        configure_openai_connection_pool(force_reset=True)
+    _last_pool_use = now
 
 
 def get_io_executor(workers: int = None) -> ThreadPoolExecutor:
@@ -115,9 +139,23 @@ def predict_with_budget(model, prompt, stage="recipe", **kwargs):
             settings.INTENT_REASONING_EFFORT if stage in {"intent", "context_intent"} else settings.LLM_REASONING_EFFORT,
         )
     started = perf_counter()
+    _refresh_idle_connection_pool()
     try:
         response = model.predict(prompt, **kwargs)
         logger.info("Model stage=%s duration=%.2fs input_chars=%s output_chars=%s",
+                    stage, perf_counter() - started, len(prompt), len(response) if isinstance(response, str) else 0)
+        return response
+    except APIConnectionError as error:
+        logger.warning("Model stage=%s duration=%.2fs connection drop (%s); resetting pool and retrying once",
+                       stage, perf_counter() - started, type(error).__name__)
+        configure_openai_connection_pool(force_reset=True)
+        if deadline is not None:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise ModelBudgetExhausted("Recipe model time budget exhausted") from error
+            kwargs["request_timeout"] = min(remaining, settings.LLM_REQUEST_TIMEOUT_SECONDS)
+        response = model.predict(prompt, **kwargs)
+        logger.info("Model stage=%s retry_duration=%.2fs input_chars=%s output_chars=%s",
                     stage, perf_counter() - started, len(prompt), len(response) if isinstance(response, str) else 0)
         return response
     except Exception as error:

@@ -1,4 +1,4 @@
-from app.services.model_latency import predict_with_budget
+from app.services.model_latency import _refresh_idle_connection_pool, predict_with_budget
 
 import logging
 from app.services.model_errors import raise_if_model_unavailable
@@ -48,6 +48,7 @@ class SearchEngine:
     
     def multi_query_search(self, original_query: str, intent_data: Dict[str, Any], k: int) -> List[Document]:
         """Perform multiple searches with different query formulations"""
+        _refresh_idle_connection_pool()
         all_docs = []
         seen_content = set()
         
