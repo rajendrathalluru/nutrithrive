@@ -205,14 +205,14 @@ test('clicking a visible starter prompt sends that exact request', async () => {
 
 test('does not render search analysis disclosure and formats bulleted recipe summaries cleanly', async () => {
   searchRecipes.mockResolvedValue({ recipes: [], backendData: {
-    response: 'I found 1 recipe for your request:\n• Cozy One-Pot Chicken and Rice — Tender chicken and vegetables · High protein\nOpen a recipe card for ingredients and steps.',
+    response: 'I found 1 recipe for your request:\n• Cozy One-Pot Chicken and Rice — High-protein one-pot meal with tender chicken and colorful vegetables.\nOpen a recipe card for ingredients and steps.',
     intent_analysis: { search_strategy: { primary_focus: 'Easy microwave meals' }, constraints: { equipment_only: ['microwave'] } },
   } });
   await readyChat();
   send('Microwave meals');
   const highlights = await screen.findByRole('list', { name: 'Recipe highlights' });
   expect(within(highlights).getByText('Cozy One-Pot Chicken and Rice').tagName).toBe('STRONG');
-  expect(within(highlights).getByText(/Tender chicken and vegetables · High protein/)).toBeInTheDocument();
+  expect(within(highlights).getByText(/High-protein one-pot meal with tender chicken and colorful vegetables\./)).toBeInTheDocument();
   expect(screen.getByText('Open a recipe card for ingredients and steps.')).toBeInTheDocument();
   expect(screen.queryByText('Search Analysis')).not.toBeInTheDocument();
   expect(screen.queryByText('Easy microwave meals')).not.toBeInTheDocument();

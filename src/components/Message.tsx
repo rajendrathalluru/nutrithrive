@@ -49,15 +49,15 @@ const renderFormattedContent = (content: string): React.ReactNode => {
   const flushBullets = (keyPrefix: string) => {
     if (bulletBuffer.length === 0) return;
     blocks.push(
-      <ul key={`${keyPrefix}-list`} className="my-2.5 space-y-2" aria-label="Recipe highlights">
+      <ul key={`${keyPrefix}-list`} className="my-2 space-y-1.5" aria-label="Recipe highlights">
         {bulletBuffer.map((rawBullet, idx) => {
           const { title, detail } = splitBullet(rawBullet);
           return (
             <li
               key={idx}
-              className="flex items-start gap-2.5 rounded-xl border border-[#e2e9dc] bg-[#f4f7f1] px-3.5 py-2.5 text-[14px] leading-6"
+              className="flex items-baseline gap-2 text-[15px] leading-6 text-slate-700"
             >
-              <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#56774e]" aria-hidden="true" />
+              <span className="text-[#56774e] font-bold select-none" aria-hidden="true">•</span>
               <div>
                 <strong className="font-semibold text-slate-900">{title}</strong>
                 {detail && <span className="text-slate-600"> — {detail}</span>}
@@ -80,13 +80,13 @@ const renderFormattedContent = (content: string): React.ReactNode => {
     flushBullets(`block-${idx}`);
     if (!seenBullets) {
       blocks.push(
-        <p key={`intro-${idx}`} className="text-[15px] font-medium text-slate-800 mb-2.5">
+        <p key={`intro-${idx}`} className="text-[15px] text-slate-700 mb-1.5">
           {line}
         </p>
       );
     } else if (line.startsWith('Open ')) {
       blocks.push(
-        <p key={`outro-${idx}`} className="mt-2 text-xs text-slate-500">
+        <p key={`outro-${idx}`} className="mt-2 text-[13px] text-slate-500">
           {line}
         </p>
       );

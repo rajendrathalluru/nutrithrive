@@ -90,18 +90,13 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
             else ""
         )
         placeholders = {"a dinner recipe.", "custom generated recipe for optimal nutrition"}
-        desc = str(recipe.get("description") or "").strip()
-        if desc.lower() in placeholders:
-            desc = ""
         benefits = str(recipe.get("nutrition_benefits") or "").strip()
         if benefits.lower() in placeholders:
             benefits = ""
-        if desc and benefits and benefits.lower() not in desc.lower():
-            summary = f"{desc.rstrip('.')} · {benefits.rstrip('.')}"
-        else:
-            summary = desc or benefits
-        if summary and len(summary) > 160:
-            summary = summary[:157].rstrip() + "..."
+        desc = str(recipe.get("description") or "").strip()
+        if desc.lower() in placeholders:
+            desc = ""
+        summary = benefits or desc
         if summary:
             return f"• {name}{servings_part} — {summary}"
         return f"• {name}{servings_part}"
