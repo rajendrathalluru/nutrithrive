@@ -98,9 +98,9 @@ class FrozenRecipeGenerationTests(unittest.TestCase):
         enhancer = RecipeEnhancer()
         enhancer.initialize(model, aicr_service)
         generated = enhancer.generate_fallback_recipes(QUERY, self.intent, [])
-        self.assertEqual(len(generated), 1)
+        self.assertEqual(len(generated), 2)
         generation_prompt = model.predict.call_args.args[0]
-        self.assertIn("exactly ONE complete recipe", generation_prompt)
+        self.assertIn("2 to 3 distinct complete recipes", generation_prompt)
         enhancer.enhance_single_recipe(frozen_bowl(), self.intent)
         enhancement_prompt = model.predict.call_args.args[0]
         verifier = RecipeVerifier()

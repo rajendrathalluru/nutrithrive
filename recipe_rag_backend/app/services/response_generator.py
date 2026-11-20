@@ -4,7 +4,7 @@ import logging
 from app.services.model_errors import raise_if_model_unavailable
 from app.services.budget_service import budget_no_results
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.services.recipe_prompt_rules import INGREDIENT_STORAGE_RULES, CHEWING_RULES, PREPARATION_RULES, SERVING_TEMPERATURE_RULES, FOOD_GUIDANCE_RULES, active_recipe_rules
 from app.services.chewing_validation import audit_chewing_assessment
 from app.services.storage_guidance import requests_reheating, storage_summary
@@ -500,13 +500,41 @@ Do not infer a medical condition. Keep the answer concise and name the recipe be
     def build_default_follow_up(self, source_docs: List[Dict], intent_data: Dict[str, Any]) -> Dict[str, Any]:
         if not source_docs:
             return {}
-        first_name = str(source_docs[0].get("name") or "the first recipe").strip()
+        target = (
+            str(source_docs[0].get("name") or "this recipe").strip()
+            if len(source_docs) == 1
+            else "this recipe"
+        )
         choices = [
             {"label": "More recipes", "instruction": "Show me more recipes with these requirements."},
-            {"label": "Make it simpler", "instruction": f"Simplify {first_name} to reduce preparation steps."},
-            {"label": "Storage tips", "instruction": f"How can I store or reheat leftovers for {first_name}?"},
+            {"label": "More seasoning", "instruction": f"Add more seasoning to {target}."},
+            {"label": "Make it simpler", "instruction": f"Simplify {target} to reduce preparation steps."},
+            {"label": "Storage tips", "instruction": f"How can I store or reheat leftovers for {target}?"},
         ]
         return {
             "question": "Would you like to explore more options or adjust a recipe?",
             "choices": choices,
         }
+
+    def ensure_seasoning_choice(
+        self, follow_up: Optional[Dict[str, Any]], source_docs: List[Dict], intent_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        if not source_docs:
+            return follow_up or {}
+        if not isinstance(follow_up, dict) or not follow_up.get("choices"):
+            return self.build_default_follow_up(source_docs, intent_data)
+        choices = list(follow_up.get("choices") or [])
+        has_seasoning = any(
+            isinstance(choice, dict)
+            and any(word in f"{choice.get('label', '')} {choice.get('instruction', '')}".lower()
+                    for word in ("season", "flavor", "flavour", "spice", "herb"))
+            for choice in choices
+        )
+        if not has_seasoning:
+            target = (
+                str(source_docs[0].get("name") or "this recipe").strip()
+                if len(source_docs) == 1
+                else "this recipe"
+            )
+            choices.append({"label": "More seasoning", "instruction": f"Add more seasoning to {target}."})
+        return {**follow_up, "choices": choices}

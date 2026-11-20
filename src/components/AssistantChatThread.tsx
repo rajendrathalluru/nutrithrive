@@ -67,7 +67,7 @@ const AssistantChatThread: React.FC<AssistantChatThreadProps> = ({
   });
   const isWelcome = messages.length === 1 && messages[0].role === 'assistant';
   const latest = messages[messages.length - 1];
-  const canRefine = latest?.role === 'assistant' && !!latest.recipes?.length;
+  const canRefine = latest?.role === 'assistant' && !latest.isLoading && Boolean(latest.backendData?.follow_up);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>

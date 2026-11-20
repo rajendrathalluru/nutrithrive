@@ -74,10 +74,10 @@ export interface NutriThriveChatbotProps {
 export interface RecipeConversationContext {
   version: 1;
   query_type: 'recipe_question' | 'recipe_adaptation';
-  operation: 'modify' | 'simplify' | 'texture' | 'question';
+  operation: 'modify' | 'simplify' | 'texture' | 'seasoning' | 'question';
   selected_recipe_ids: string[];
   request: string;
-  waiting_for?: 'recipe' | 'texture' | null;
+  waiting_for?: 'recipe' | 'texture' | 'seasoning' | 'seasoning_choice' | 'seasoning_custom' | 'seasoning_profile' | null;
 }
 
 export interface ChatMessage {

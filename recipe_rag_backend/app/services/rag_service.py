@@ -751,10 +751,12 @@ class RecipeRAGService:
         return list(recipes.values())
 
     def _build_context_reply(self, query: str, mode: str, intent_data: Dict[str, Any], response: str) -> Dict[str, Any]:
+        follow_up = intent_data.pop("_generated_follow_up", None) if isinstance(intent_data, dict) else None
         return {
             "query": query, "mode": mode, "response": response,
             "source": "recipe_follow_up", "matches_found": 0,
             "source_documents": [], "intent_analysis": intent_data,
+            **({"follow_up": follow_up} if follow_up else {}),
             "conversation_context_used": True
         }
 
@@ -1624,7 +1626,9 @@ class RecipeRAGService:
             
             total_time = time.time() - start_time
             logger.info(f"TOTAL TIME: {total_time:.2f}s")
-            follow_up = intent_data.pop("_generated_follow_up", None) or self.response_generator.build_default_follow_up(source_docs, intent_data)
+            follow_up = self.response_generator.ensure_seasoning_choice(
+                intent_data.pop("_generated_follow_up", None), source_docs, intent_data
+            )
             
             return {
                 "query": query,

@@ -29,10 +29,12 @@ Explain the concrete change in the description; do not add unrelated tips, sides
 class RecipeConversationContext(BaseModel):
     version: Literal[1] = 1
     query_type: Literal["recipe_question", "recipe_adaptation"]
-    operation: Literal["modify", "simplify", "texture", "question"]
+    operation: Literal["modify", "simplify", "texture", "seasoning", "question"]
     selected_recipe_ids: List[str] = Field(default_factory=list, max_length=3)
     request: str = Field(default="", max_length=8000)
-    waiting_for: Optional[Literal["recipe", "texture"]] = None
+    waiting_for: Optional[Literal[
+        "recipe", "texture", "seasoning", "seasoning_choice", "seasoning_custom", "seasoning_profile"
+    ]] = None
 
 
 def parse_recipe_context(value: Any) -> Optional[Dict[str, Any]]:
@@ -66,11 +68,129 @@ def _simplification_requested(query: str) -> bool:
 
 TEXTURE = re.compile(r"\b(?:soft(?:er)?|smooth(?:er)?|creamy|creamier|crunchy|crunchier|crispy|crispier|"
                      r"firm(?:er)?|thick(?:er)?|thin(?:ner)?|coars(?:e|er)|chewy|chewier|puree(?:d)?|purée(?:d)?)\b", re.I)
+SEASONING_REQUEST = re.compile(
+    r"\b(?:more|extra|add|boost|enhance|increase|change|adjust|update|switch|different|new)\b[^.!?]{0,40}"
+    r"\b(?:season(?:ing|ings|ed)?|flavor(?:s|ing|ings|ful)?|flavour(?:s|ing|ings|ful)?|spic(?:e|es|ier|y)|herbs?)\b|"
+    r"\b(?:season|flavor|flavour)\b[^.!?]{0,60}\b(?:it|this|that|the recipe|more|better|differently|with)\b|"
+    r"^\s*(?:please\s+)?(?:more|extra|better)\s+(?:seasoning|flavor|flavour|spices|herbs)[.!?]*$",
+    re.I,
+)
+SEASONING_PROFILE = re.compile(
+    r"\b(?:"
+    r"italian|mediterranean|greek|mexican|latin|tex[- ]?mex|southwest(?:ern)?|indian|curry|"
+    r"asian|chinese|thai|japanese|korean|vietnamese|french|provencal|provençal|"
+    r"cajun|creole|moroccan|middle eastern|lebanese|turkish|persian|caribbean|jamaican|jerk|"
+    r"spanish|ethiopian|scandinavian|nordic|bbq|barbecue|lemon[- ]?herb|herbaceous|herby|"
+    r"garlic|garlicky|ginger|onion|shallot|scallion|chive|leek|"
+    r"basil|oregano|thyme|rosemary|parsley|cilantro|coriander|dill|mint|sage|tarragon|marjoram|bay lea(?:f|ves)|chervil|lemongrass|"
+    r"cumin|paprika|turmeric|cinnamon|nutmeg|clove|cardamom|allspice|anise|fennel|fenugreek|caraway|saffron|sumac|za'?atar|"
+    r"chili|chile|cayenne|jalape[nñ]o|chipotle|harissa|peppercorn|black pepper|red pepper|peppery|crushed red|"
+    r"garam masala|five[- ]?spice|italian seasoning|herbes de provence|old bay|ras el hanout|berbere|taj[ií]n|taco|ranch|"
+    r"lemon|lime|orange zest|citrus|vinegar|balsamic|tamari|soy sauce|miso|sesame|mustard|dijon|horseradish|caper|olive|"
+    r"mild(?:er)?|gentle|subtle|bright|zesty|tangy|smok(?:y|ier)|savor(?:y|ier)|umami|warm(?:er)?|earthy|sweet(?:er)?|bold(?:er)?|spic(?:y|ier)|hot(?:ter)?|kick"
+    r")\b",
+    re.I,
+)
+SEASONING_CUSTOM_CHOICE = re.compile(
+    r"\b(?:specific seasonings?|my own|enter my own|own seasonings?|custom seasonings?|in mind|i know what|type my own)\b",
+    re.I,
+)
+SEASONING_GUIDE_CHOICE = re.compile(
+    r"\b(?:help me choose|choose (?:for me|from|a flavor)|flavor profiles?|you choose|suggest(?:ions?)?|show .*profiles?|recommend)\b",
+    re.I,
+)
+VAGUE_CONFIRMATION = re.compile(
+    r"^\s*(?:yes|yeah|yep|yup|sure|ok|okay|please|yes please|sure thing|sounds good|go ahead|do it|thanks?)[.!?\s]*$",
+    re.I,
+)
 MORE_RECIPES = re.compile(
     r"\b(?:more|another|other|similar|extra|additional) (?:recipes?|meals?|options?)\b|"
     r"\bshow (?:me )?(?:more|others?)[.!?]*$|"
     r"^what else(?:[.!?]*$| can (?:i|we) (?:make|cook|prepare|eat)\b)", re.I,
 )
+
+
+def _strip_recipe_names(text: str, references: List[Dict[str, Any]]) -> str:
+    cleaned = text
+    for recipe in references:
+        name = str(recipe.get("name") or "").strip()
+        if name:
+            cleaned = re.sub(r"(?<!\w)" + re.escape(name) + r"(?!\w)", " ", cleaned, flags=re.I)
+    return " ".join(cleaned.split())
+
+
+def build_recipe_selection_follow_up(recipes: List[Dict[str, Any]], operation: str) -> Dict[str, Any]:
+    choices = []
+    seen = set()
+    for recipe in recipes[:3]:
+        name = str(recipe.get("name") or "").strip()
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        choices.append({"label": name, "instruction": name})
+    if len(choices) < 2:
+        return {}
+    choices.append({"label": "All recipes", "instruction": "All of the recipes"})
+    question = (
+        "Which recipe are you asking about?"
+        if operation == "question"
+        else "Which recipe would you like to update?"
+    )
+    return {"question": question, "choices": choices}
+
+
+def build_seasoning_choice_follow_up(recipe_names: str) -> Dict[str, Any]:
+    target = recipe_names.strip() or "this recipe"
+    return {
+        "question": "How would you like to customize the seasonings?",
+        "choices": [
+            {
+                "label": "I have specific seasonings in mind",
+                "instruction": f"I have specific seasonings in mind for {target}.",
+            },
+            {
+                "label": "Help me choose a flavor profile",
+                "instruction": f"Help me choose a flavor profile for {target}.",
+            },
+        ],
+    }
+
+
+def build_seasoning_follow_up(recipe_names: str) -> Dict[str, Any]:
+    target = recipe_names.strip() or "this recipe"
+    return {
+        "question": "Choose a flavor profile or type the herbs and spices you'd like:",
+        "choices": [
+            {
+                "label": "Italian (basil, oregano, garlic)",
+                "instruction": f"Season {target} with an Italian flavor profile using basil, oregano, garlic, and rosemary.",
+            },
+            {
+                "label": "Mediterranean (lemon, dill, thyme)",
+                "instruction": f"Season {target} with a Mediterranean flavor profile using lemon, oregano, dill, and garlic.",
+            },
+            {
+                "label": "Mexican (cumin, lime, cilantro)",
+                "instruction": f"Season {target} with a Mexican flavor profile using cumin, oregano, smoked paprika, lime, and cilantro.",
+            },
+            {
+                "label": "Indian (turmeric, cumin, ginger)",
+                "instruction": f"Season {target} with an Indian flavor profile using turmeric, cumin, coriander, ginger, and garam masala.",
+            },
+            {
+                "label": "Asian (ginger, garlic, sesame)",
+                "instruction": f"Season {target} with an Asian flavor profile using ginger, garlic, scallions, and toasted sesame.",
+            },
+            {
+                "label": "Cajun (paprika, thyme, cayenne)",
+                "instruction": f"Season {target} with a Cajun flavor profile using smoked paprika, thyme, oregano, garlic, and a pinch of cayenne.",
+            },
+            {
+                "label": "Mild & herbaceous (parsley, chives, lemon)",
+                "instruction": f"Season {target} with a mild, bright herb profile using fresh parsley, chives, thyme, and lemon zest.",
+            },
+        ],
+    }
 
 
 def is_more_recipes_request(query: str) -> bool:
@@ -93,6 +213,8 @@ def _follow_up_action(query: str) -> Optional[tuple[str, str]]:
         re.search(r"\b(?:make|adapt|change|convert)\b", text) and TEXTURE.search(text)
     ):
         return "recipe_adaptation", "texture"
+    if SEASONING_REQUEST.search(text):
+        return "recipe_adaptation", "seasoning"
     if re.search(r"\b(?:change|modify|adapt|replace|swap|substitute|omit|remove|halve|double|scale|convert|reduce|increase|add)\b", text):
         return "recipe_adaptation", "modify"
     if re.search(r"\buse\b[^.!?]*\binstead\b", text):
@@ -135,7 +257,7 @@ def resolve_recipe_references(query: str, history: List[Dict[str, Any]], implici
         by_id = {recipe["recipe_id"]: recipe for recipes in recipe_lists for recipe in recipes}
         ids = context["selected_recipe_ids"]
         selection = [by_id[recipe_id] for recipe_id in ids] if all(recipe_id in by_id for recipe_id in ids) else []
-    if re.search(r"\ball (?:of )?(?:the )?recipes\b", text):
+    if re.search(r"\ball (?:of )?(?:the )?(?:recipes|them|these|those)\b|^\s*all[.!?]*$", text):
         return recent[:3]
     if re.search(r"\b(?:them|these|those|both)\b", text):
         return selection if selection is not None and len(selection) != 1 else recent[:3]
@@ -174,10 +296,13 @@ def resolve_recipe_follow_up(
         if isinstance(ids, list) and 0 < len(ids) <= 3 and all(isinstance(recipe_id, str) and recipe_id in by_id for recipe_id in ids):
             references = [by_id[recipe_id] for recipe_id in dict.fromkeys(ids)]
     if references is None:
-        implicit_edit = action[0] == "recipe_adaptation" and bool(re.search(
-            r"\b(?:simplify|replace|swap|substitute|omit|remove|halve|double|scale|reduce|increase|add)\b|"
-            r"\buse\b[^.!?]*\binstead\b", query, re.I,
-        ))
+        implicit_edit = action[0] == "recipe_adaptation" and (
+            action[1] == "seasoning"
+            or bool(re.search(
+                r"\b(?:simplify|replace|swap|substitute|omit|remove|halve|double|scale|reduce|increase|add)\b|"
+                r"\buse\b[^.!?]*\binstead\b", query, re.I,
+            ))
+        )
         semantic_follow_up = model_intent and model_intent.get("context_action") != "new_request" and (
             model_intent.get("query_type") in {"recipe_question", "recipe_adaptation"}
         )
@@ -186,14 +311,45 @@ def resolve_recipe_follow_up(
     if references is None:
         return None
     query_type, operation = action
-    waiting_for = "recipe" if not references else "texture" if operation == "texture" and not TEXTURE.search(request) else None
+    pending_wait = pending.get("waiting_for") if pending else None
+    cleaned_request = _strip_recipe_names(request, references)
+    cleaned_query = _strip_recipe_names(query, references)
+    waiting_for = None
+    if not references:
+        waiting_for = "recipe"
+    elif operation == "texture" and not TEXTURE.search(cleaned_request):
+        waiting_for = "texture"
+    elif operation == "seasoning":
+        if pending_wait == "seasoning_custom":
+            if SEASONING_GUIDE_CHOICE.search(cleaned_query):
+                waiting_for = "seasoning_profile"
+            elif VAGUE_CONFIRMATION.fullmatch(cleaned_query.strip()) or SEASONING_CUSTOM_CHOICE.search(cleaned_query):
+                waiting_for = "seasoning_custom"
+            else:
+                waiting_for = None
+        elif SEASONING_PROFILE.search(cleaned_request):
+            waiting_for = None
+        elif SEASONING_CUSTOM_CHOICE.search(cleaned_query):
+            waiting_for = "seasoning_custom"
+        elif SEASONING_GUIDE_CHOICE.search(cleaned_query):
+            waiting_for = "seasoning_profile"
+        elif pending_wait in {"seasoning_profile", "seasoning"}:
+            waiting_for = "seasoning_profile"
+        else:
+            waiting_for = "seasoning_choice"
+    recent_lists = [
+        [recipe for recipe in message.get("recipes", []) if isinstance(recipe, dict) and recipe.get("recipe_id")]
+        for message in history if message.get("role") == "assistant" and message.get("recipes")
+    ]
+    recent_recipes = recent_lists[-1][:3] if recent_lists else []
     return {"query_type": query_type, "operation": operation, "request": request,
-            "references": references, "waiting_for": waiting_for}
+            "references": references, "recent_recipes": recent_recipes, "waiting_for": waiting_for}
 
 
 def apply_recipe_follow_up(resolution: Dict[str, Any], intent: Dict[str, Any]) -> Dict[str, Any]:
     intent = deepcopy(intent)
     references = resolution["references"]
+    recent_recipes = resolution.get("recent_recipes") or []
     request = resolution["request"]
     operation = resolution["operation"]
     intent["context_action"] = "continue_request"
@@ -205,11 +361,38 @@ def apply_recipe_follow_up(resolution: Dict[str, Any], intent: Dict[str, Any]) -
     if resolution["waiting_for"]:
         intent["query_type"] = "clarification"
         intent.pop("adaptation_request", None)
+        names = "; ".join(recipe["name"] for recipe in references)
         if resolution["waiting_for"] == "texture":
-            names = "; ".join(recipe["name"] for recipe in references)
             intent["clarification_question"] = f"What texture would you like for {names}—softer, creamier, smoother, or firmer/crunchier? I'll adapt the same recipe."
+        elif resolution["waiting_for"] == "seasoning_choice":
+            intent["clarification_question"] = (
+                f"Would you like to enter specific seasonings or herbs you have in mind for {names}, "
+                "or would you like to choose from our classic flavor profiles?"
+            )
+            intent["_generated_follow_up"] = build_seasoning_choice_follow_up(names)
+        elif resolution["waiting_for"] == "seasoning_custom":
+            intent["clarification_question"] = (
+                f"Great! Tell me which herbs, spices, or seasonings you'd like for {names} "
+                "(for example: garlic and rosemary, cumin and lime, or ginger and sesame), "
+                "and I'll customize the recipe for you."
+            )
+        elif resolution["waiting_for"] in {"seasoning_profile", "seasoning"}:
+            intent["clarification_question"] = (
+                f"Here are classic flavor profiles you can choose from for {names}. "
+                "Pick one below—or type your own herbs and spices—and I'll customize the recipe."
+            )
+            intent["_generated_follow_up"] = build_seasoning_follow_up(names)
         else:
-            intent["clarification_question"] = "Which recipe do you mean? Please use its name or its position in the last recipe list."
+            selection_follow_up = build_recipe_selection_follow_up(recent_recipes, operation)
+            if selection_follow_up:
+                intent["clarification_question"] = (
+                    "Which recipe are you asking about? Select one below or choose All recipes."
+                    if operation == "question"
+                    else "Which recipe would you like to adjust? Select one below or choose All recipes."
+                )
+                intent["_generated_follow_up"] = selection_follow_up
+            else:
+                intent["clarification_question"] = "Which recipe do you mean? Please use its name or its position in the last recipe list."
         return intent
     intent["query_type"] = resolution["query_type"]
     if resolution["query_type"] == "recipe_adaptation":

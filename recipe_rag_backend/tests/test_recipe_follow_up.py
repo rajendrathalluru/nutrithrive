@@ -18,6 +18,7 @@ class RecipeFollowUpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         service = RecipeRAGService()
+        service.is_initialized = True
         service.data_loader.load_data(str(Path(__file__).parents[1] / "app/data/Recipe.csv"))
         cls.original = service._build_recipe_data_from_record(service.data_loader.get_recipe_record(TITLE))
 
@@ -262,6 +263,161 @@ class RecipeFollowUpTests(unittest.TestCase):
                                              "recipe_context": pending["recipe_context"]})
         self.assertEqual(message.model_dump(exclude_none=True)["recipe_context"], pending["recipe_context"])
 
+    def test_unspecified_seasoning_asks_choice_then_custom_or_flavor_profiles(self):
+        intent = self.analyze(f"Add more seasoning to {TITLE}.")
+        self.assertEqual(intent["query_type"], "clarification")
+        self.assertEqual(intent["referenced_recipe_ids"], [self.original["recipe_id"]])
+        self.assertEqual(intent["recipe_context"]["waiting_for"], "seasoning_choice")
+        self.assertIn(TITLE, intent["clarification_question"])
+        choice_follow_up = intent.get("_generated_follow_up")
+        self.assertIsInstance(choice_follow_up, dict)
+        choice_labels = [choice["label"] for choice in choice_follow_up["choices"]]
+        self.assertIn("I have specific seasonings in mind", choice_labels)
+        self.assertIn("Help me choose a flavor profile", choice_labels)
+        self.analyzer.llm.predict.assert_not_called()
+
+        # Branch A: user chooses to enter their own specific seasonings
+        custom_history = copy.deepcopy(self.history)
+        custom_history.extend([
+            {"role": "user", "content": f"Add more seasoning to {TITLE}."},
+            {"role": "assistant", "content": intent["clarification_question"],
+             "recipe_context": intent["recipe_context"], "context_action": "continue_request"},
+        ])
+        ask_custom = self.analyze(f"I have specific seasonings in mind for {TITLE}.", history=custom_history)
+        self.assertEqual(ask_custom["query_type"], "clarification")
+        self.assertEqual(ask_custom["recipe_context"]["waiting_for"], "seasoning_custom")
+        self.assertNotIn("_generated_follow_up", ask_custom)
+
+        custom_history.extend([
+            {"role": "user", "content": f"I have specific seasonings in mind for {TITLE}."},
+            {"role": "assistant", "content": ask_custom["clarification_question"],
+             "recipe_context": ask_custom["recipe_context"], "context_action": "continue_request"},
+        ])
+        vague_custom = self.analyze("yes please", history=custom_history)
+        self.assertEqual(vague_custom["query_type"], "clarification")
+        self.assertEqual(vague_custom["recipe_context"]["waiting_for"], "seasoning_custom")
+
+        custom_ready = self.analyze("smoked paprika, roasted garlic, and lemon zest", history=custom_history)
+        self.assertEqual(custom_ready["query_type"], "recipe_adaptation")
+        self.assertEqual(custom_ready["adaptation_request"]["operation"], "seasoning")
+        self.assertIn("smoked paprika", custom_ready["adaptation_request"]["request"])
+        self.assertIsNone(custom_ready["recipe_context"].get("waiting_for"))
+
+        # Branch B: user asks us to help choose a flavor profile
+        self.append_clarification(f"Add more seasoning to {TITLE}.", intent)
+        profiles = self.analyze(f"Help me choose a flavor profile for {TITLE}.")
+        self.assertEqual(profiles["query_type"], "clarification")
+        self.assertEqual(profiles["recipe_context"]["waiting_for"], "seasoning_profile")
+        profile_follow_up = profiles.get("_generated_follow_up")
+        self.assertIsInstance(profile_follow_up, dict)
+        profile_labels = [choice["label"] for choice in profile_follow_up["choices"]]
+        self.assertTrue(any("Italian" in label for label in profile_labels))
+        self.assertTrue(any("Mexican" in label for label in profile_labels))
+        self.assertTrue(any("Indian" in label for label in profile_labels))
+
+        self.append_clarification(f"Help me choose a flavor profile for {TITLE}.", profiles)
+        ready = self.analyze("Italian herbs and garlic")
+        self.assertEqual(ready["query_type"], "recipe_adaptation")
+        self.assertEqual(ready["adaptation_request"]["operation"], "seasoning")
+        self.assertIn("Italian herbs and garlic", ready["adaptation_request"]["request"])
+        self.assertIsNone(ready["recipe_context"].get("waiting_for"))
+
+    def test_default_follow_up_includes_more_seasoning_and_clarification_returns_follow_up(self):
+        service = RecipeRAGService()
+        default_follow_up = service.response_generator.build_default_follow_up([self.original], {})
+        labels = [choice["label"] for choice in default_follow_up["choices"]]
+        self.assertIn("More seasoning", labels)
+
+        merged = service.response_generator.ensure_seasoning_choice(
+            {"question": "Want a side?", "choices": [{"label": "Quick side", "instruction": "Add a side."}]},
+            [self.original],
+            {},
+        )
+        self.assertTrue(any(choice["label"] == "More seasoning" for choice in merged["choices"]))
+
+        service.is_initialized = True
+        service.data_loader.load_data(str(Path(__file__).parents[1] / "app/data/Recipe.csv"))
+        service.intent_analyzer.initialize(Mock(predict=Mock(side_effect=AssertionError("Clarification needs no LLM"))), recipe_names=[TITLE])
+        history = [
+            {"role": "user", "content": TITLE},
+            {"role": "assistant", "content": "Recipe", "recipes": [copy.deepcopy(self.original)]},
+        ]
+        with patch("app.services.rag_service.safety_service.should_intercept", return_value=False):
+            reply = service.ask_question("More seasoning", conversation_history=history)
+        self.assertEqual(reply["source"], "recipe_follow_up")
+        self.assertIn("follow_up", reply)
+        self.assertEqual(len(reply["follow_up"]["choices"]), 2)
+
+    def test_multiple_recipes_prompt_user_to_pick_one_or_all_recipes(self):
+        other = {**self.original, "recipe_id": "second-recipe", "name": "Vegetable Soup"}
+        service = RecipeRAGService()
+        multi_follow_up = service.response_generator.build_default_follow_up([self.original, other], {})
+        seasoning_choice = next(c for c in multi_follow_up["choices"] if c["label"] == "More seasoning")
+        self.assertNotIn(TITLE, seasoning_choice["instruction"])
+        self.assertIn("this recipe", seasoning_choice["instruction"])
+
+        self.history[-1]["recipes"].append(other)
+        pick = self.analyze(seasoning_choice["instruction"])
+        self.assertEqual(pick["query_type"], "clarification")
+        self.assertEqual(pick["recipe_context"]["waiting_for"], "recipe")
+        picker_labels = [choice["label"] for choice in pick["_generated_follow_up"]["choices"]]
+        self.assertEqual(picker_labels, [TITLE, "Vegetable Soup", "All recipes"])
+
+        # Picking the second recipe advances to seasoning_choice for only that recipe
+        second_history = copy.deepcopy(self.history)
+        second_history.extend([
+            {"role": "user", "content": seasoning_choice["instruction"]},
+            {"role": "assistant", "content": pick["clarification_question"],
+             "recipe_context": pick["recipe_context"], "context_action": "continue_request"},
+        ])
+        picked_second = self.analyze("Vegetable Soup", history=second_history)
+        self.assertEqual(picked_second["recipe_context"]["waiting_for"], "seasoning_choice")
+        self.assertEqual(picked_second["referenced_recipe_ids"], ["second-recipe"])
+
+        # Picking "All of the recipes" advances to seasoning_choice for both recipes
+        all_history = copy.deepcopy(self.history)
+        all_history.extend([
+            {"role": "user", "content": seasoning_choice["instruction"]},
+            {"role": "assistant", "content": pick["clarification_question"],
+             "recipe_context": pick["recipe_context"], "context_action": "continue_request"},
+        ])
+        picked_all = self.analyze("All of the recipes", history=all_history)
+        self.assertEqual(picked_all["recipe_context"]["waiting_for"], "seasoning_choice")
+        self.assertEqual(picked_all["referenced_recipe_ids"], [self.original["recipe_id"], "second-recipe"])
+
+    def test_flavor_words_in_recipe_name_do_not_skip_seasoning_choice(self):
+        med = {**self.original, "recipe_id": "med-chicken", "name": "Mediterranean Lemon Herb Chicken"}
+        ginger = {**self.original, "recipe_id": "ginger-tofu", "name": "Ginger Garlic Tofu Stir-Fry"}
+        history = [
+            {"role": "user", "content": "Healthy dinners"},
+            {"role": "assistant", "content": "Here are 2 recipes.", "recipes": [med, ginger]},
+        ]
+        pick = self.analyze("Add more seasoning to this recipe.", history=history)
+        self.assertEqual(pick["recipe_context"]["waiting_for"], "recipe")
+
+        history.extend([
+            {"role": "user", "content": "Add more seasoning to this recipe."},
+            {"role": "assistant", "content": pick["clarification_question"],
+             "recipe_context": pick["recipe_context"], "context_action": "continue_request"},
+        ])
+        chosen = self.analyze("Mediterranean Lemon Herb Chicken", history=history)
+        self.assertEqual(chosen["query_type"], "clarification")
+        self.assertEqual(chosen["recipe_context"]["waiting_for"], "seasoning_choice")
+        self.assertEqual(chosen["referenced_recipe_ids"], ["med-chicken"])
+        labels = [choice["label"] for choice in chosen["_generated_follow_up"]["choices"]]
+        self.assertIn("I have specific seasonings in mind", labels)
+        self.assertIn("Help me choose a flavor profile", labels)
+
+        # Choosing "I have specific seasonings in mind" also must not be skipped by flavor words in the title
+        history.extend([
+            {"role": "user", "content": "Mediterranean Lemon Herb Chicken"},
+            {"role": "assistant", "content": chosen["clarification_question"],
+             "recipe_context": chosen["recipe_context"], "context_action": "continue_request"},
+        ])
+        custom = self.analyze("I have specific seasonings in mind for Mediterranean Lemon Herb Chicken.", history=history)
+        self.assertEqual(custom["query_type"], "clarification")
+        self.assertEqual(custom["recipe_context"]["waiting_for"], "seasoning_custom")
+
 
 class FollowUpRoutingTests(unittest.TestCase):
     def test_short_follow_up_reaches_intent_instead_of_small_talk(self):
@@ -287,6 +443,7 @@ class FollowUpRoutingTests(unittest.TestCase):
         service = RecipeRAGService()
         service.is_initialized = True
         service._contains_phi_like_content = Mock(return_value=False)
+        service.is_initialized = True
         service.data_loader.load_data(str(Path(__file__).parents[1] / "app/data/Recipe.csv"))
         original = service._build_recipe_data_from_record(service.data_loader.get_recipe_record(TITLE))
         parsed = service.intent_analyzer._get_fallback_intent_data("Find recipes with millet")

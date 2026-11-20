@@ -442,8 +442,8 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
                 or bool(constraints.get("serving_temperature"))
                 or bool(constraints.get("avoid_steam") or constraints.get("avoid_splatter"))
             )
-            recipe_count = "exactly ONE complete recipe" if focused_generation else "2 concise recipes"
-            generation_limit = 1 if focused_generation else 3
+            recipe_count = "2 to 3 distinct complete recipes (at least 2, maximum 3)"
+            generation_limit = 3
             budget_alternatives = bool(intent_data.get("budget_request") and intent_data.get("red_meat_alternatives")
                                        and not intent_data.get("adaptation_request"))
             if budget_alternatives:
@@ -591,12 +591,11 @@ Keep wording clear and concise: use complete quantified ingredient lists and cle
 Optional tips and adaptations must preserve every restriction, including allergens, time, ingredient forms,
 and equipment. Never replace a required ingredient or shorten a safety step. Use [] if no suitable option exists.
 {time_limit_generation_guidance(constraints)}
-{"Return exactly ONE complete recipe to keep its timing and instructions complete within the output budget." if timed_request else ""}
 {chr(10).join(explicit_rules) if constraints.get('ingredient_storage') in {'canned_only', 'frozen_only'} else ''}
 """
 
             if timed_request:
-                generation_prompt = f"""Create exactly ONE complete recipe for this timed request, not general meal advice.
+                generation_prompt = f"""Create 2 to 3 distinct complete recipes (at least 2, maximum 3) for this timed request, not general meal advice.
 USER REQUEST: {query}
 ACTIVE REQUIREMENTS: {json.dumps(intent_data)}
 {time_limit_generation_guidance(constraints)}
@@ -607,18 +606,18 @@ NUTRITION AND FOOD SAFETY POLICY:
 {aicr_context}
 {chr(10).join(explicit_rules)}
 
-Choose a practical dish with enough time for ALL preparation. Do not just copy a reference's cooking time.
+Choose practical dishes with enough time for ALL preparation. Do not just copy a reference's cooking time.
 Include the time to open packages, wash/cut food, set up equipment, heat, cook, rest, and serve where needed.
 Use purchased ready-to-eat components only when their form is explicit and compatible with the request.
 Each instruction must include its numeric estimated duration, even a short mixing or serving step.
 Keep sequential step durations within total_time and use safe cooking endpoints, not a rushed timer alone.
-Return only a valid JSON array with one object containing:
+Return only a valid JSON array with 2 to 3 recipe objects, each containing:
 name, type, ingredients (quantified strings), instructions (complete strings with durations),
 total_time (e.g. '20 minutes', numeric units), calories, protein_grams, carbs, and fat (numeric per-serving estimates),
 description, nutrition_benefits, storage_instructions, helpful_tips, ingredient_adaptations.
 Use at most one short tip and one substitution with quantities and changed steps. Each option must meet
 the same total time, safety and other restrictions. Use [] when no compatible option exists.
-The finished recipe undergoes independent timing, user-requirement, and guideline verification.
+Each finished recipe undergoes independent timing, user-requirement, and guideline verification.
 """
 
             repair_target = next((
@@ -804,6 +803,15 @@ Where the original has substantial prep, aim to remove a real preparation task r
 For example, a purchased pre-cut component can replace chopping, or seasoning directly can replace making a dressing.
 These are techniques, not required ingredients. Do not claim fewer steps or a shorter total time unless actually reduced.
 The result must be substantively simpler, not merely renamed or renumbered.
+"""
+        elif request.get("operation") == "seasoning":
+            goal = """Enhance the selected recipe's seasoning using the user's chosen flavor profile, herbs, or spices.
+Apply the seasonings directly in the ingredient list (with clear quantities) AND in the cooking steps (such as blooming
+spices, seasoning proteins or vegetables, or finishing with fresh herbs and citrus).
+Preserve the dish's core identity, main ingredients, and every active dietary, allergy, symptom, and safety requirement.
+Keep sodium mindful by relying on herbs, spices, aromatics, and citrus rather than excess salt; avoid red or processed meat,
+and keep any spice/heat level compatible with the user's preferences (such as mild or gentle when requested).
+First write description naming the specific herbs, spices, or flavor profile added, then implement them throughout the recipe.
 """
         return f"""Edit a recipe, do not search for or invent unrelated alternatives.
 LATEST REQUEST: {request['request']}

@@ -245,12 +245,12 @@ class TimeLimitedRecipeTests(unittest.TestCase):
         enhancer = RecipeEnhancer()
         enhancer.initialize(model, aicr_service)
         recipes = enhancer.generate_fallback_recipes(QUERIES[0], self.intent(), [])
-        self.assertEqual(len(recipes), 1)
+        self.assertEqual(len(recipes), 2)
         self.assertEqual(recipes[0]["total_time"], timed_recipe()["total_time"])
         prompt = model.predict.call_args.args[0]
         self.assertIn("strictly less than 5 minutes (300 seconds)", prompt)
         self.assertIn("Exactly 5 minutes does NOT qualify", prompt)
-        self.assertIn("exactly ONE complete recipe", prompt)
+        self.assertIn("2 to 3 distinct complete recipes", prompt)
         self.assertIn("do not merely relabel a slower recipe", prompt)
 
     def test_repair_prompt_includes_original_time_and_strict_budget(self):
