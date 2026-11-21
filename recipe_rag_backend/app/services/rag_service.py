@@ -860,17 +860,16 @@ class RecipeRAGService:
                 
                 self.data_loader.load_data()
                 documents = self.data_loader.prepare_documents()
-                
-                text_splitter = RecursiveCharacterTextSplitter(
+                split_docs = self.data_loader.split_recipe_documents(
+                    documents,
                     chunk_size=settings.CHUNK_SIZE,
-                    chunk_overlap=settings.CHUNK_OVERLAP
+                    chunk_overlap=settings.CHUNK_OVERLAP,
                 )
-                split_docs = text_splitter.split_documents(documents)
                 
                 faiss_cache_dir = None
                 if settings.data_file_path.is_file() and type(self.embeddings) is OpenAIEmbeddings:
                     csv_hash = hashlib.sha256(settings.data_file_path.read_bytes()).hexdigest()[:16]
-                    cache_id = f"{settings.EMBEDDING_MODEL}_{settings.CHUNK_SIZE}_{settings.CHUNK_OVERLAP}_{csv_hash}"
+                    cache_id = f"{settings.EMBEDDING_MODEL}_whole_v2_{settings.CHUNK_SIZE}_{settings.CHUNK_OVERLAP}_{csv_hash}"
                     faiss_cache_dir = settings.data_file_path.parent / ".faiss_cache" / cache_id
                 if faiss_cache_dir and (faiss_cache_dir / "index.faiss").is_file():
                     logger.info(f"Loading cached FAISS vector store from {faiss_cache_dir}")

@@ -75,17 +75,10 @@ class DataLoader:
         
         documents = []
         for _, row in self.df.iterrows():
-            recipe_text = f"""
-Recipe Name: {row['Name']}
-Type: {row['Type']}
-Description: {row['Description']}
-Calories: {row['Calories'] if row['Calories'] else 'Not specified'}
-Ingredients: {row['Ingredients']}
-Directions: {row['Directions']}
-Notes: {row['Notes'] if row['Notes'] else 'No additional notes'}
-"""
+            row_dict = row.to_dict()
+            recipe_text = self.build_recipe_text(row_dict)
             metadata = {
-                "recipe_id": row.get('recipe_id') or self._build_recipe_id(row.to_dict()),
+                "recipe_id": row.get('recipe_id') or self._build_recipe_id(row_dict),
                 "name": row['Name'],
                 "type": row['Type'],
                 "calories": float(row['Calories']) if row['Calories'] and str(row['Calories']).replace('.', '').isdigit() else 0,
@@ -97,6 +90,32 @@ Notes: {row['Notes'] if row['Notes'] else 'No additional notes'}
             documents.append(Document(page_content=recipe_text, metadata=metadata))
         
         return documents
+
+    @staticmethod
+    def split_recipe_documents(
+        documents: List[Document], chunk_size: int, chunk_overlap: int
+    ) -> List[Document]:
+        """Keep each recipe as a single whole vector unless it exceeds chunk_size;
+        if an unusually long recipe must be split, repeat its Recipe Name header on every chunk."""
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        result: List[Document] = []
+        for doc in documents:
+            if len(doc.page_content) <= chunk_size:
+                result.append(doc)
+                continue
+            name = str(doc.metadata.get("name") or "").strip()
+            header = f"Recipe Name: {name}\n" if name else ""
+            sub_docs = splitter.split_documents([doc])
+            for sub in sub_docs:
+                if header and not sub.page_content.lstrip().startswith("Recipe Name:"):
+                    sub = Document(page_content=header + sub.page_content, metadata=dict(sub.metadata))
+                result.append(sub)
+        return result
 
     def _normalize_name(self, name: str) -> str:
         return ' '.join(str(name).lower().split())
@@ -189,12 +208,17 @@ Notes: {row['Notes'] if row['Notes'] else 'No additional notes'}
         if not row:
             return ""
 
-        return f"""
-Recipe Name: {row.get('Name', '')}
-Type: {row.get('Type', '')}
-Description: {row.get('Description', '')}
-Calories: {row.get('Calories', 'Not specified') if row.get('Calories', '') else 'Not specified'}
-Ingredients: {row.get('Ingredients', '')}
-Directions: {row.get('Directions', '')}
-Notes: {row.get('Notes', 'No additional notes') if row.get('Notes', '') else 'No additional notes'}
-"""
+        sections = [f"Recipe Name: {row.get('Name', '')}"]
+        if str(row.get('Type', '')).strip():
+            sections.append(f"Type: {row['Type']}")
+        if str(row.get('Description', '')).strip():
+            sections.append(f"Description: {row['Description']}")
+        if str(row.get('Calories', '')).strip():
+            sections.append(f"Calories: {row['Calories']}")
+        if str(row.get('Ingredients', '')).strip():
+            sections.append(f"Ingredients: {row['Ingredients']}")
+        if str(row.get('Directions', '')).strip():
+            sections.append(f"Directions: {row['Directions']}")
+        if str(row.get('Notes', '')).strip():
+            sections.append(f"Notes: {row['Notes']}")
+        return "\n".join(sections)

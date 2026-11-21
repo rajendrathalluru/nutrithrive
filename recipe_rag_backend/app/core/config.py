@@ -63,8 +63,8 @@ class Settings:
     RECIPE_CACHE_TTL_SECONDS: int = max(0, int(os.getenv("RECIPE_CACHE_TTL_SECONDS", "300")))
     RECIPE_CACHE_MAX_ENTRIES: int = max(1, min(512, int(os.getenv("RECIPE_CACHE_MAX_ENTRIES", "128"))))
     
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 100
+    CHUNK_SIZE: int = 6000
+    CHUNK_OVERLAP: int = 200
     SEARCH_K: int = 8
 
     @property
