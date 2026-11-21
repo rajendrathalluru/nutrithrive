@@ -514,26 +514,10 @@ For this section-based format, put any estimated total time in COOKING_INSTRUCTI
             if not explicit_rules:
                 explicit_rules.append("- Preserve the user's stated intent closely.")
             
-            # STEP 3: Generate with AICR Guidelines
+            # STEP 3: Generate with AICR Guidelines (static instructions first for OpenAI prompt caching)
             generation_prompt = f"""You are a nutrition specialist creating recipes using AICR guidelines.
 
 {aicr_context}
-
-USER QUERY: "{query}"
-
-USER REQUIREMENTS:
-{json.dumps(intent_data)}
-{failure_context}
-
-{active_recipe_rules(intent_data)}
-
-{self._build_grounding_context(grounding_recipes)}
-
-YOUR TASK:
-1. Read ALL user requirements from intent_data
-2. Apply AICR guidelines above (especially protein, food safety, easy digestion)
-3. Generate {recipe_count} that satisfy BOTH user constraints AND AICR guidelines, unless adapting specific references;
-   for recipe_adaptation, return only one adapted recipe per selected reference (at most three).
 
 RECIPE REQUIREMENTS:
 - Include protein source (see AICR protein sources above - aim for 20-30g)
@@ -551,9 +535,6 @@ CONSTRAINT COMPLIANCE:
 - If equipment_only exists → use only that equipment
 - If leftover_friendly is true → include safe storage duration and reheating or thawing guidance
 
-IMPORTANT FOLLOW-UP RULES:
-{chr(10).join(explicit_rules)}
-
 OUTPUT FORMAT (valid JSON only):
 [
     {{
@@ -563,7 +544,7 @@ OUTPUT FORMAT (valid JSON only):
         "protein_grams": 24,
         "carbs": 45,
         "fat": 14,
-        "servings": {constraints.get("requested_servings") or 2},
+        "servings": 2,
         "total_time": "Total elapsed time with units, or empty if not established",
         "ingredients": [
             "1 cup ingredient one",
@@ -590,21 +571,35 @@ Generate practical, safe, nutrition-optimized recipes that meet ALL constraints 
 Keep wording clear and concise: use complete quantified ingredient lists and clear step-by-step instructions (including safe cooking endpoints), keep description and nutrition_benefits under 12 words each, keep storage_instructions to 1 short sentence, and include 1 short practical tip in helpful_tips and 1 compatible substitution in ingredient_adaptations (under 15 words each; use [] only if a strict constraint such as canned_only or frozen_only prevents safe options).
 Optional tips and adaptations must preserve every restriction, including allergens, time, ingredient forms,
 and equipment. Never replace a required ingredient or shorten a safety step. Use [] if no suitable option exists.
+
+YOUR TASK:
+1. Read ALL user requirements from intent_data
+2. Apply AICR guidelines above (especially protein, food safety, easy digestion)
+3. Generate {recipe_count} that satisfy BOTH user constraints AND AICR guidelines, unless adapting specific references;
+   for recipe_adaptation, return only one adapted recipe per selected reference (at most three).
+{f"4. Set servings to {constraints.get('requested_servings')} and scale all ingredient quantities accordingly." if constraints.get("requested_servings") else ""}
+
+USER QUERY: "{query}"
+
+USER REQUIREMENTS:
+{json.dumps(intent_data)}
+{failure_context}
+
+{active_recipe_rules(intent_data)}
+
+{self._build_grounding_context(grounding_recipes)}
+
+IMPORTANT FOLLOW-UP RULES:
+{chr(10).join(explicit_rules)}
 {time_limit_generation_guidance(constraints)}
 {chr(10).join(explicit_rules) if constraints.get('ingredient_storage') in {'canned_only', 'frozen_only'} else ''}
 """
 
             if timed_request:
                 generation_prompt = f"""Create 2 to 3 distinct complete recipes (at least 2, maximum 3) for this timed request, not general meal advice.
-USER REQUEST: {query}
-ACTIVE REQUIREMENTS: {json.dumps(intent_data)}
-{time_limit_generation_guidance(constraints)}
-{active_recipe_rules(intent_data)}
-{self._build_grounding_context(grounding_recipes)}
-{failure_context}
+
 NUTRITION AND FOOD SAFETY POLICY:
 {aicr_context}
-{chr(10).join(explicit_rules)}
 
 Choose practical dishes with enough time for ALL preparation. Do not just copy a reference's cooking time.
 Include the time to open packages, wash/cut food, set up equipment, heat, cook, rest, and serve where needed.
@@ -618,6 +613,14 @@ description, nutrition_benefits, storage_instructions, helpful_tips, ingredient_
 Use at most one short tip and one substitution with quantities and changed steps. Each option must meet
 the same total time, safety and other restrictions. Use [] when no compatible option exists.
 Each finished recipe undergoes independent timing, user-requirement, and guideline verification.
+
+USER REQUEST: {query}
+ACTIVE REQUIREMENTS: {json.dumps(intent_data)}
+{time_limit_generation_guidance(constraints)}
+{active_recipe_rules(intent_data)}
+{self._build_grounding_context(grounding_recipes)}
+{failure_context}
+{chr(10).join(explicit_rules)}
 """
 
             repair_target = next((

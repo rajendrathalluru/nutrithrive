@@ -774,17 +774,8 @@ The backend will retain existing failures and independently validate this eviden
             return self._fallback_individual_verification(recipes, intent_data, aicr_service)
 
     def _build_batch_verification_prompt(self, recipes_for_verification: List[Dict], intent_data: Dict[str, Any]) -> str:
-        """Build batch verification prompt"""
+        """Build batch verification prompt (static rules first for OpenAI prompt caching)"""
         return f"""You are a STRICT recipe verification system for nutrition-focused recipes. Verify ALL these recipes against user requirements IN ONE RESPONSE.
-
-RECIPES TO VERIFY:
-{json.dumps(recipes_for_verification, indent=2)}
-
-USER REQUIREMENTS:
-{json.dumps({
-    "recipe_request": intent_data.get("recipe_request") or intent_data.get("resolved_query") or intent_data.get("search_strategy", {}).get("primary_focus", ""),
-    "requirements": self._required_checks(intent_data),
-}, indent=2)}
 
 YOUR TASK:
 Verify EACH recipe (by id) against the request and ALL active requirements.
@@ -794,15 +785,25 @@ Verify EACH recipe (by id) against the request and ALL active requirements.
 - ANY constraint violation = FAIL for that recipe
 
 {self.RELEVANCE_RULES}
+Return ONLY a valid JSON array with one assessment per recipe. Copy that recipe's integer id into its assessment;
+do not reuse the example id for other recipes.
+Keep evidence concise: one short, concrete sentence per required check. Omit fields not requested by the
+verification contract. Do not repeat the recipe or policy in reasoning. Never omit a required check to save tokens.
+
 {self._guideline_contract(intent_data)}
 {active_recipe_rules(intent_data)}
 {self.STORAGE_VERIFICATION_RULES if intent_data.get('constraints', {}).get('ingredient_storage') in {'pantry_based', 'shelf_stable_only'} else ''}
 
 {self._verification_contract(intent_data, batch=True)}
-Return ONLY a valid JSON array with one assessment per recipe. Copy that recipe's integer id into its assessment;
-do not reuse the example id for other recipes.
-Keep evidence concise: one short, concrete sentence per required check. Omit fields not requested by the
-verification contract. Do not repeat the recipe or policy in reasoning. Never omit a required check to save tokens.
+
+RECIPES TO VERIFY:
+{json.dumps(recipes_for_verification, indent=2)}
+
+USER REQUIREMENTS:
+{json.dumps({
+    "recipe_request": intent_data.get("recipe_request") or intent_data.get("resolved_query") or intent_data.get("search_strategy", {}).get("primary_focus", ""),
+    "requirements": self._required_checks(intent_data),
+}, indent=2)}
 
 Verify ALL {len(recipes_for_verification)} recipes.
 """
